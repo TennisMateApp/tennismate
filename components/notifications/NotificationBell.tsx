@@ -8,13 +8,24 @@ import {
   where,
   onSnapshot,
   orderBy,
+  DocumentData,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 
+// ✅ Define the Notification type
+type Notification = {
+  id: string;
+  read: boolean;
+  message: string;
+  timestamp: any;
+  type: string;
+  matchId?: string;
+};
+
 export default function NotificationBell() {
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -37,9 +48,9 @@ export default function NotificationBell() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map((doc) => ({
+      const data: Notification[] = snapshot.docs.map((doc) => ({
         id: doc.id,
-        ...doc.data(),
+        ...(doc.data() as Omit<Notification, "id">),
       }));
       setNotifications(data);
       setUnreadCount(data.filter((n) => !n.read).length);
@@ -48,7 +59,7 @@ export default function NotificationBell() {
     return () => unsubscribe();
   }, [userId]);
 
-  const handleNotificationClick = (notif: any) => {
+  const handleNotificationClick = (notif: Notification) => {
     setDropdownOpen(false);
 
     if (notif.matchId) {
