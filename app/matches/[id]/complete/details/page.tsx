@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import Image from "next/image";
 import withAuth from "@/components/withAuth";
+import { ComponentType } from "react"; // ✅ Add this for typing
 
 const tennisPoints = ["0", "15", "30", "40", "Adv"];
 
@@ -170,46 +171,39 @@ function MatchDetailsForm() {
     }
   };
 
-const handleSubmit = async () => {
-  try {
-    const matchRef = doc(db, "match_requests", matchId as string);
+  const handleSubmit = async () => {
+    try {
+      const matchRef = doc(db, "match_requests", matchId as string);
 
-    // Calculate sets won by each player
-    let setsWonA = 0;
-    let setsWonB = 0;
+      let setsWonA = 0;
+      let setsWonB = 0;
 
-    sets.forEach((set) => {
-      if (set.A > set.B) setsWonA++;
-      else if (set.B > set.A) setsWonB++;
-    });
+      sets.forEach((set) => {
+        if (set.A > set.B) setsWonA++;
+        else if (set.B > set.A) setsWonB++;
+      });
 
-    // Determine winner
-    let winnerId = null;
-    if (setsWonA > setsWonB) {
-      winnerId = playerA?.id;
-    } else if (setsWonB > setsWonA) {
-      winnerId = playerB?.id;
+      let winnerId = null;
+      if (setsWonA > setsWonB) winnerId = playerA?.id;
+      else if (setsWonB > setsWonA) winnerId = playerB?.id;
+
+      const updateData: any = {
+        matchType: type,
+        score: sets.map((s) => `${s.A}-${s.B}`).join(", "),
+        completed: true,
+        winnerId: winnerId || null,
+      };
+
+      if (playerA?.id && playerB?.id) {
+        updateData.players = [playerA.id, playerB.id];
+      }
+
+      await updateDoc(matchRef, updateData);
+      router.push(`/matches/${matchId}/summary`);
+    } catch (error) {
+      console.error("Error submitting match results:", error);
     }
-
-    // Build update object
-    const updateData: any = {
-      matchType: type,
-      score: sets.map((s) => `${s.A}-${s.B}`).join(", "),
-      completed: true,
-      winnerId: winnerId || null,
-    };
-
-    // Ensure players array is included if missing
-    if (playerA?.id && playerB?.id) {
-      updateData.players = [playerA.id, playerB.id];
-    }
-
-    await updateDoc(matchRef, updateData);
-    router.push(`/matches/${matchId}/summary`);
-  } catch (error) {
-    console.error("Error submitting match results:", error);
-  }
-};
+  };
 
   if (!playerA || !playerB) return <div className="p-6 text-center">Loading...</div>;
 
@@ -292,6 +286,6 @@ const handleSubmit = async () => {
   );
 }
 
-const AuthenticatedComponent = withAuth(MatchDetailsForm);
+// ✅ Correct export to fix build type error
+const AuthenticatedComponent: ComponentType = withAuth(MatchDetailsForm);
 export default AuthenticatedComponent;
-
