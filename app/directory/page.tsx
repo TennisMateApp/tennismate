@@ -103,4 +103,5 @@ function DirectoryPage() {
   );
 }
 
-export default withAuth(DirectoryPage); // ✅ Wrap with auth
+export default withAuth(DirectoryPage as React.ComponentType);
+
