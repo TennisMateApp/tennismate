@@ -2,6 +2,7 @@
 
 import { useRouter, useParams } from "next/navigation";
 import withAuth from "@/components/withAuth"; // ✅ Import auth wrapper
+import React from "react"; // ✅ Ensure React is imported
 
 function MatchCompleteStep1() {
   const router = useRouter();
