@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
-export default function withAuth<T>(WrappedComponent: React.ComponentType<T>) {
+export default function withAuth<T extends Record<string, any>>(
+  WrappedComponent: React.ComponentType<T>
+) {
   return function ProtectedComponent(props: T) {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
