@@ -37,83 +37,83 @@ export default function MatchPage() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  useEffect(() => {
-    let unsubscribeIncoming: () => void;
-    let unsubscribeAccepted: () => void;
+useEffect(() => {
+  let unsubscribeIncoming: (() => void) | undefined;
+  let unsubscribeAccepted: (() => void) | undefined;
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/login");
-        return;
-      }
-      setUser(currentUser);
+  const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+    if (!currentUser) {
+      router.push("/login");
+      return;
+    }
+    setUser(currentUser);
 
-      const myRef = doc(db, "players", currentUser.uid);
-      const mySnap = await getDoc(myRef);
-      if (!mySnap.exists()) {
-        alert("Please complete your profile first.");
-        router.push("/profile");
-        return;
-      }
+    const myRef = doc(db, "players", currentUser.uid);
+    const mySnap = await getDoc(myRef);
+    if (!mySnap.exists()) {
+      alert("Please complete your profile first.");
+      router.push("/profile");
+      return;
+    }
 
-      const myData = mySnap.data() as Player;
-      setMyProfile(myData);
+    const myData = mySnap.data() as Player;
+    setMyProfile(myData);
 
-      // Fetch match requests sent by this user
-      const reqQuery = query(
-        collection(db, "match_requests"),
-        where("fromUserId", "==", currentUser.uid)
-      );
-      const reqSnap = await getDocs(reqQuery);
-      const sentTo = new Set<string>();
-      reqSnap.forEach((doc) => {
-        const data = doc.data();
-        if (data.toUserId) sentTo.add(data.toUserId);
-      });
-      setSentRequests(sentTo);
-
-      // Get all players
-      const snapshot = await getDocs(collection(db, "players"));
-      const allPlayers = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Player[];
-
-      // Score & filter matches
-      const scoredMatches = allPlayers
-        .filter((p) => p.id !== currentUser.uid)
-        .map((p) => {
-          let score = 0;
-
-          if (p.skillLevel === myData.skillLevel) score += 2;
-          else if (
-            (p.skillLevel === "Intermediate" && myData.skillLevel === "Beginner") ||
-            (p.skillLevel === "Beginner" && myData.skillLevel === "Intermediate")
-          )
-            score += 1;
-
-          const sharedAvailability = p.availability.filter((a) =>
-            myData.availability.includes(a)
-          ).length;
-          score += sharedAvailability;
-
-          if (p.postcode.startsWith(myData.postcode.slice(0, 1))) score += 1;
-
-          return { ...p, score };
-        })
-        .filter((p) => p.score > 0)
-        .sort((a, b) => b.score - a.score);
-
-      setMatches(scoredMatches);
-      setLoading(false);
+    // Fetch match requests sent by this user
+    const reqQuery = query(
+      collection(db, "match_requests"),
+      where("fromUserId", "==", currentUser.uid)
+    );
+    const reqSnap = await getDocs(reqQuery);
+    const sentTo = new Set<string>();
+    reqSnap.forEach((doc) => {
+      const data = doc.data();
+      if (data.toUserId) sentTo.add(data.toUserId);
     });
+    setSentRequests(sentTo);
 
-    return () => {
-      unsubscribeAuth();
-      if (unsubscribeIncoming) unsubscribeIncoming();
-      if (unsubscribeAccepted) unsubscribeAccepted();
-    };
-  }, [router]);
+    // Get all players
+    const snapshot = await getDocs(collection(db, "players"));
+    const allPlayers = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    })) as Player[];
+
+    // Score & filter matches
+    const scoredMatches = allPlayers
+      .filter((p) => p.id !== currentUser.uid)
+      .map((p) => {
+        let score = 0;
+
+        if (p.skillLevel === myData.skillLevel) score += 2;
+        else if (
+          (p.skillLevel === "Intermediate" && myData.skillLevel === "Beginner") ||
+          (p.skillLevel === "Beginner" && myData.skillLevel === "Intermediate")
+        )
+          score += 1;
+
+        const sharedAvailability = p.availability.filter((a) =>
+          myData.availability.includes(a)
+        ).length;
+        score += sharedAvailability;
+
+        if (p.postcode.startsWith(myData.postcode.slice(0, 1))) score += 1;
+
+        return { ...p, score };
+      })
+      .filter((p) => p.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    setMatches(scoredMatches);
+    setLoading(false);
+  });
+
+  return () => {
+    unsubscribeAuth();
+    if (unsubscribeIncoming) unsubscribeIncoming();
+    if (unsubscribeAccepted) unsubscribeAccepted();
+  };
+}, [router]);
 
   const handleMatchRequest = async (match: Player) => {
     if (!myProfile || !user) return;
