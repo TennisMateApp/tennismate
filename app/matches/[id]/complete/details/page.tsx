@@ -292,4 +292,6 @@ const handleSubmit = async () => {
   );
 }
 
-export default withAuth(MatchDetailsForm);
+const AuthenticatedComponent = withAuth(MatchDetailsForm);
+export default AuthenticatedComponent;
+
