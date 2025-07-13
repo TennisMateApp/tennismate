@@ -116,7 +116,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const totalNotifications = unreadMessages.length + unreadMatchRequests.length + notifications.length;
 
   return (
-    <div className="bg-gray-100 min-h-screen text-gray-900 pb-20">
+    <div className={`bg-gray-100 min-h-screen text-gray-900 ${hideNav ? "" : "pb-20"}`}>
       {!hideNav && (
         <header className="bg-white border-b p-4 mb-6 shadow-sm">
           <div className="max-w-5xl mx-auto flex justify-between items-center">
@@ -259,8 +259,9 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
         </header>
       )}
 
-      <main className="max-w-5xl mx-auto px-4 pb-20">{children}</main>
-
+<main className={`max-w-5xl mx-auto px-4 ${hideNav ? "pb-0" : "pb-20"}`}>
+  {children}
+</main>
       {user && !hideNav && (
         <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
           <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm">
