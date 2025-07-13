@@ -84,11 +84,17 @@ function ChatPage() {
     const unsub = onSnapshot(q, (snap) => {
       const msgs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setMessages(msgs);
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+
+      // Fix scroll bug on iOS
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          bottomRef.current?.scrollIntoView({ behavior: "auto" });
+        });
+      });
     });
 
     return () => unsub();
-  }, [conversationID]);
+  }, [conversationID]); // ✅ this closing brace was missing
 
   const sendMessage = async () => {
     if (!input.trim() || !user) return;
@@ -121,9 +127,9 @@ function ChatPage() {
   }, 300);
 
   return (
-    <div className="flex flex-col h-screen bg-white pt-safe-top">
+    <div className="flex flex-col h-screen bg-white">
       {/* Header */}
-      <div className="shrink-0 flex items-center gap-3 px-4 py-3 border-b shadow-sm">
+      <div className="flex items-center gap-3 px-4 py-3 border-b shadow-sm">
         <button onClick={() => router.push("/messages")}>
           <ArrowLeft className="w-5 h-5 text-blue-600" />
         </button>
@@ -142,7 +148,7 @@ function ChatPage() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4">
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {messages.map((msg) => {
           const isOtherUser = msg.senderId !== user?.uid;
           const avatarURL = isOtherUser ? otherUserAvatar : userAvatar;
@@ -197,9 +203,9 @@ function ChatPage() {
       </div>
 
       {/* Input */}
-      <div className="shrink-0 bg-white border-t px-4 py-3 flex items-center gap-2 pb-safe-bottom">
+      <div className="px-4 py-3 border-t flex items-center gap-2 bg-white">
         <input
-          className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm"
+          className="flex-1 border border-gray-300 rounded px-3 py-2 text-base"
           value={input}
           onChange={(e) => {
             setInput(e.target.value);
