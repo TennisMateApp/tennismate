@@ -121,9 +121,9 @@ function ChatPage() {
   }, 300);
 
 return (
-  <div className="relative min-h-[100dvh] bg-white flex flex-col pt-safe-top">
+  <div className="h-[100dvh] flex flex-col bg-white pt-safe-top">
     {/* Header */}
-    <div className="flex items-center gap-3 px-4 py-3 border-b shadow-sm">
+    <div className="shrink-0 flex items-center gap-3 px-4 py-3 border-b shadow-sm">
       <button onClick={() => router.push("/messages")}>
         <ArrowLeft className="w-5 h-5 text-blue-600" />
       </button>
@@ -141,8 +141,8 @@ return (
       <span className="font-medium text-sm text-gray-900">{otherUserName}</span>
     </div>
 
-    {/* Message list */}
-    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 pb-28">
+    {/* Messages */}
+    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
       {messages.map((msg) => {
         const isOtherUser = msg.senderId !== user?.uid;
         const avatarURL = isOtherUser ? otherUserAvatar : userAvatar;
@@ -196,8 +196,8 @@ return (
       <div ref={bottomRef}></div>
     </div>
 
-    {/* Input bar — now absolute */}
-    <div className="absolute bottom-0 left-0 right-0 bg-white border-t px-4 py-3 flex items-center gap-2">
+    {/* Input */}
+    <div className="shrink-0 bg-white border-t px-4 py-3 flex items-center gap-2 pb-safe-bottom">
       <input
         className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm"
         value={input}
