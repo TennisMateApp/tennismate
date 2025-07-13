@@ -121,7 +121,7 @@ function ChatPage() {
   }, 300);
 
   return (
-    <div className="fixed inset-0 z-[999] bg-white flex flex-col max-h-screen overflow-hidden">
+    <div className="min-h-[100dvh] bg-white flex flex-col overflow-hidden pt-safe-top pb-safe-bottom">
       {/* Custom Top Bar */}
       <div className="flex items-center gap-3 px-4 py-3 border-b shadow-sm">
         <button onClick={() => router.push("/messages")}>
