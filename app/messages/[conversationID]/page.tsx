@@ -197,7 +197,7 @@ function ChatPage() {
       </div>
 
       {/* Input */}
-      <div className="flex items-center gap-2 px-4 py-3 border-t">
+     <div className="flex items-center gap-2 px-4 py-3 border-t">
         <input
           className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm"
           value={input}
