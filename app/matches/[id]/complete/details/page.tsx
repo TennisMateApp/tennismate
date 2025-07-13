@@ -213,7 +213,7 @@ function MatchDetailsForm() {
       {tieBreaker && <p className="text-red-600 font-semibold mb-2">🏆 Tie-breaker in progress</p>}
 
       <div className="overflow-x-auto">
-        <table className="min-w-full table-fixed border-collapse border border-gray-400 text-center">
+        <table className="min-w-[640px] table-auto border-collapse border border-gray-400 text-center">
           <thead>
             <tr>
               <th rowSpan={2} className="border border-gray-400 px-2 py-2 w-40">Player</th>
@@ -233,18 +233,18 @@ function MatchDetailsForm() {
               const tieScores = sets.map((s) => player === "A" ? s.tieBreakA : s.tieBreakB);
               return (
                 <tr key={player}>
-                  <td className="border border-gray-400 px-2 py-2 text-left w-40">
-                    <div className="flex items-center gap-2">
-                      <Image
-                        src={p.photoURL || "/default-avatar.png"}
-                        width={30}
-                        height={30}
-                        className="rounded-full"
-                        alt={`Player ${player}`}
-                      />
-                      {p.name || `Player ${player}`}
-                    </div>
-                  </td>
+<td className="border border-gray-400 px-2 py-2 text-left min-w-[140px] max-w-[160px]">
+  <div className="flex items-center gap-2 overflow-hidden">
+    <Image
+      src={p.photoURL || "/default-avatar.png"}
+      width={30}
+      height={30}
+      className="rounded-full shrink-0"
+      alt={`Player ${player}`}
+    />
+    <span className="truncate text-sm block w-full">{p.name || `Player ${player}`}</span>
+  </div>
+</td>
                   {[0, 1, 2, 3, 4, 5].map((i) => (
                     <td key={i} className="border border-gray-400 px-2 py-1 text-sm">
                       {playerSets[i] ?? "-"}
