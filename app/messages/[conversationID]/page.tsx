@@ -16,7 +16,7 @@ import {
 import { useParams, useRouter } from "next/navigation";
 import debounce from "lodash.debounce";
 import { ArrowLeft } from "lucide-react";
-import withAuth from "@/components/withAuth"; // ✅ import wrapper
+import withAuth from "@/components/withAuth";
 
 function ChatPage() {
   const { conversationID } = useParams();
@@ -121,7 +121,7 @@ function ChatPage() {
   }, 300);
 
   return (
-    <div className="min-h-[100dvh] bg-white flex flex-col overflow-hidden pt-safe-top pb-safe-bottom">
+    <div className="min-h-[100dvh] bg-white flex flex-col pt-safe-top pb-safe-bottom">
       {/* Custom Top Bar */}
       <div className="flex items-center gap-3 px-4 py-3 border-b shadow-sm">
         <button onClick={() => router.push("/messages")}>
@@ -169,7 +169,7 @@ function ChatPage() {
                   }`}
                 />
               )}
-              <div className="max-w-xs">
+              <div className="max-w-[75%] sm:max-w-xs">
                 <div
                   className={`px-3 py-2 rounded-lg text-sm ${
                     isOtherUser
@@ -197,7 +197,7 @@ function ChatPage() {
       </div>
 
       {/* Input */}
-     <div className="flex items-center gap-2 px-4 py-3 border-t">
+      <div className="sticky bottom-0 z-10 bg-white flex items-center gap-2 px-4 py-3 border-t">
         <input
           className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm"
           value={input}
@@ -219,4 +219,4 @@ function ChatPage() {
   );
 }
 
-export default withAuth(ChatPage); // ✅ Wrap with auth
+export default withAuth(ChatPage);
