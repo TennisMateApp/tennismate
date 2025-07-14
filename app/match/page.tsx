@@ -1,3 +1,4 @@
+// app/match/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -11,8 +12,7 @@ import {
   addDoc,
   serverTimestamp,
   query,
-  where,
-  onSnapshot,
+  where
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -29,91 +29,104 @@ interface Player {
   timestamp?: any;
 }
 
+interface PostcodeCoords {
+  [postcode: string]: { lat: number; lng: number };
+}
+
+function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Radius of the Earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
 export default function MatchPage() {
   const [user, setUser] = useState<any>(null);
   const [myProfile, setMyProfile] = useState<Player | null>(null);
   const [matches, setMatches] = useState<Player[]>([]);
   const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
+  const [postcodeCoords, setPostcodeCoords] = useState<PostcodeCoords>({});
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-useEffect(() => {
-  let unsubscribeIncoming: (() => void) | undefined;
-  let unsubscribeAccepted: (() => void) | undefined;
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        router.push("/login");
+        return;
+      }
+      setUser(currentUser);
 
-  const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
-    if (!currentUser) {
-      router.push("/login");
-      return;
-    }
-    setUser(currentUser);
+      const myRef = doc(db, "players", currentUser.uid);
+      const mySnap = await getDoc(myRef);
+      if (!mySnap.exists()) {
+        alert("Please complete your profile first.");
+        router.push("/profile");
+        return;
+      }
 
-    const myRef = doc(db, "players", currentUser.uid);
-    const mySnap = await getDoc(myRef);
-    if (!mySnap.exists()) {
-      alert("Please complete your profile first.");
-      router.push("/profile");
-      return;
-    }
+      const myData = mySnap.data() as Player;
+      setMyProfile(myData);
 
-    const myData = mySnap.data() as Player;
-    setMyProfile(myData);
+      const postcodeSnap = await getDocs(collection(db, "postcodes"));
+      const coords: PostcodeCoords = {};
+      postcodeSnap.forEach(doc => {
+        coords[doc.id] = doc.data() as { lat: number; lng: number };
+      });
+      setPostcodeCoords(coords);
 
-    // Fetch match requests sent by this user
-    const reqQuery = query(
-      collection(db, "match_requests"),
-      where("fromUserId", "==", currentUser.uid)
-    );
-    const reqSnap = await getDocs(reqQuery);
-    const sentTo = new Set<string>();
-    reqSnap.forEach((doc) => {
-      const data = doc.data();
-      if (data.toUserId) sentTo.add(data.toUserId);
+      const reqQuery = query(
+        collection(db, "match_requests"),
+        where("fromUserId", "==", currentUser.uid)
+      );
+      const reqSnap = await getDocs(reqQuery);
+      const sentTo = new Set<string>();
+      reqSnap.forEach((doc) => {
+        const data = doc.data();
+        if (data.toUserId) sentTo.add(data.toUserId);
+      });
+      setSentRequests(sentTo);
+
+      const snapshot = await getDocs(collection(db, "players"));
+      const allPlayers = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Player[];
+
+      const scoredMatches = allPlayers
+        .filter((p) => p.id !== currentUser.uid)
+        .map((p) => {
+          let score = 0;
+          if (p.skillLevel === myData.skillLevel) score += 2;
+          else if (
+            (p.skillLevel === "Intermediate" && myData.skillLevel === "Beginner") ||
+            (p.skillLevel === "Beginner" && myData.skillLevel === "Intermediate")
+          ) score += 1;
+
+          const sharedAvailability = p.availability.filter((a) =>
+            myData.availability.includes(a)
+          ).length;
+          score += sharedAvailability;
+
+          if (p.postcode.startsWith(myData.postcode.slice(0, 1))) score += 1;
+
+          return { ...p, score };
+        })
+        .filter((p) => p.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+      setMatches(scoredMatches);
+      setLoading(false);
     });
-    setSentRequests(sentTo);
 
-    // Get all players
-    const snapshot = await getDocs(collection(db, "players"));
-    const allPlayers = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Player[];
-
-    // Score & filter matches
-    const scoredMatches = allPlayers
-      .filter((p) => p.id !== currentUser.uid)
-      .map((p) => {
-        let score = 0;
-
-        if (p.skillLevel === myData.skillLevel) score += 2;
-        else if (
-          (p.skillLevel === "Intermediate" && myData.skillLevel === "Beginner") ||
-          (p.skillLevel === "Beginner" && myData.skillLevel === "Intermediate")
-        )
-          score += 1;
-
-        const sharedAvailability = p.availability.filter((a) =>
-          myData.availability.includes(a)
-        ).length;
-        score += sharedAvailability;
-
-        if (p.postcode.startsWith(myData.postcode.slice(0, 1))) score += 1;
-
-        return { ...p, score };
-      })
-      .filter((p) => p.score > 0)
-      .sort((a, b) => b.score - a.score);
-
-    setMatches(scoredMatches);
-    setLoading(false);
-  });
-
-  return () => {
-    unsubscribeAuth();
-    if (unsubscribeIncoming) unsubscribeIncoming();
-    if (unsubscribeAccepted) unsubscribeAccepted();
-  };
-}, [router]);
+    return () => unsubscribeAuth();
+  }, [router]);
 
   const handleMatchRequest = async (match: Player) => {
     if (!myProfile || !user) return;
@@ -160,6 +173,14 @@ useEffect(() => {
               Date.now() - new Date(match.timestamp.toDate?.() || match.timestamp).getTime() <
                 3 * 24 * 60 * 60 * 1000;
 
+            let distanceText = "";
+            if (myProfile && postcodeCoords[myProfile.postcode] && postcodeCoords[match.postcode]) {
+              const myCoord = postcodeCoords[myProfile.postcode];
+              const theirCoord = postcodeCoords[match.postcode];
+              const distance = getDistanceFromLatLonInKm(myCoord.lat, myCoord.lng, theirCoord.lat, theirCoord.lng);
+              distanceText = `📍 ~${distance} km away`;
+            }
+
             return (
               <li
                 key={match.id}
@@ -188,6 +209,9 @@ useEffect(() => {
                   <p className="text-sm text-gray-600">
                     Skill: {match.skillLevel} — Postcode: {match.postcode}
                   </p>
+                  {distanceText && (
+                    <p className="text-sm text-gray-600">{distanceText}</p>
+                  )}
                   <p className="text-sm">
                     <strong>Availability:</strong> {match.availability.join(", ")}
                   </p>
