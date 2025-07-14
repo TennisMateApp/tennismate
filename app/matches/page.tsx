@@ -237,6 +237,8 @@ function MatchesPage() {
           </p>
           <p className="text-sm text-gray-700">Status: {match.status}</p>
 
+{/* Court suggestion logic preserved but hidden for now */}
+{/* 
 {match.suggestedCourtName && match.suggestedCourtLat && match.suggestedCourtLng ? (
   <p className="text-sm text-gray-700">
     Suggested Court:{" "}
@@ -251,7 +253,11 @@ function MatchesPage() {
   </p>
 ) : (
   <p className="text-sm text-gray-500 italic">🏗️ Court suggestion coming soon</p>
-)}
+)} 
+*/}
+
+{/* Temporary placeholder until court suggestion rollout */}
+<p className="text-sm text-gray-500 italic">🏗️ Court suggestion coming soon</p>
 
           {match.time && <p className="text-sm text-gray-700">Time: {match.time}</p>}
 
