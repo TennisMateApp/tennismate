@@ -95,17 +95,23 @@ export default function SignupPage() {
         photoURL = await getDownloadURL(imageRef);
       }
 
-      await setDoc(doc(db, "players", user.uid), {
-        name: formData.name,
-        email: formData.email,
-        postcode: formData.postcode,
-        skillLevel: formData.skillLevel,
-        availability: formData.availability,
-        bio: formData.bio,
-        photoURL,
-        profileComplete: true,
-        timestamp: serverTimestamp(),
-      });
+     const now = new Date();
+const mvpStart = new Date("2025-07-16");
+const mvpEnd = new Date("2025-08-01");
+const badges = (now >= mvpStart && now <= mvpEnd) ? ["mvpLaunch"] : [];
+
+await setDoc(doc(db, "players", user.uid), {
+  name: formData.name,
+  email: formData.email,
+  postcode: formData.postcode,
+  skillLevel: formData.skillLevel,
+  availability: formData.availability,
+  bio: formData.bio,
+  photoURL,
+  profileComplete: true,
+  timestamp: serverTimestamp(),
+  badges, // <-- ✅ this is now dynamic
+});
 
       await setDoc(doc(db, "users", user.uid), {
         name: formData.name,

@@ -183,9 +183,9 @@ export default function MatchPage() {
 
             return (
               <li
-                key={match.id}
-                className="border p-4 rounded bg-white shadow-sm flex items-start gap-4"
-              >
+  key={match.id}
+  className="border p-6 rounded-lg bg-white shadow-lg hover:shadow-xl transition-all ease-in-out flex items-start gap-6"
+>
                 {match.photoURL ? (
                   <img
                     src={match.photoURL}
@@ -198,7 +198,7 @@ export default function MatchPage() {
                   </div>
                 )}
                 <div>
-                  <h2 className="font-semibold text-lg flex items-center gap-2">
+                  <h2 className="font-semibold text-xl text-gray-800 flex items-center gap-2">
                     {match.name}
                     {isNew && (
                       <span className="text-xs bg-green-200 text-green-800 px-2 py-0.5 rounded">
@@ -220,15 +220,16 @@ export default function MatchPage() {
                     {alreadySent ? (
                       <span className="text-green-600 text-sm font-medium">✅ Request Sent</span>
                     ) : (
-                      <button
-                        onClick={() => handleMatchRequest(match)}
-                        className="text-sm text-blue-600 underline"
-                      >
-                        Request to Play
-                      </button>
+                     <button
+  onClick={() => handleMatchRequest(match)}
+  aria-label={`Request match with ${match.name}`}
+  className="text-sm text-white bg-green-600 hover:bg-blue-700 px-3 py-2 rounded transition-all"
+>
+  Request to Play
+</button>
                     )}
                     <Link href={`/players/${match.id}`}>
-                      <button className="text-sm bg-gray-200 rounded px-3 py-1">
+                      <button className="text-sm bg-gray-200 rounded px-3 py-2">
                         View Profile
                       </button>
                     </Link>

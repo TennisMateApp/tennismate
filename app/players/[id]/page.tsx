@@ -3,14 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { db } from "@/lib/firebase";
-import {
-  doc,
-  getDoc,
-  collection,
-  query,
-  where,
-  getDocs,
-} from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import Image from "next/image";
 import withAuth from "@/components/withAuth";
 
@@ -33,23 +26,19 @@ function PublicProfilePage() {
     completed: 0,
     wins: 0,
   });
+  const [showFullBio, setShowFullBio] = useState(false);
 
   useEffect(() => {
     const fetchPlayerAndStats = async () => {
       if (!id) return;
 
-      // Fetch player data
       const playerRef = doc(db, "players", id as string);
       const playerSnap = await getDoc(playerRef);
       if (playerSnap.exists()) {
         setPlayer(playerSnap.data() as Player);
       }
 
-      // ✅ Fetch match stats from match_history
-      const matchQuery = query(
-        collection(db, "match_history"),
-        where("players", "array-contains", id)
-      );
+      const matchQuery = query(collection(db, "match_history"), where("players", "array-contains", id));
       const snapshot = await getDocs(matchQuery);
 
       let total = 0, complete = 0, wins = 0;
@@ -68,55 +57,95 @@ function PublicProfilePage() {
   }, [id]);
 
   if (loading) {
-    return <p className="p-4">Loading profile...</p>;
+    return (
+      <div className="flex justify-center items-center p-6">
+        <div className="animate-spin border-t-4 border-blue-600 rounded-full w-12 h-12"></div>
+        <span className="ml-3 text-sm text-gray-600">Loading profile...</span>
+      </div>
+    );
   }
 
   if (!player) {
-    return <p className="p-4 text-red-600">Player not found.</p>;
+    return (
+      <div className="p-6 text-center text-red-600">
+        <h2 className="text-xl font-bold">Player not found.</h2>
+        <p>Please check the URL or try searching for another player.</p>
+      </div>
+    );
   }
 
   return (
-    <div className="p-6 max-w-xl mx-auto text-gray-800">
-      <h1 className="text-2xl font-bold mb-4">Player Profile</h1>
-      <div className="flex flex-col items-center gap-4">
-        {player.photoURL ? (
-          <Image
-            src={player.photoURL}
-            width={100}
-            height={100}
-            alt={player.name}
-            className="rounded-full object-cover"
-          />
-        ) : (
-          <div className="w-[100px] h-[100px] rounded-full bg-gray-300 flex items-center justify-center text-sm text-gray-700">
-            No Photo
-          </div>
-        )}
-        <p className="text-lg font-semibold">{player.name}</p>
-        <p className="text-sm text-gray-600">Postcode: {player.postcode}</p>
-        <p className="text-sm text-gray-600">Skill Level: {player.skillLevel}</p>
-        <p className="text-sm mt-2">{player.bio}</p>
-        <div className="mt-2">
-          <h2 className="font-semibold text-sm">Availability:</h2>
-          <ul className="list-disc list-inside text-sm">
-            {player.availability?.length > 0 ? (
-              player.availability.map((slot, index) => (
-                <li key={index}>{slot}</li>
-              ))
-            ) : (
-              <li>No availability provided</li>
-            )}
-          </ul>
-        </div>
+    <div className="p-6 max-w-4xl mx-auto text-gray-800 space-y-10">
 
-        {/* ✅ Match Stats */}
-        <div className="mt-6 bg-gray-50 p-4 rounded shadow w-full text-left">
-          <h2 className="font-semibold mb-2 text-gray-700">Match Stats</h2>
-          <p>Total Matches: {matchStats.matches}</p>
-          <p>Completed Matches: {matchStats.completed}</p>
-          <p>Wins: {matchStats.wins}</p>
+      {/* Top Section: Player Info */}
+      <section className="flex flex-col gap-4">
+        <div className="flex items-start gap-6">
+          <div className="w-28 h-28 rounded-full bg-gray-300 overflow-hidden">
+            {player.photoURL ? (
+              <Image src={player.photoURL} width={112} height={112} alt={player.name} className="object-cover w-full h-full" />
+            ) : (
+              <div className="flex items-center justify-center w-full h-full text-white text-xl">
+                {player.name.slice(0, 2).toUpperCase()}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col justify-center gap-2">
+            <p className="text-base font-medium text-gray-800">📍 Postcode: <span className="font-semibold">{player.postcode}</span></p>
+            <p className="text-base font-medium text-gray-800">🎾 Skill Level: <span className="font-semibold">{player.skillLevel}</span></p>
+
+            {/* Bio */}
+            {player.bio && (
+              <div className="mt-2 text-sm text-gray-700">
+                <h3 className="font-semibold text-md mb-1">Bio</h3>
+                <p>
+                  {showFullBio ? player.bio : `${player.bio.slice(0, 100)}...`}
+                  {player.bio.length > 100 && (
+                    <button
+                      onClick={() => setShowFullBio(!showFullBio)}
+                      className="ml-2 text-blue-600 underline text-xs"
+                    >
+                      {showFullBio ? "Show Less" : "Read More"}
+                    </button>
+                  )}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </section>
+
+      {/* Middle Section: Availability */}
+      <section className="flex flex-col sm:flex-row sm:items-start sm:gap-6 border-t pt-6">
+        <h2 className="font-semibold text-lg sm:w-1/3">Availability</h2>
+        <ul className="list-disc text-sm text-green-600 space-y-1 pl-5 sm:pl-0 sm:w-2/3">
+          {player.availability?.length > 0 ? (
+            player.availability.map((slot, index) => (
+              <li key={index}>{slot}</li>
+            ))
+          ) : (
+            <li className="text-gray-500">No availability provided</li>
+          )}
+        </ul>
+      </section>
+
+      {/* Bottom Section: Match Stats */}
+      <section className="bg-gradient-to-r from-gray-600 to-gray-800 p-8 rounded-xl shadow-lg text-white text-center">
+        <h2 className="text-2xl font-semibold mb-4">Match Stats</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <div>
+            <p className="text-2xl font-bold">{matchStats.matches}</p>
+            <p className="text-sm text-gray-300">Total Matches</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold">{matchStats.completed}</p>
+            <p className="text-sm text-gray-300">Completed Matches</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold">{matchStats.wins}</p>
+            <p className="text-sm text-gray-300">Wins</p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
