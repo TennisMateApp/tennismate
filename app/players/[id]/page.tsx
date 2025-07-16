@@ -80,9 +80,9 @@ function PublicProfilePage() {
       {/* Top Section: Player Info */}
       <section className="flex flex-col gap-4">
         <div className="flex items-start gap-6">
-          <div className="w-28 h-28 rounded-full bg-gray-300 overflow-hidden">
+          <div className="w-28 aspect-square rounded-full bg-gray-300 overflow-hidden relative">
             {player.photoURL ? (
-              <Image src={player.photoURL} width={112} height={112} alt={player.name} className="object-cover w-full h-full" />
+              <Image src={player.photoURL} alt={player.name} fill className="object-cover" />
             ) : (
               <div className="flex items-center justify-center w-full h-full text-white text-xl">
                 {player.name.slice(0, 2).toUpperCase()}
