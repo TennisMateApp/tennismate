@@ -107,7 +107,7 @@ export default function MatchSummaryPage() {
     if (!matchId || !currentUserId || !match?.winnerId) return;
 
     try {
-      const matchRef = doc(db, "match_requests", matchId);
+      const matchRef = doc(db, "match_requests", matchId as string);
       const matchSnap = await getDoc(matchRef);
       if (!matchSnap.exists()) return;
       const matchData = matchSnap.data();
