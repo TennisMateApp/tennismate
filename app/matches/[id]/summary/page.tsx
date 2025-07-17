@@ -12,6 +12,7 @@ import {
   deleteDoc,
   updateDoc,
   setDoc,
+  arrayUnion,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -37,9 +38,8 @@ export default function MatchSummaryPage() {
     async function fetchMatchData() {
       if (!matchId) return;
 
-      const matchRef = doc(db, "match_requests", matchId as string);
+      const matchRef = doc(db, "match_requests", matchId);
       const matchSnap = await getDoc(matchRef);
-
       if (!matchSnap.exists()) {
         setLoading(false);
         return;
@@ -49,24 +49,21 @@ export default function MatchSummaryPage() {
       setMatch(matchData);
 
       const { winnerId, fromUserId, toUserId, fromName, toName, score } = matchData;
-
       const fromSnap = await getDoc(doc(db, "players", fromUserId));
       const toSnap = await getDoc(doc(db, "players", toUserId));
-
       const fromPlayer = fromSnap.exists() ? fromSnap.data() : {};
       const toPlayer = toSnap.exists() ? toSnap.data() : {};
 
       if (winnerId === fromUserId) {
         setWinner({ ...fromPlayer, id: fromUserId, name: fromName });
         setLoser({ ...toPlayer, id: toUserId, name: toName });
-      } else if (winnerId === toUserId) {
+      } else {
         setWinner({ ...toPlayer, id: toUserId, name: toName });
         setLoser({ ...fromPlayer, id: fromUserId, name: fromName });
       }
 
       if (score) {
-        const scores = score.split(",").map((s: string) => s.trim());
-        setScoreArray(scores);
+        setScoreArray(score.split(",").map((s: string) => s.trim()));
       }
 
       setLoading(false);
@@ -77,7 +74,6 @@ export default function MatchSummaryPage() {
 
   const handleRematch = async () => {
     if (!currentUserId || !match) return;
-
     const { fromUserId, toUserId, fromName, toName } = match;
     const opponentId = currentUserId === fromUserId ? toUserId : fromUserId;
     const myName = currentUserId === fromUserId ? fromName : toName;
@@ -111,41 +107,59 @@ export default function MatchSummaryPage() {
     if (!matchId || !currentUserId || !match?.winnerId) return;
 
     try {
-      const matchRef = doc(db, "match_requests", matchId as string);
+      const matchRef = doc(db, "match_requests", matchId);
       const matchSnap = await getDoc(matchRef);
+      if (!matchSnap.exists()) return;
       const matchData = matchSnap.data();
 
+      // Move to history
       const historyRef = doc(collection(db, "match_history"));
       await setDoc(historyRef, {
         ...matchData,
         completed: true,
         status: "completed",
-        movedAt: serverTimestamp()
+        movedAt: serverTimestamp(),
       });
 
+      // Remove original request
       await deleteDoc(matchRef);
 
-      const winnerRef = doc(db, "players", match.winnerId);
-      const loserId = match.winnerId === match.fromUserId ? match.toUserId : match.fromUserId;
+      // Update player stats
+      const winnerRef = doc(db, "players", matchData.winnerId);
+      const loserId = matchData.winnerId === matchData.fromUserId ? matchData.toUserId : matchData.fromUserId;
       const loserRef = doc(db, "players", loserId);
-
       const [winnerSnap, loserSnap] = await Promise.all([
         getDoc(winnerRef),
         getDoc(loserRef),
       ]);
-
       const winnerData = winnerSnap.data() || {};
       const loserData = loserSnap.data() || {};
 
       await Promise.all([
         updateDoc(winnerRef, {
           matchesPlayed: (winnerData.matchesPlayed || 0) + 1,
-          matchesWon: (winnerData.matchesWon || 0) + 1
+          matchesWon: (winnerData.matchesWon || 0) + 1,
         }),
         updateDoc(loserRef, {
-          matchesPlayed: (loserData.matchesPlayed || 0) + 1
-        })
+          matchesPlayed: (loserData.matchesPlayed || 0) + 1,
+        }),
       ]);
+
+      // Award "First Match Complete" badge to both players
+      const users = [matchData.fromUserId, matchData.toUserId];
+      for (const uid of users) {
+        await setDoc(
+          doc(db, "players", uid),
+          { badges: arrayUnion("firstMatchComplete") },
+          { merge: true }
+        );
+        // Award First Win to the match winner
+await setDoc(
+  doc(db, "players", matchData.winnerId),
+  { badges: arrayUnion("firstWin") },
+  { merge: true }
+);
+      }
 
       router.push(`/matches/${matchId}/feedback`);
     } catch (error) {
@@ -162,6 +176,7 @@ export default function MatchSummaryPage() {
       {winner && loser ? (
         <div className="flex flex-col items-center gap-6">
           <div className="flex items-center justify-center gap-8">
+            {/* Winner */}
             <div className="flex flex-col items-center">
               <img
                 src={winner.photoURL || "/default-avatar.png"}
@@ -171,6 +186,7 @@ export default function MatchSummaryPage() {
               <p className="text-green-700 font-semibold mt-2">🏆 {winner.name}</p>
             </div>
             <div className="text-xl font-bold text-gray-500">vs</div>
+            {/* Loser */}
             <div className="flex flex-col items-center">
               <img
                 src={loser.photoURL || "/default-avatar.png"}
@@ -181,6 +197,7 @@ export default function MatchSummaryPage() {
             </div>
           </div>
 
+          {/* Scoreboard */}
           <div className="w-full max-w-md mt-4 bg-white rounded-lg shadow-sm border">
             <div className="flex justify-center gap-8 font-bold text-gray-800 border-b p-2">
               <span className="w-20 text-right">Set</span>
@@ -199,6 +216,7 @@ export default function MatchSummaryPage() {
             })}
           </div>
 
+          {/* Actions */}
           <div className="flex gap-4 mt-6">
             <button
               onClick={handleRematch}

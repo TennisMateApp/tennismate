@@ -56,7 +56,6 @@ export default function ProfilePage() {
       const playerRef = doc(db, "players", currentUser.uid);
       const snap = await getDoc(playerRef);
       const data = snap.data() || {};
-      console.log("Loaded badges from Firestore:", data.badges);
       setFormData({
         name: data.name || "",
         postcode: data.postcode || "",
@@ -68,7 +67,6 @@ export default function ProfilePage() {
         timestamp: data.timestamp || null,
       });
       if (data.photoURL) setPreviewURL(data.photoURL);
-      // load match stats
       const q = query(
         collection(db, "match_history"),
         where("players", "array-contains", currentUser.uid)
@@ -179,74 +177,155 @@ export default function ProfilePage() {
   if (loading) return <p className="p-6">Loading...</p>;
 
   return (
-    <div className="relative max-w-2xl mx-auto p-6">
+    <div className="relative max-w-2xl mx-auto p-6 space-y-6">
       {/* Delete button */}
       {editMode && (
-        <button onClick={handleDeleteProfile} className="absolute top-4 right-4 text-red-600 hover:text-red-800" title="Delete Profile">
+        <button
+          onClick={handleDeleteProfile}
+          className="absolute top-4 right-4 text-red-600 hover:text-red-800"
+          title="Delete Profile"
+        >
           <Trash2 size={24} />
         </button>
       )}
 
-      {/* Inline Badge and Name */}
-      {!editMode && (
-        <div className="mb-4">
-          <h1 className="text-2xl font-bold flex items-center">
-            {formData.name}
-            {formData.badges.includes("mvpLaunch") && (
-              <span className="ml-2 inline-block bg-yellow-500 text-white text-xs px-2 py-1 rounded-full">
-                🌟 MVP Launch
-              </span>
-            )}
-          </h1>
-        </div>
-      )}
-
-      {/* Stats */}
-      {!editMode && (
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="bg-white p-4 rounded-xl shadow text-center">
-            <h2 className="text-sm text-gray-500">Matches</h2>
-            <p className="text-xl font-bold">{matchStats.matches}</p>
-          </div>
-          <div className="bg-white p-4 rounded-xl shadow text-center">
-            <h2 className="text-sm text-gray-500">Completed</h2>
-            <p className="text-xl font-bold">{matchStats.completed}</p>
-          </div>
-          <div className="bg-white p-4 rounded-xl shadow text-center">
-            <h2 className="text-sm text-gray-500">Wins</h2>
-            <p className="text-xl font-bold">{matchStats.wins}</p>
-          </div>
-        </div>
-      )}
-
       {/* Profile Image */}
       <div className="flex items-center mb-4">
-        {previewURL && <img src={previewURL} className="w-24 h-24 rounded-full object-cover" alt="Profile" />}
+        {previewURL && <img src={previewURL} className="w-24 h-24 rounded-full object-cover" alt="Profile" />}      
       </div>
 
-      {/* View Mode */}
+      {/* View Mode Info */}
       {!editMode ? (
-        <div className="space-y-2">
-          <p><strong>Email:</strong> {user.email}</p>
-          <p><strong>Postcode:</strong> {formData.postcode}</p>
-          <p><strong>Skill Level:</strong> {formData.skillLevel}</p>
-          <p><strong>Availability:</strong> {formData.availability.join(", ")}</p>
-          <p><strong>Bio:</strong> {formData.bio}</p>
-        </div>
+        <>
+          {/* Basic Info */}
+          <div className="space-y-2">
+            <p><strong>Name:</strong> {formData.name}</p>
+            <p><strong>Email:</strong> {user.email}</p>
+            <p><strong>Postcode:</strong> {formData.postcode}</p>
+            <p><strong>Skill Level:</strong> {formData.skillLevel}</p>
+
+            {/* Bio */}
+            <div>
+              <h2 className="font-semibold">Bio</h2>
+              <p>{formData.bio}</p>
+            </div>
+
+            {/* Availability */}
+            <div>
+              <h2 className="font-semibold">Availability</h2>
+              <p>{formData.availability.join(", ")}</p>
+            </div>
+          </div>
+
+          {/* Match Stats */}
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-white p-4 rounded-xl shadow text-center">
+              <h3 className="text-sm text-gray-500">Matches</h3>
+              <p className="text-xl font-bold">{matchStats.matches}</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl shadow text-center">
+              <h3 className="text-sm text-gray-500">Completed</h3>
+              <p className="text-xl font-bold">{matchStats.completed}</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl shadow text-center">
+              <h3 className="text-sm text-gray-500">Wins</h3>
+              <p className="text-xl font-bold">{matchStats.wins}</p>
+            </div>
+          </div>
+
+{/* Badges Title */}
+<h2 className="font-semibold mt-6">Badges</h2>
+
+{/* Badges Box */}
+<div className="border rounded-xl p-4 bg-white shadow mt-2">
+  {/* Single flex row for all badges, aligned at the top */}
+  <div className="flex items-start gap-4">
+    {/* MVP Launch badge */}
+    <div className="flex flex-col items-center">
+      <img
+        src="/badges/mvp-badge.svg"
+        width={64}
+        height={64}
+        alt="MVP Launch"
+      />
+      <span className="text-xs mt-1">MVP Launch</span>
+    </div>
+
+    {/* First Match badge */}
+    <div className="flex flex-col items-center">
+      <img
+        src={
+          formData.badges.includes("firstMatch")
+            ? "/badges/first-match.svg"
+            : "/badges/first-match-locked.svg"
+        }
+        alt="First Match"
+        width={64}
+        height={64}
+        className={formData.badges.includes("firstMatch") ? "" : "opacity-40"}
+      />
+      <span className="text-xs mt-1">First Match</span>
+    </div>
+{/* First Match Complete badge */}
+<div className="flex flex-col items-center">
+  <img
+    src={
+      formData.badges.includes("firstMatchComplete")
+        ? "/badges/first-match-complete.svg"
+        : "/badges/first-match-complete-locked.svg"
+    }
+    alt="First Match Complete"
+    width={64}
+    height={64}
+    className={formData.badges.includes("firstMatchComplete") ? "" : "opacity-40"}
+  />
+  <span className="text-xs mt-1">First Match Complete</span>
+</div>
+{/* **New** First Win badge */}
+<div className="flex flex-col items-center">
+  <img
+    src={
+      formData.badges.includes("firstWin")
+        ? "/badges/first-win.svg"
+        : "/badges/first-win-locked.svg"
+    }
+    alt="First Win"
+    width={64}
+    height={64}
+    className={formData.badges.includes("firstWin") ? "" : "opacity-40"}
+  />
+  <span className="text-xs mt-1">First Win</span>
+</div>
+  </div>
+</div>
+        </>
       ) : (
-        /* Edit Form */
+        // Edit Form
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block font-medium">Name:</label>
-            <input name="name" value={formData.name} onChange={handleChange} className="w-full p-2 border rounded" />
+            <input
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
+              className="w-full p-2 border rounded" />
           </div>
           <div>
             <label className="block font-medium">Postcode:</label>
-            <input name="postcode" value={formData.postcode} onChange={handleChange} className="w-full p-2 border rounded" />
+            <input
+              name="postcode"
+              value={formData.postcode}
+              onChange={handleChange}
+              className="w-full p-2 border rounded" />
           </div>
           <div>
             <label className="block font-medium">Skill Level:</label>
-            <select name="skillLevel" value={formData.skillLevel} onChange={handleChange} className="w-full p-2 border rounded">
+            <select
+              name="skillLevel"
+              value={formData.skillLevel}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+            >
               <option value="">Select</option>
               <option value="Beginner">Beginner</option>
               <option value="Intermediate">Intermediate</option>
@@ -255,7 +334,7 @@ export default function ProfilePage() {
           </div>
           <fieldset>
             <legend className="font-medium mb-1">Availability:</legend>
-            {['Weekdays AM', 'Weekdays PM', 'Weekends AM', 'Weekends PM'].map(slot => (
+            {['Weekdays AM', 'Weekdays PM', 'Weekends AM', 'Weekends PM'].map((slot) => (
               <label key={slot} className="block text-sm">
                 <input
                   type="checkbox"
@@ -270,13 +349,34 @@ export default function ProfilePage() {
           </fieldset>
           <div>
             <label className="block font-medium">Bio:</label>
-            <textarea name="bio" value={formData.bio} onChange={handleChange} rows={4} className="w-full p-2 border rounded" />
+            <textarea
+              name="bio"
+              value={formData.bio}
+              onChange={handleChange}
+              rows={4}
+              className="w-full p-2 border rounded"
+            />
           </div>
           <div className="flex items-center space-x-4">
-            {previewURL && <img src={previewURL} className="w-20 h-20 rounded-full object-cover border" alt="Preview" />}
+            {previewURL && (
+              <img
+                src={previewURL}
+                className="w-20 h-20 rounded-full object-cover border"
+                alt="Preview"
+              />
+            )}
             <div className="space-y-2">
-              <label htmlFor="upload" className="cursor-pointer inline-block bg-green-600 text-white px-3 py-1 rounded">Choose Photo</label>
-              <input id="upload" type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+              <label
+                htmlFor="upload"
+                className="cursor-pointer inline-block bg-green-600 text-white px-3 py-1 rounded"
+              >Choose Photo</label>
+              <input
+                id="upload"
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                className="hidden"
+              />
             </div>
           </div>
           {showCropper && imageSrc && (
@@ -291,10 +391,17 @@ export default function ProfilePage() {
                 onZoomChange={setZoom}
                 onCropComplete={handleCropComplete}
               />
-              <button onClick={showCroppedImage} className="absolute bottom-2 left-2 bg-blue-500 text-white px-3 py-1 rounded">Confirm Crop</button>
+              <button
+                onClick={showCroppedImage}
+                className="absolute bottom-2 left-2 bg-blue-500 text-white px-3 py-1 rounded"
+              >Confirm Crop</button>
             </div>
           )}
-          <button type="submit" disabled={saving} className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50">
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50"
+          >
             {saving ? "Saving..." : "Save Profile"}
           </button>
         </form>

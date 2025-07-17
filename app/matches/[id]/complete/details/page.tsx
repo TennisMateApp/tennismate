@@ -10,6 +10,7 @@ import {
   onSnapshot,
   setDoc,
   serverTimestamp,
+  arrayUnion,
 } from "firebase/firestore";
 import Image from "next/image";
 import withAuth from "@/components/withAuth";
@@ -173,33 +174,49 @@ function MatchDetailsForm() {
 
   const handleSubmit = async () => {
     try {
-      const matchRef = doc(db, "match_requests", matchId as string);
+      // 1) Fetch original match request data for badge logic
+      const matchReqRef = doc(db, "match_requests", matchId as string);
+      const matchReqSnap = await getDoc(matchReqRef);
+      if (!matchReqSnap.exists()) return;
+      const matchData = matchReqSnap.data();
 
-      let setsWonA = 0;
-      let setsWonB = 0;
-
-      sets.forEach((set) => {
-        if (set.A > set.B) setsWonA++;
-        else if (set.B > set.A) setsWonB++;
+      // 2) Compute setsWon and winnerId
+      let setsWonA = 0, setsWonB = 0;
+      sets.forEach((s) => {
+        if (s.A > s.B) setsWonA++;
+        else if (s.B > s.A) setsWonB++;
       });
+      const winnerId = setsWonA > setsWonB ? playerA?.id : setsWonB > setsWonA ? playerB?.id : null;
 
-      let winnerId = null;
-      if (setsWonA > setsWonB) winnerId = playerA?.id;
-      else if (setsWonB > setsWonA) winnerId = playerB?.id;
-
+      // 3) Prepare update data
       const updateData: any = {
         matchType: type,
         score: sets.map((s) => `${s.A}-${s.B}`).join(", "),
         completed: true,
-        winnerId: winnerId || null,
+        winnerId,
       };
+      if (playerA?.id && playerB?.id) updateData.players = [playerA.id, playerB.id];
 
-      if (playerA?.id && playerB?.id) {
-        updateData.players = [playerA.id, playerB.id];
+      // 4) Update match request doc
+      await updateDoc(matchReqRef, updateData);
+
+      // 5) Award Love Hold badge if any set was 40-0
+      if (updateData.score) {
+        const setStrs = updateData.score.split(",").map((s: string) => s.trim());
+        for (const str of setStrs) {
+          if (str === "40-0") {
+            await setDoc(
+              doc(db, "players", winnerId!),
+              { badges: arrayUnion("loveHold") },
+              { merge: true }
+            );
+            break;
+          }
+        }
       }
 
-      await updateDoc(matchRef, updateData);
-      router.push(`/matches/${matchId}/summary`);
+// 3) Finally navigate on to the summary page
+router.push(`/matches/${matchId}/summary`);
     } catch (error) {
       console.error("Error submitting match results:", error);
     }
