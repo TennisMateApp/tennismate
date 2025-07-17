@@ -80,7 +80,7 @@ function PublicProfilePage() {
       {/* Top Section: Player Info */}
       <section className="flex flex-col gap-4">
         <div className="flex items-start gap-6">
-          <div className="w-28 aspect-square rounded-full bg-gray-300 overflow-hidden relative">
+          <div className="w-28 h-28 relative rounded-full overflow-hidden bg-gray-300">
             {player.photoURL ? (
               <Image src={player.photoURL} alt={player.name} fill className="object-cover" />
             ) : (
@@ -92,26 +92,26 @@ function PublicProfilePage() {
           <div className="flex flex-col justify-center gap-2">
             <p className="text-base font-medium text-gray-800">📍 Postcode: <span className="font-semibold">{player.postcode}</span></p>
             <p className="text-base font-medium text-gray-800">🎾 Skill Level: <span className="font-semibold">{player.skillLevel}</span></p>
-
-            {/* Bio */}
-            {player.bio && (
-              <div className="mt-2 text-sm text-gray-700">
-                <h3 className="font-semibold text-md mb-1">Bio</h3>
-                <p>
-                  {showFullBio ? player.bio : `${player.bio.slice(0, 100)}...`}
-                  {player.bio.length > 100 && (
-                    <button
-                      onClick={() => setShowFullBio(!showFullBio)}
-                      className="ml-2 text-blue-600 underline text-xs"
-                    >
-                      {showFullBio ? "Show Less" : "Read More"}
-                    </button>
-                  )}
-                </p>
-              </div>
-            )}
           </div>
         </div>
+
+        {/* Bio */}
+        {player.bio && (
+          <div className="mt-2 text-sm text-gray-700">
+            <h3 className="font-semibold text-md mb-1">Bio</h3>
+            <p>
+              {showFullBio ? player.bio : `${player.bio.slice(0, 100)}...`}
+              {player.bio.length > 100 && (
+                <button
+                  onClick={() => setShowFullBio(!showFullBio)}
+                  className="ml-2 text-blue-600 underline text-xs"
+                >
+                  {showFullBio ? "Show Less" : "Read More"}
+                </button>
+              )}
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Middle Section: Availability */}
