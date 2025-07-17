@@ -38,7 +38,7 @@ export default function MatchSummaryPage() {
     async function fetchMatchData() {
       if (!matchId) return;
 
-      const matchRef = doc(db, "match_requests", matchId);
+      const matchRef = doc(db, "match_requests", matchId as string);
       const matchSnap = await getDoc(matchRef);
       if (!matchSnap.exists()) {
         setLoading(false);
