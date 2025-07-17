@@ -177,7 +177,7 @@ export default function ProfilePage() {
   if (loading) return <p className="p-6">Loading...</p>;
 
   return (
-    <div className="relative max-w-2xl mx-auto p-6 space-y-6">
+    <div className="relative max-w-2xl mx-auto p-6 space-y-6 pb-24">
       {/* Delete button */}
       {editMode && (
         <button
