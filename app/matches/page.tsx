@@ -199,8 +199,17 @@ function MatchesPage() {
                 Start Game
               </button>
               {/* Chat button logic here */}
-            </>
-          )}
+ <button
+  onClick={() => {
+    const sortedIDs = [currentUserId, other].sort().join("_");
+    router.push(`/messages/${sortedIDs}`);
+  }}
+  className="px-4 py-1 bg-blue-600 text-white rounded"
+>
+  Chat
+</button>
+  </>
+)}
         </div>
       </li>
     );

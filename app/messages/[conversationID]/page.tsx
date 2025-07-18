@@ -5,6 +5,7 @@ import { db, auth } from "@/lib/firebaseConfig";
 import {
   doc,
   getDoc,
+  setDoc,
   collection,
   addDoc,
   onSnapshot,
@@ -36,37 +37,52 @@ function ChatPage() {
       setUser(u);
 
       const convoRef = doc(db, "conversations", conversationID as string);
-      const convoSnap = await getDoc(convoRef);
-      if (!convoSnap.exists()) return;
+      let convoSnap = await getDoc(convoRef);
 
-      const data = convoSnap.data();
-      const otherUserId = data.participants.find((id: string) => id !== u.uid);
+      const allIds = (conversationID as string).split("_");
+      const otherUserId = allIds.find((id) => id !== u.uid);
+
+      if (!convoSnap.exists() && otherUserId) {
+        await setDoc(convoRef, {
+          participants: [u.uid, otherUserId],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          typing: {},
+          lastRead: { [u.uid]: serverTimestamp() },
+        });
+      } else {
+        await updateDoc(convoRef, {
+          [`lastRead.${u.uid}`]: serverTimestamp(),
+        });
+      }
+
+      convoSnap = await getDoc(convoRef);
 
       if (otherUserId) {
-        const otherUserRef = doc(db, "players", otherUserId);
-        const otherSnap = await getDoc(otherUserRef);
-        if (otherSnap.exists()) {
-          const otherData = otherSnap.data();
-          setOtherUserName(otherData.name || "TennisMate");
-          setOtherUserAvatar(otherData.photoURL || null);
+        try {
+          const otherUserRef = doc(db, "players", otherUserId);
+          const otherSnap = await getDoc(otherUserRef);
+
+          if (otherSnap.exists()) {
+            const otherData = otherSnap.data();
+            setOtherUserName(otherData.name || "TennisMate");
+            setOtherUserAvatar(otherData.photoURL || null);
+          }
+        } catch (err) {
+          console.error("🔥 Error loading other user profile:", err);
         }
       }
 
       const meRef = doc(db, "players", u.uid);
       const meSnap = await getDoc(meRef);
       if (meSnap.exists()) {
-        const myData = meSnap.data();
-        setUserAvatar(myData.photoURL || null);
+        setUserAvatar(meSnap.data().photoURL || null);
       }
-
-      await updateDoc(convoRef, {
-        [`lastRead.${u.uid}`]: serverTimestamp(),
-      });
 
       const unsubscribeTyping = onSnapshot(convoRef, (snap) => {
         const typingData = snap.data()?.typing || {};
-        const otherUserId = data.participants.find((id: string) => id !== u.uid);
-        setOtherUserTyping(typingData[otherUserId] === true);
+        const otherTypingId = snap.data()?.participants?.find((id: string) => id !== u.uid);
+        setOtherUserTyping(typingData[otherTypingId] === true);
       });
 
       return () => unsubscribeTyping();
@@ -85,7 +101,6 @@ function ChatPage() {
       const msgs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setMessages(msgs);
 
-      // Fix scroll bug on iOS
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           bottomRef.current?.scrollIntoView({ behavior: "auto" });
@@ -94,7 +109,7 @@ function ChatPage() {
     });
 
     return () => unsub();
-  }, [conversationID]); // ✅ this closing brace was missing
+  }, [conversationID]);
 
   const sendMessage = async () => {
     if (!input.trim() || !user) return;
@@ -137,12 +152,15 @@ function ChatPage() {
           <img
             src={otherUserAvatar}
             alt="avatar"
-            className="w-8 h-8 rounded-full object-cover"
+            className="w-8 h-8 rounded-full object-cover opacity-0 transition-opacity duration-300"
+            onLoad={(e) => e.currentTarget.classList.add("opacity-100")}
           />
-        ) : (
+        ) : otherUserName ? (
           <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-xs text-gray-600">
             No Photo
           </div>
+        ) : (
+          <div className="w-8 h-8" />
         )}
         <span className="font-medium text-sm text-gray-900">{otherUserName}</span>
       </div>
@@ -152,27 +170,26 @@ function ChatPage() {
         {messages.map((msg) => {
           const isOtherUser = msg.senderId !== user?.uid;
           const avatarURL = isOtherUser ? otherUserAvatar : userAvatar;
-          const timestamp = msg.timestamp?.toDate
+          const timestamp = msg.timestamp?.toDate?.()
             ? msg.timestamp.toDate().toLocaleTimeString([], {
                 hour: "2-digit",
                 minute: "2-digit",
               })
-            : "";
+            : "Sending...";
 
           return (
             <div
               key={msg.id}
-              className={`flex items-end ${
-                isOtherUser ? "justify-start" : "justify-end"
-              }`}
+              className={`flex items-end ${isOtherUser ? "justify-start" : "justify-end"}`}
             >
               {avatarURL && (
                 <img
                   src={avatarURL}
                   alt="avatar"
-                  className={`w-7 h-7 rounded-full object-cover ${
+                  className={`w-7 h-7 rounded-full object-cover opacity-0 transition-opacity duration-300 ${
                     isOtherUser ? "mr-2" : "ml-2"
                   }`}
+                  onLoad={(e) => e.currentTarget.classList.add("opacity-100")}
                 />
               )}
               <div className="max-w-[75%] sm:max-w-xs">
