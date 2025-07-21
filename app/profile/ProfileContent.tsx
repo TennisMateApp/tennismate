@@ -104,35 +104,32 @@ export default function ProfilePage() {
     }));
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setStatus("❌ Image too large (max 5MB). Please choose a smaller image.");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImageSrc(reader.result as string);
-      setShowCropper(true);
-    };
-    reader.readAsDataURL(file);
+const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    setImageSrc(reader.result as string);   // sets the image to be cropped
+    setShowCropper(true);                   // show the crop popup
   };
+  reader.readAsDataURL(file);
+};
 
   const handleCropComplete = (_: any, areaPix: any) => setCroppedAreaPixels(areaPix);
 
-  const showCroppedImage = async () => {
-    if (!imageSrc || !croppedAreaPixels) return;
-    try {
-      const blob = await getCroppedImg(imageSrc, croppedAreaPixels);
-      const file = new File([blob], "profile.jpg", { type: "image/jpeg" });
-      setCroppedImage(file);
-      setPreviewURL(URL.createObjectURL(file));
-      setShowCropper(false);
-    } catch {
-      setStatus("❌ Crop failed.");
-    }
-  };
+const showCroppedImage = async () => {
+  if (!imageSrc || !croppedAreaPixels) return;
+  try {
+    const blob = await getCroppedImg(imageSrc, croppedAreaPixels);
+    const file = new File([blob], "profile.jpg", { type: "image/jpeg" });
+    setCroppedImage(file); // Save the cropped file for later upload
+    setPreviewURL(URL.createObjectURL(file)); // Show preview in edit mode
+    setShowCropper(false); // Close cropper
+    // 🚫 Do not call handleSubmit or any save/redirect logic here
+  } catch {
+    setStatus("❌ Crop failed.");
+  }
+};
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -379,24 +376,39 @@ export default function ProfilePage() {
               />
             </div>
           </div>
-          {showCropper && imageSrc && (
-            <div className="relative w-full h-64 bg-gray-100">
-              <Cropper
-                image={imageSrc}
-                crop={crop}
-                zoom={zoom}
-                aspect={1}
-                cropShape="round"
-                onCropChange={setCrop}
-                onZoomChange={setZoom}
-                onCropComplete={handleCropComplete}
-              />
-              <button
-                onClick={showCroppedImage}
-                className="absolute bottom-2 left-2 bg-blue-500 text-white px-3 py-1 rounded"
-              >Confirm Crop</button>
-            </div>
-          )}
+{showCropper && imageSrc && (
+  <div className="fixed inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="bg-white rounded-xl shadow-lg p-4 flex flex-col items-center justify-center w-[340px]">
+      <div className="relative w-[300px] h-[300px]">
+        <Cropper
+          image={imageSrc}
+          crop={crop}
+          zoom={zoom}
+          aspect={1}
+          cropShape="round"
+          showGrid={true}
+          onCropChange={setCrop}
+          onZoomChange={setZoom}
+          onCropComplete={handleCropComplete}
+        />
+      </div>
+<button
+  type="button" // <--- This prevents the form from submitting!
+  onClick={showCroppedImage}
+  className="mt-4 bg-green-600 text-white px-4 py-2 rounded font-semibold"
+>
+  Confirm Crop
+</button>
+     <button
+  type="button"
+  onClick={() => setShowCropper(false)}
+  className="mt-2 text-xs text-gray-600 underline"
+>
+  Cancel
+</button>
+    </div>
+  </div>
+)}
           <button
             type="submit"
             disabled={saving}
