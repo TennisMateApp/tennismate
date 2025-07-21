@@ -103,8 +103,11 @@ export default function MatchPage() {
 
       // Load all players and score
       const snapshot = await getDocs(collection(db, "players"));
-      const allPlayers = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Player) }));
-
+      const allPlayers = snapshot.docs.map((d) => {
+  const data = d.data() as Player;
+  const { id: _id, ...rest } = data; // remove any id from data
+  return { ...rest, id: d.id };      // always set id from doc.id last
+});
       const scored = allPlayers
         .filter((p) => p.id !== currentUser.uid)
         .map((p) => {
