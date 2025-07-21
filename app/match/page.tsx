@@ -1,7 +1,6 @@
-// app/match/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { db, auth } from "@/lib/firebaseConfig";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -27,21 +26,27 @@ interface Player {
   email: string;
   photoURL?: string;
   timestamp?: any;
+  score?: number;
 }
 
 interface PostcodeCoords {
   [postcode: string]: { lat: number; lng: number };
 }
 
-function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+function getDistanceFromLatLonInKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
   const R = 6371; // Radius of the Earth in km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(lat1 * Math.PI / 180) *
-    Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Math.round(R * c);
 }
@@ -49,10 +54,11 @@ function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon
 export default function MatchPage() {
   const [user, setUser] = useState<any>(null);
   const [myProfile, setMyProfile] = useState<Player | null>(null);
-  const [matches, setMatches] = useState<Player[]>([]);
+  const [rawMatches, setRawMatches] = useState<Player[]>([]);
   const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
   const [postcodeCoords, setPostcodeCoords] = useState<PostcodeCoords>({});
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState<string>("score");
   const router = useRouter();
 
   useEffect(() => {
@@ -74,54 +80,54 @@ export default function MatchPage() {
       const myData = mySnap.data() as Player;
       setMyProfile(myData);
 
+      // Load postcode coordinates
       const postcodeSnap = await getDocs(collection(db, "postcodes"));
       const coords: PostcodeCoords = {};
-      postcodeSnap.forEach(doc => {
-        coords[doc.id] = doc.data() as { lat: number; lng: number };
+      postcodeSnap.forEach((d) => {
+        coords[d.id] = d.data() as { lat: number; lng: number };
       });
       setPostcodeCoords(coords);
 
+      // Load sent requests
       const reqQuery = query(
         collection(db, "match_requests"),
         where("fromUserId", "==", currentUser.uid)
       );
       const reqSnap = await getDocs(reqQuery);
       const sentTo = new Set<string>();
-      reqSnap.forEach((doc) => {
-        const data = doc.data();
+      reqSnap.forEach((d) => {
+        const data = d.data();
         if (data.toUserId) sentTo.add(data.toUserId);
       });
       setSentRequests(sentTo);
 
+      // Load all players and score
       const snapshot = await getDocs(collection(db, "players"));
-      const allPlayers = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Player[];
+      const allPlayers = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Player) }));
 
-      const scoredMatches = allPlayers
+      const scored = allPlayers
         .filter((p) => p.id !== currentUser.uid)
         .map((p) => {
           let score = 0;
+          // Skill match
           if (p.skillLevel === myData.skillLevel) score += 2;
           else if (
             (p.skillLevel === "Intermediate" && myData.skillLevel === "Beginner") ||
             (p.skillLevel === "Beginner" && myData.skillLevel === "Intermediate")
-          ) score += 1;
-
-          const sharedAvailability = p.availability.filter((a) =>
-            myData.availability.includes(a)
-          ).length;
-          score += sharedAvailability;
-
+          ) {
+            score += 1;
+          }
+          // Availability overlap
+          const shared = p.availability.filter((a) => myData.availability.includes(a)).length;
+          score += shared;
+          // Postcode proximity (first digit)
           if (p.postcode.startsWith(myData.postcode.slice(0, 1))) score += 1;
 
           return { ...p, score };
         })
-        .filter((p) => p.score > 0)
-        .sort((a, b) => b.score - a.score);
+        .filter((p) => (p.score ?? 0) > 0);
 
-      setMatches(scoredMatches);
+      setRawMatches(scored);
       setLoading(false);
     });
 
@@ -140,7 +146,7 @@ export default function MatchPage() {
         toName: match.name,
         message: `Hey ${match.name}, I’d love to play sometime soon!`,
         timestamp: serverTimestamp(),
-        status: "unread",
+        status: "unread"
       });
 
       setSentRequests((prev) => new Set(prev).add(match.id));
@@ -150,6 +156,38 @@ export default function MatchPage() {
       alert("❌ Could not send request. Try again.");
     }
   };
+
+  // Sort matches based on user choice
+  const sortedMatches = useMemo(() => {
+    if (!myProfile) return rawMatches;
+    return [...rawMatches].sort((a, b) => {
+      if (sortBy === "distance") {
+        const myC = postcodeCoords[myProfile.postcode];
+        const aC = postcodeCoords[a.postcode];
+        const bC = postcodeCoords[b.postcode];
+        const da = myC && aC
+          ? getDistanceFromLatLonInKm(myC.lat, myC.lng, aC.lat, aC.lng)
+          : Infinity;
+        const db_ = myC && bC
+          ? getDistanceFromLatLonInKm(myC.lat, myC.lng, bC.lat, bC.lng)
+          : Infinity;
+        return da - db_;
+      }
+      if (sortBy === "availability") {
+        const sa = a.availability.filter((t) => myProfile.availability.includes(t)).length;
+        const sb = b.availability.filter((t) => myProfile.availability.includes(t)).length;
+        return sb - sa;
+      }
+      if (sortBy === "skill") {
+        const scoreFn = (p: Player) =>
+          p.skillLevel === myProfile.skillLevel ? 2 :
+          (["Beginner","Intermediate"].includes(p.skillLevel) && ["Beginner","Intermediate"].includes(myProfile.skillLevel)) ? 1 : 0;
+        return scoreFn(b) - scoreFn(a);
+      }
+      // default: best match score
+      return (b.score ?? 0) - (a.score ?? 0);
+    });
+  }, [rawMatches, sortBy, postcodeCoords, myProfile]);
 
   if (loading) return <p className="p-6">Looking for matches...</p>;
 
@@ -162,30 +200,56 @@ export default function MatchPage() {
       >
         🔄 Refresh Matches
       </button>
-      {matches.length === 0 ? (
+
+      {/* Sort Selector */}
+      <div className="mb-4 flex items-center gap-3">
+        <label className="text-sm font-medium">Sort by:</label>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+          className="border px-3 py-1 rounded"
+        >
+          <option value="score">Best Match</option>
+          <option value="distance">Location</option>
+          <option value="availability">Availability</option>
+          <option value="skill">Skill Compatibility</option>
+        </select>
+      </div>
+
+      {sortedMatches.length === 0 ? (
         <p>No matches found yet. Try adjusting your availability or skill level.</p>
       ) : (
         <ul className="space-y-4">
-          {matches.map((match) => {
+          {sortedMatches.map((match) => {
             const alreadySent = sentRequests.has(match.id);
             const isNew =
               match.timestamp &&
-              Date.now() - new Date(match.timestamp.toDate?.() || match.timestamp).getTime() <
+              Date.now() -
+                new Date(match.timestamp.toDate?.() || match.timestamp).getTime() <
                 3 * 24 * 60 * 60 * 1000;
 
             let distanceText = "";
-            if (myProfile && postcodeCoords[myProfile.postcode] && postcodeCoords[match.postcode]) {
-              const myCoord = postcodeCoords[myProfile.postcode];
-              const theirCoord = postcodeCoords[match.postcode];
-              const distance = getDistanceFromLatLonInKm(myCoord.lat, myCoord.lng, theirCoord.lat, theirCoord.lng);
-              distanceText = `📍 ~${distance} km away`;
+            if (
+              myProfile &&
+              postcodeCoords[myProfile.postcode] &&
+              postcodeCoords[match.postcode]
+            ) {
+              const myC = postcodeCoords[myProfile.postcode];
+              const theirC = postcodeCoords[match.postcode];
+              const dist = getDistanceFromLatLonInKm(
+                myC.lat,
+                myC.lng,
+                theirC.lat,
+                theirC.lng
+              );
+              distanceText = `📍 ~${dist} km away`;
             }
 
             return (
               <li
-  key={match.id}
-  className="border p-6 rounded-lg bg-white shadow-lg hover:shadow-xl transition-all ease-in-out flex items-start gap-6"
->
+                key={match.id}
+                className="border p-6 rounded-lg bg-white shadow-lg hover:shadow-xl transition-all ease-in-out flex items-start gap-6"
+              >
                 {match.photoURL ? (
                   <img
                     src={match.photoURL}
@@ -209,9 +273,7 @@ export default function MatchPage() {
                   <p className="text-sm text-gray-600">
                     Skill: {match.skillLevel} — Postcode: {match.postcode}
                   </p>
-                  {distanceText && (
-                    <p className="text-sm text-gray-600">{distanceText}</p>
-                  )}
+                  {distanceText && <p className="text-sm text-gray-600">{distanceText}</p>}
                   <p className="text-sm">
                     <strong>Availability:</strong> {match.availability.join(", ")}
                   </p>
@@ -220,18 +282,16 @@ export default function MatchPage() {
                     {alreadySent ? (
                       <span className="text-green-600 text-sm font-medium">✅ Request Sent</span>
                     ) : (
-                     <button
-  onClick={() => handleMatchRequest(match)}
-  aria-label={`Request match with ${match.name}`}
-  className="text-sm text-white bg-green-600 hover:bg-blue-700 px-3 py-2 rounded transition-all"
->
-  Request to Play
-</button>
-                    )}
-                    <Link href={`/players/${match.id}`}>
-                      <button className="text-sm bg-gray-200 rounded px-3 py-2">
-                        View Profile
+                      <button
+                        onClick={() => handleMatchRequest(match)}
+                        aria-label={`Request match with ${match.name}`}
+                        className="text-sm text-white bg-green-600 hover:bg-blue-700 px-3 py-2 rounded transition-all"
+                      >
+                        Request to Play
                       </button>
+                    )}
+                    <Link href={`/players/${match.id}`}> 
+                      <button className="text-sm bg-gray-200 rounded px-3 py-2">View Profile</button>
                     </Link>
                   </div>
                 </div>
