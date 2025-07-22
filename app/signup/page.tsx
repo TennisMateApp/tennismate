@@ -26,6 +26,7 @@ export default function SignupPage() {
     bio: "",
   });
 
+  const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [status, setStatus] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewURL, setPreviewURL] = useState<string | null>(null);
@@ -38,6 +39,25 @@ export default function SignupPage() {
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
 
+  // Password criteria helper function
+  function getPasswordCriteria(password: string) {
+    return {
+      length: password.length >= 6,
+      uppercase: /[A-Z]/.test(password),
+      special: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+    };
+  }
+
+  // Calculate criteria state
+  const passwordCriteria = getPasswordCriteria(formData.password);
+const isPasswordValid = Object.values(passwordCriteria).every(Boolean);
+const isFormComplete =
+  formData.name &&
+  formData.email &&
+  formData.password &&
+  formData.postcode &&
+  formData.skillLevel;
+const canSubmit = isFormComplete && isPasswordValid;
   const handleChange = (
     e: React.ChangeEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
@@ -87,6 +107,10 @@ export default function SignupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+      if (!isPasswordValid) {
+    setStatus("⚠️ Please meet all password requirements.");
+    return;
+  }
     setStatus("Submitting...");
     try {
       const userCredential = await createUserWithEmailAndPassword(
@@ -193,15 +217,49 @@ export default function SignupPage() {
             required
             className="w-full p-2 border rounded"
           />
-          <input
-            type="password"
-            name="password"
-            value={formData.password}
-            onChange={handleChange}
-            placeholder="Password"
-            required
-            className="w-full p-2 border rounded"
-          />
+<input
+  type="password"
+  name="password"
+  value={formData.password}
+  onChange={handleChange}
+  placeholder="Password"
+  required
+  className="w-full p-2 border rounded"
+  onFocus={() => setIsPasswordFocused(true)}
+  onBlur={() => setIsPasswordFocused(false)}
+/>
+{isPasswordFocused && (
+  <div className="bg-gray-50 border border-gray-300 rounded px-3 py-2 mt-1 text-sm text-gray-800 shadow min-w-[220px]">
+    <strong>Password requirements:</strong>
+    <ul className="list-none mt-1 space-y-1">
+      <li className="flex items-center gap-2">
+        {passwordCriteria.length ? (
+          <span className="text-green-600 font-bold">✔</span>
+        ) : (
+          <span className="text-red-500 font-bold">✘</span>
+        )}
+        At least 6 characters
+      </li>
+      <li className="flex items-center gap-2">
+        {passwordCriteria.uppercase ? (
+          <span className="text-green-600 font-bold">✔</span>
+        ) : (
+          <span className="text-red-500 font-bold">✘</span>
+        )}
+        1 uppercase letter
+      </li>
+      <li className="flex items-center gap-2">
+        {passwordCriteria.special ? (
+          <span className="text-green-600 font-bold">✔</span>
+        ) : (
+          <span className="text-red-500 font-bold">✘</span>
+        )}
+        1 special character (e.g. !@#$%)
+      </li>
+    </ul>
+  </div>
+)}
+
           <input
             type="text"
             name="postcode"
@@ -314,12 +372,13 @@ export default function SignupPage() {
             </div>
           )}
 
-          <button
-            type="submit"
-            className="bg-blue-600 text-white px-4 py-2 rounded"
-          >
-            Submit
-          </button>
+         <button
+  type="submit"
+  className={`bg-blue-600 text-white px-4 py-2 rounded ${!canSubmit ? "opacity-50 cursor-not-allowed" : ""}`}
+  disabled={!canSubmit}
+>
+  Submit
+</button>
 
           {status && <p className="mt-2 text-sm">{status}</p>}
         </form>
