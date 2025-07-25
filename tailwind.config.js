@@ -1,4 +1,5 @@
 module.exports = {
+  darkMode: 'class', // 👈 Add this line!
   theme: {
     extend: {
       padding: {

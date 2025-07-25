@@ -10,10 +10,38 @@ import { GiTennisCourt, GiTennisBall } from "react-icons/gi";
 import {
   collection, query, where, onSnapshot, getDoc, doc, updateDoc, writeBatch
 } from "firebase/firestore";
+// ✅ Import the function instead
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
+import InstallPwaAndroidPrompt from "@/components/InstallPwaAndroidPrompt";
+import InstallPwaIosPrompt from "@/components/InstallPwaIosPrompt";
+
+// ---- Add the useSystemTheme hook after imports ----
+function useSystemTheme() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const root = window.document.documentElement;
+    const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
+
+    function updateTheme(e?: MediaQueryListEvent) {
+      if (e ? e.matches : matchMedia.matches) {
+        root.classList.add("dark");
+      } else {
+        root.classList.remove("dark");
+      }
+    }
+
+    updateTheme();
+    matchMedia.addEventListener("change", updateTheme);
+
+    return () => matchMedia.removeEventListener("change", updateTheme);
+  }, []);
+}
+// ---------------------------------------------------
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
+  useSystemTheme(); // <-- Call the hook at the top of your component
+
   const [user, setUser] = useState<any>(null);
   const [photoURL, setPhotoURL] = useState<string | null>(null);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
@@ -61,6 +89,8 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           }
         });
 
+        // ...rest of your useEffect code
+
         unsubInbox = onSnapshot(
           query(collection(db, "match_requests"), where("toUserId", "==", u.uid), where("status", "==", "unread")),
           (snap) => setUnreadMatchRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })))
@@ -93,6 +123,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           query(collection(db, "notifications"), where("recipientId", "==", u.uid), where("read", "==", false)),
           (snap) => setNotifications(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
         );
+
       } else {
         setUser(null);
         setPhotoURL(null);
@@ -107,6 +138,50 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       unsubPlayer();
     };
   }, []);
+useEffect(() => {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+
+  const requestPermissionAndListen = async () => {
+    try {
+      const { getMessagingClient } = await import("@/lib/firebaseMessaging");
+      const { vapidKey } = await import("@/lib/firebaseConfig");
+
+      const client = await getMessagingClient();
+      if (!client) return;
+
+      const { messaging, getToken, onMessage } = client;
+
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        console.warn("🚫 Push permission denied");
+        return;
+      }
+
+      const token = await getToken(messaging, { vapidKey });
+      console.log("📲 Push token:", token);
+
+      onMessage(messaging, (payload) => {
+        console.log("🔔 Foreground push received:", payload);
+        alert(payload?.notification?.title || "📬 New notification received");
+      });
+    } catch (err) {
+      console.error("❌ Error setting up push notifications:", err);
+    }
+  };
+
+  requestPermissionAndListen();
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker
+      .register("/firebase-messaging-sw.js")
+      .then((registration) => {
+        console.log("🛠️ Service Worker registered:", registration);
+      })
+      .catch((err) => {
+        console.error("❌ Service Worker registration failed:", err);
+      });
+  }
+}, []);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -116,7 +191,9 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const totalNotifications = unreadMessages.length + unreadMatchRequests.length + notifications.length;
 
   return (
-    <div className={`bg-gray-100 min-h-screen text-gray-900 ${hideNav ? "" : "pb-20"}`}>
+  <div className={`bg-gray-100 min-h-screen text-gray-900 ${hideNav ? "" : "pb-20"}`}>
+    <InstallPwaAndroidPrompt />
+    <InstallPwaIosPrompt />
       {!hideNav && (
         <header className="bg-white border-b p-4 mb-6 shadow-sm">
           <div className="max-w-5xl mx-auto flex justify-between items-center">
