@@ -6,6 +6,9 @@ import { db } from "@/lib/firebase";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import Image from "next/image";
 import withAuth from "@/components/withAuth";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+
 
 type Player = {
   name: string;
@@ -27,24 +30,32 @@ function PublicProfilePage() {
   });
   const [showFullBio, setShowFullBio] = useState(false);
 
-  useEffect(() => {
-    const fetchPlayerAndStats = async () => {
-      if (!id) return;
+useEffect(() => {
+  const fetchPlayerAndStats = async () => {
+    if (!id) return;
 
+    try {
       const playerRef = doc(db, "players", id as string);
       const playerSnap = await getDoc(playerRef);
-if (playerSnap.exists()) {
-  const d = playerSnap.data();
-  setPlayer({
-    name: d.name,
-    postcode: d.postcode,
-    skillLevel: d.skillLevel,
-    availability: d.availability,
-    bio: d.bio,
-    photoURL: d.photoURL,
-  });
-}
-      const matchQuery = query(collection(db, "match_history"), where("players", "array-contains", id));
+
+      if (playerSnap.exists()) {
+        const d = playerSnap.data();
+        setPlayer({
+          name: d.name,
+          postcode: d.postcode,
+          skillLevel: d.skillLevel,
+          availability: d.availability,
+          bio: d.bio,
+          photoURL: d.photoURL,
+        });
+      } else {
+        console.warn("Player not found in Firestore.");
+      }
+
+      const matchQuery = query(
+        collection(db, "match_history"),
+        where("players", "array-contains", id)
+      );
       const snapshot = await getDocs(matchQuery);
 
       let total = 0, complete = 0, wins = 0;
@@ -56,11 +67,24 @@ if (playerSnap.exists()) {
       });
 
       setMatchStats({ matches: total, completed: complete, wins });
+    } catch (error) {
+      console.error("Error loading player profile:", error);
+    } finally {
       setLoading(false);
-    };
+    }
+  };
 
-    fetchPlayerAndStats();
-  }, [id]);
+  const unsubscribe = onAuthStateChanged(auth, (user) => {
+    if (user) {
+      fetchPlayerAndStats();
+    } else {
+      console.warn("User not signed in");
+      setLoading(false);
+    }
+  });
+
+  return () => unsubscribe();
+}, [id]);
 
   if (loading) {
     return (
