@@ -9,7 +9,6 @@ import withAuth from "@/components/withAuth";
 
 type Player = {
   name: string;
-  email: string;
   postcode: string;
   skillLevel: string;
   availability: string[];
