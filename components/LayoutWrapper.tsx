@@ -20,21 +20,24 @@ import InstallPwaIosPrompt from "@/components/InstallPwaIosPrompt";
 function useSystemTheme() {
   useEffect(() => {
     if (typeof window === "undefined") return;
+
     const root = window.document.documentElement;
     const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
-    function updateTheme(e?: MediaQueryListEvent) {
+    const updateTheme = (e?: MediaQueryListEvent) => {
       if (e ? e.matches : matchMedia.matches) {
         root.classList.add("dark");
       } else {
         root.classList.remove("dark");
       }
-    }
+    };
 
-    updateTheme();
+    updateTheme(); // Initial run
     matchMedia.addEventListener("change", updateTheme);
 
-    return () => matchMedia.removeEventListener("change", updateTheme);
+    return () => {
+      matchMedia.removeEventListener("change", updateTheme);
+    };
   }, []);
 }
 // ---------------------------------------------------
