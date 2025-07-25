@@ -33,10 +33,17 @@ function PublicProfilePage() {
 
       const playerRef = doc(db, "players", id as string);
       const playerSnap = await getDoc(playerRef);
-      if (playerSnap.exists()) {
-        setPlayer(playerSnap.data() as Player);
-      }
-
+if (playerSnap.exists()) {
+  const d = playerSnap.data();
+  setPlayer({
+    name: d.name,
+    postcode: d.postcode,
+    skillLevel: d.skillLevel,
+    availability: d.availability,
+    bio: d.bio,
+    photoURL: d.photoURL,
+  });
+}
       const matchQuery = query(collection(db, "match_history"), where("players", "array-contains", id));
       const snapshot = await getDocs(matchQuery);
 
