@@ -7,6 +7,8 @@ import { getMessagingClient } from "@/lib/firebaseMessaging";
 
 export default function PushPermissionPrompt() {
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
     async function setup() {
       const messaging = await getMessagingClient();
       if (!messaging) return;

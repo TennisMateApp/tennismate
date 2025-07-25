@@ -138,30 +138,30 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       unsubPlayer();
     };
   }, []);
-useEffect(() => {
+uuseEffect(() => {
   if (typeof window === "undefined" || !("Notification" in window)) return;
 
   const requestPermissionAndListen = async () => {
     try {
-     const { getMessagingClient, getToken, onMessage, vapidKey } = await import("@/lib/firebaseMessaging");
+      const { getMessagingClient, getToken, onMessage } = await import("@/lib/firebaseMessaging");
+      const { vapidKey } = await import("@/lib/firebaseConfig");
 
-const client = await getMessagingClient();
-if (!client) return;
+      const client = await getMessagingClient();
+      if (!client) return;
 
-const permission = await Notification.requestPermission();
-if (permission !== "granted") {
-  console.warn("🚫 Push permission denied");
-  return;
-}
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        console.warn("🚫 Push permission denied");
+        return;
+      }
 
-const token = await getToken(client, { vapidKey });
-console.log("📲 Push token:", token);
+      const token = await getToken(client, { vapidKey });
+      console.log("📲 Push token:", token);
 
-onMessage(client, (payload) => {
-  console.log("🔔 Foreground push received:", payload);
-  alert(payload?.notification?.title || "📬 New notification received");
-});
-
+      onMessage(client, (payload) => {
+        console.log("🔔 Foreground push received:", payload);
+        alert(payload?.notification?.title || "📬 New notification received");
+      });
     } catch (err) {
       console.error("❌ Error setting up push notifications:", err);
     }
