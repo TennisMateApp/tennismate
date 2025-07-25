@@ -15,6 +15,7 @@ import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import InstallPwaAndroidPrompt from "@/components/InstallPwaAndroidPrompt";
 import InstallPwaIosPrompt from "@/components/InstallPwaIosPrompt";
+import PushPermissionPrompt from "@/components/PushPermissionPrompt";
 
 // ---- Add the useSystemTheme hook after imports ----
 function useSystemTheme() {
@@ -141,49 +142,6 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       unsubPlayer();
     };
   }, []);
-useEffect(() => {
-  if (typeof window === "undefined" || !("Notification" in window)) return;
-
-  const requestPermissionAndListen = async () => {
-    try {
-      const { getMessagingClient, getToken, onMessage } = await import("@/lib/firebaseMessaging");
-      const { vapidKey } = await import("@/lib/firebaseConfig");
-
-      const client = await getMessagingClient();
-      if (!client) return;
-
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        console.warn("🚫 Push permission denied");
-        return;
-      }
-
-      const token = await getToken(client, { vapidKey });
-      console.log("📲 Push token:", token);
-
-      onMessage(client, (payload) => {
-        console.log("🔔 Foreground push received:", payload);
-        alert(payload?.notification?.title || "📬 New notification received");
-      });
-    } catch (err) {
-      console.error("❌ Error setting up push notifications:", err);
-    }
-  };
-
-  requestPermissionAndListen();
-
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker
-      .register("/firebase-messaging-sw.js")
-      .then((registration) => {
-        console.log("🛠️ Service Worker registered:", registration);
-      })
-      .catch((err) => {
-        console.error("❌ Service Worker registration failed:", err);
-      });
-  }
-}, []);
-
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -196,6 +154,7 @@ useEffect(() => {
   <div className={`bg-gray-100 min-h-screen text-gray-900 ${hideNav ? "" : "pb-20"}`}>
     <InstallPwaAndroidPrompt />
     <InstallPwaIosPrompt />
+    <PushPermissionPrompt />
       {!hideNav && (
         <header className="bg-white border-b p-4 mb-6 shadow-sm">
           <div className="max-w-5xl mx-auto flex justify-between items-center">
