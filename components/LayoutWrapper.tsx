@@ -149,7 +149,8 @@ useEffect(() => {
       const client = await getMessagingClient();
       if (!client) return;
 
-      const { messaging, getToken, onMessage } = client;
+      const messaging = client;
+      const { getToken, onMessage } = await import("firebase/messaging");
 
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
@@ -182,6 +183,7 @@ useEffect(() => {
       });
   }
 }, []);
+
 
   const handleLogout = async () => {
     await signOut(auth);
