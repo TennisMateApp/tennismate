@@ -8,10 +8,10 @@ import { getMessagingClient } from "@/lib/firebaseMessaging";
 export default function PushPermissionPrompt() {
   useEffect(() => {
     async function setup() {
-      const client = await getMessagingClient();
-      if (!client) return;
+      const messaging = await getMessagingClient();
+      if (!messaging) return;
 
-      const { messaging, getToken, onMessage } = client;
+      const { getToken, onMessage } = await import("firebase/messaging");
 
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
