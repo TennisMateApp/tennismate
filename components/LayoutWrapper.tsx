@@ -23,16 +23,17 @@ function useSystemTheme() {
     if (typeof window === "undefined") return;
 
     const root = window.document.documentElement;
-    const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
     const updateTheme = (e?: MediaQueryListEvent) => {
-      if (e ? e.matches : matchMedia.matches) {
+      const isDark = e?.matches ?? window.matchMedia("(prefers-color-scheme: dark)").matches;
+      if (isDark) {
         root.classList.add("dark");
       } else {
         root.classList.remove("dark");
       }
     };
 
+    const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
     updateTheme(); // Initial run
     matchMedia.addEventListener("change", updateTheme);
 
