@@ -1,4 +1,3 @@
-// components/PushPermissionPrompt.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -7,9 +6,9 @@ import { getMessagingClient } from "@/lib/firebaseMessaging";
 
 export default function PushPermissionPrompt() {
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
     async function setup() {
+      if (typeof window === "undefined" || !("Notification" in window)) return;
+
       const messaging = await getMessagingClient();
       if (!messaging) return;
 
