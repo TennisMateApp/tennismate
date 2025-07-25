@@ -138,7 +138,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       unsubPlayer();
     };
   }, []);
-uuseEffect(() => {
+useEffect(() => {
   if (typeof window === "undefined" || !("Notification" in window)) return;
 
   const requestPermissionAndListen = async () => {
