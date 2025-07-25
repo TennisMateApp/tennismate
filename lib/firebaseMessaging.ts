@@ -3,9 +3,13 @@ import { getMessaging, getToken, onMessage, isSupported, Messaging } from "fireb
 import { initializeApp, FirebaseApp, getApps } from "firebase/app";
 import { firebaseConfig, vapidKey } from "./firebaseConfig";
 
-let messaging: Messaging | null = null;
+let messagingInstance: Messaging | null = null;
 
-export const getMessagingClient = async (): Promise<Messaging | null> => {
+export const getMessagingClient = async (): Promise<{
+  messaging: Messaging;
+  getToken: typeof getToken;
+  onMessage: typeof onMessage;
+} | null> => {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
     return null; // SSR-safe
   }
@@ -16,12 +20,16 @@ export const getMessagingClient = async (): Promise<Messaging | null> => {
     return null;
   }
 
-  if (!messaging) {
+  if (!messagingInstance) {
     const app: FirebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-    messaging = getMessaging(app);
+    messagingInstance = getMessaging(app);
   }
 
-  return messaging;
+  return {
+    messaging: messagingInstance,
+    getToken,
+    onMessage
+  };
 };
 
-export { getToken, onMessage, vapidKey };
+export { vapidKey };
