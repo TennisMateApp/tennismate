@@ -143,28 +143,25 @@ useEffect(() => {
 
   const requestPermissionAndListen = async () => {
     try {
-      const { getMessagingClient } = await import("@/lib/firebaseMessaging");
-      const { vapidKey } = await import("@/lib/firebaseConfig");
+     const { getMessagingClient, getToken, onMessage, vapidKey } = await import("@/lib/firebaseMessaging");
 
-      const client = await getMessagingClient();
-      if (!client) return;
+const client = await getMessagingClient();
+if (!client) return;
 
-      const messaging = client;
-      const { getToken, onMessage } = await import("firebase/messaging");
+const permission = await Notification.requestPermission();
+if (permission !== "granted") {
+  console.warn("🚫 Push permission denied");
+  return;
+}
 
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        console.warn("🚫 Push permission denied");
-        return;
-      }
+const token = await getToken(client, { vapidKey });
+console.log("📲 Push token:", token);
 
-      const token = await getToken(messaging, { vapidKey });
-      console.log("📲 Push token:", token);
+onMessage(client, (payload) => {
+  console.log("🔔 Foreground push received:", payload);
+  alert(payload?.notification?.title || "📬 New notification received");
+});
 
-      onMessage(messaging, (payload) => {
-        console.log("🔔 Foreground push received:", payload);
-        alert(payload?.notification?.title || "📬 New notification received");
-      });
     } catch (err) {
       console.error("❌ Error setting up push notifications:", err);
     }
