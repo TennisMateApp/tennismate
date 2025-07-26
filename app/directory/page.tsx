@@ -104,5 +104,6 @@ function DirectoryPage() {
   );
 }
 
-export default withAuth(DirectoryPage as React.ComponentType);
+const ProtectedDirectoryPage = withAuth(DirectoryPage);
+export default ProtectedDirectoryPage;
 
