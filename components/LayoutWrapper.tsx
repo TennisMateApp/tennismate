@@ -23,12 +23,11 @@ function useSystemTheme() {
     if (typeof window === "undefined") return; // SSR guard
 
     // Ensure matchMedia exists
-    const matchMedia =
-      typeof window.matchMedia === "function"
-        ? window.matchMedia("(prefers-color-scheme: dark)")
-        : null;
+if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+  return;
+}
 
-    if (!matchMedia) return;
+const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
     const root = document.documentElement;
 
