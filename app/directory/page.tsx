@@ -1,5 +1,6 @@
 "use client";
-export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic"; // ✅ Keep this
+export const fetchCache = 'force-no-store'; // ✅ Prevents caching that triggers SSR
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
