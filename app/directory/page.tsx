@@ -1,6 +1,6 @@
 "use client";
-export const dynamic = "force-dynamic"; // ✅ Keep this
-export const fetchCache = 'force-no-store'; // ✅ Prevents caching that triggers SSR
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -8,7 +8,7 @@ import { auth, db } from "@/lib/firebaseConfig";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import withAuth from "@/components/withAuth"; // ✅ Import the wrapper
+import withAuth from "@/components/withAuth";
 
 interface Player {
   id: string;
