@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebaseConfig";
@@ -11,7 +13,6 @@ import withAuth from "@/components/withAuth"; // ✅ Import the wrapper
 interface Player {
   id: string;
   name: string;
-  email: string;
   postcode: string;
   skillLevel: string;
   availability: string[];
