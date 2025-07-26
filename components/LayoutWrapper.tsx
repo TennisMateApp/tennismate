@@ -20,15 +20,20 @@ import PushPermissionPrompt from "@/components/PushPermissionPrompt";
 // ---- Add the useSystemTheme hook after imports ----
 function useSystemTheme() {
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") return; // SSR guard
+
+    // Ensure matchMedia exists
+    const matchMedia =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-color-scheme: dark)")
+        : null;
+
+    if (!matchMedia) return;
 
     const root = document.documentElement;
-    const media = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
-
-    if (!media) return;
 
     const updateTheme = (e?: MediaQueryListEvent) => {
-      const isDark = e ? e.matches : media.matches;
+      const isDark = e?.matches ?? matchMedia.matches;
       if (isDark) {
         root.classList.add("dark");
       } else {
@@ -37,13 +42,16 @@ function useSystemTheme() {
     };
 
     updateTheme();
-    media.addEventListener?.("change", updateTheme); // ✅ only add if function exists
+
+    // ✅ Use optional chaining to avoid calling undefined
+    matchMedia.addEventListener?.("change", updateTheme);
 
     return () => {
-      media.removeEventListener?.("change", updateTheme);
+      matchMedia.removeEventListener?.("change", updateTheme);
     };
   }, []);
 }
+
 // ---------------------------------------------------
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
