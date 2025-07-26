@@ -22,10 +22,13 @@ function useSystemTheme() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const root = window.document.documentElement;
+    const root = document.documentElement;
+    const media = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+
+    if (!media) return;
 
     const updateTheme = (e?: MediaQueryListEvent) => {
-      const isDark = e?.matches ?? window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const isDark = e ? e.matches : media.matches;
       if (isDark) {
         root.classList.add("dark");
       } else {
@@ -33,12 +36,11 @@ function useSystemTheme() {
       }
     };
 
-    const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
-    updateTheme(); // Initial run
-    matchMedia.addEventListener("change", updateTheme);
+    updateTheme();
+    media.addEventListener?.("change", updateTheme); // ✅ only add if function exists
 
     return () => {
-      matchMedia.removeEventListener("change", updateTheme);
+      media.removeEventListener?.("change", updateTheme);
     };
   }, []);
 }
