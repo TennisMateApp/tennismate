@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
-import { vapidKey } from "@/lib/firebaseConfig";
+import { vapidKey, auth, db } from "@/lib/firebaseConfig";
 import { getMessagingClient } from "@/lib/firebaseMessaging";
+import { doc, setDoc } from "firebase/firestore";
 
 export default function PushPermissionPrompt() {
   useEffect(() => {
@@ -43,8 +44,19 @@ export default function PushPermissionPrompt() {
 
         console.log("📲 Push token:", token);
 
-        // Optional: You could save this token to Firestore or your backend
+        // ✅ Save token to Firestore
+        const user = auth.currentUser;
+        if (user && token) {
+          const tokenRef = doc(db, "device_tokens", user.uid);
+          await setDoc(tokenRef, {
+            uid: user.uid,
+            token,
+            createdAt: new Date(),
+          });
+          console.log("✅ Token saved to Firestore");
+        }
 
+        // 🔔 Listen for foreground messages
         onMessage(messaging, (payload) => {
           console.log("🔔 Foreground push:", payload);
           alert(payload.notification?.title || "📬 New notification received");
