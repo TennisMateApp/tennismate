@@ -142,7 +142,8 @@ await updateDoc(matchRef, {
       await deleteDoc(matchRef);
 
       // 🔥 Write to completed_matches to trigger Cloud Function
-      await setDoc(doc(db, "completed_matches", matchId), {
+      const matchId = Array.isArray(params.id) ? params.id[0] : params.id;
+await setDoc(doc(db, "completed_matches", matchId), {
         matchId,
         winnerId: matchData.winnerId,
         fromUserId: matchData.fromUserId,
