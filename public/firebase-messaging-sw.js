@@ -14,7 +14,6 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// ✅ Handle background push messages
 messaging.onBackgroundMessage(function (payload) {
   console.log("🌙 Background message received:", payload);
 
@@ -24,25 +23,28 @@ messaging.onBackgroundMessage(function (payload) {
     icon: "/logo.png",
     badge: "/logo.png",
     data: {
-      url: "/directory", // Customize if needed per payload
+      // Use absolute URL pointing to your deployed Vercel domain
+      url: "https://tennismate.vercel.app/directory", // update this if needed
     },
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
-// ✅ Handle notification click (opens PWA)
 self.addEventListener("notificationclick", function (event) {
   event.notification.close();
 
-  const destination = event.notification.data?.url || "/";
+  const destination = event.notification.data?.url || "https://tennismate.vercel.app";
+
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if (client.url.includes(destination) && "focus" in client) {
+        // Focus if already open
+        if (client.url === destination && "focus" in client) {
           return client.focus();
         }
       }
+      // Otherwise, open new tab/window (PWA handles this gracefully)
       if (clients.openWindow) {
         return clients.openWindow(destination);
       }
