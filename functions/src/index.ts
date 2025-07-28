@@ -230,3 +230,72 @@ export const processCompletedMatch = onDocumentCreated(
     console.log(`✅ Processed completed match: ${matchId}`);
   }
 );
+export const sendPushNotification = onDocumentCreated(
+  "notifications/{notifId}",
+  async (event) => {
+    const notifData = event.data?.data();
+    if (!notifData) {
+      console.log("❌ Notification data missing");
+      return;
+    }
+
+    const recipientId = notifData.recipientId;
+    const tokenDoc = await db.collection("device_tokens").doc(recipientId).get();
+
+    if (!tokenDoc.exists) {
+      console.log(`❌ No device token found for user: ${recipientId}`);
+      return;
+    }
+
+    const token = tokenDoc.data()?.token;
+    if (!token) {
+      console.log(`❌ Token field missing for user: ${recipientId}`);
+      return;
+    }
+
+    const payload = {
+      notification: {
+        title: notifData.message || "🎾 TennisMate Notification",
+        body: "Tap to view",
+        click_action: "https://tennis-match.com.au", // optional override
+      },
+    };
+
+    try {
+      await admin.messaging().sendToDevice(token, payload);
+      console.log(`✅ Push notification sent to ${recipientId}`);
+    } catch (error) {
+      console.error("❌ Error sending push notification:", error);
+    }
+  }
+);
+export const notifyOnMatchRequest = onDocumentCreated("match_requests/{matchId}", async (event) => {
+  const matchData = event.data?.data();
+  if (!matchData) return;
+
+  const { toUserId, fromUserId } = matchData;
+
+  // Get the token of the recipient
+  const tokenDoc = await db.collection("device_tokens").doc(toUserId).get();
+  const token = tokenDoc.exists ? tokenDoc.data()?.token : null;
+
+  if (!token) {
+    console.log(`❌ No push token found for user ${toUserId}`);
+    return;
+  }
+
+  // Send the push notification
+  await admin.messaging().send({
+    token,
+    notification: {
+      title: "🎾 New Match Request",
+      body: "You have a new match request from another player!",
+    },
+    data: {
+      type: "match_request",
+      fromUserId,
+    },
+  });
+
+  console.log(`✅ Notification sent to ${toUserId}`);
+});
