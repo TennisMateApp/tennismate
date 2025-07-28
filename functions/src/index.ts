@@ -271,34 +271,4 @@ const payload = {
     }
   }
 );
-export const notifyOnMatchRequest = onDocumentCreated("match_requests/{matchId}", async (event) => {
-  const matchData = event.data?.data();
-  if (!matchData) return;
 
-  const { toUserId, fromUserId } = matchData;
-
-  // Get the token of the recipient
-  const tokenDoc = await db.collection("device_tokens").doc(toUserId).get();
-  const token = tokenDoc.exists ? tokenDoc.data()?.token : null;
-
-  if (!token) {
-    console.log(`❌ No push token found for user ${toUserId}`);
-    return;
-  }
-
-  // Send the push notification
-await admin.messaging().send({
-  token,
-  notification: {
-    title: "🎾 New Match Request",
-    body: "You have a new match request from another player!",
-  },
-  data: {
-    type: "match_request",
-    fromUserId,
-    url: "https://tennis-match.com.au/matches", // 📍 update this to the correct path
-  },
-});
-
-  console.log(`✅ Notification sent to ${toUserId}`);
-});
