@@ -15,15 +15,37 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 // ✅ Handle background push messages
-messaging.onBackgroundMessage(function(payload) {
+messaging.onBackgroundMessage(function (payload) {
   console.log("🌙 Background message received:", payload);
 
   const notificationTitle = payload?.notification?.title || "TennisMate";
   const notificationOptions = {
     body: payload?.notification?.body || "You have a new message!",
-    icon: "/logo.png", // optional
-    badge: "/logo.png", // optional
+    icon: "/logo.png",
+    badge: "/logo.png",
+    data: {
+      url: "/directory", // Customize if needed per payload
+    },
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+// ✅ Handle notification click (opens PWA)
+self.addEventListener("notificationclick", function (event) {
+  event.notification.close();
+
+  const destination = event.notification.data?.url || "/";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(destination) && "focus" in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(destination);
+      }
+    })
+  );
 });
