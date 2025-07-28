@@ -253,13 +253,15 @@ export const sendPushNotification = onDocumentCreated(
       return;
     }
 
-    const payload = {
-      notification: {
-        title: notifData.message || "🎾 TennisMate Notification",
-        body: "Tap to view",
-        click_action: "https://tennis-match.com.au", // optional override
-      },
-    };
+const payload = {
+  notification: {
+    title: notifData.message || "🎾 TennisMate Notification",
+    body: "Tap to view",
+  },
+  data: {
+    url: notifData.url || "https://tennis-match.com.au", // fallback to homepage
+  },
+};
 
     try {
       await admin.messaging().sendToDevice(token, payload);
@@ -285,17 +287,18 @@ export const notifyOnMatchRequest = onDocumentCreated("match_requests/{matchId}"
   }
 
   // Send the push notification
-  await admin.messaging().send({
-    token,
-    notification: {
-      title: "🎾 New Match Request",
-      body: "You have a new match request from another player!",
-    },
-    data: {
-      type: "match_request",
-      fromUserId,
-    },
-  });
+await admin.messaging().send({
+  token,
+  notification: {
+    title: "🎾 New Match Request",
+    body: "You have a new match request from another player!",
+  },
+  data: {
+    type: "match_request",
+    fromUserId,
+    url: "https://tennis-match.com.au/matches", // 📍 update this to the correct path
+  },
+});
 
   console.log(`✅ Notification sent to ${toUserId}`);
 });
