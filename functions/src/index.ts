@@ -2,6 +2,7 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 
 // ✅ Set correct region for Firestore: australia-southeast2
 setGlobalOptions({ maxInstances: 10, region: "australia-southeast2" });
@@ -165,3 +166,67 @@ export const testFirestore = onRequest({ region: "australia-southeast2" }, async
     res.status(500).send("Firestore access failed");
   }
 });
+export const processCompletedMatch = onDocumentCreated(
+  "completed_matches/{matchId}",
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) {
+      console.log("❌ No match data found in event.");
+      return;
+    }
+
+    const { winnerId, fromUserId, toUserId, matchId } = data;
+    const loserId = winnerId === fromUserId ? toUserId : fromUserId;
+
+    const winnerRef = db.collection("players").doc(winnerId);
+    const loserRef = db.collection("players").doc(loserId);
+
+    const [winnerSnap, loserSnap] = await Promise.all([
+      winnerRef.get(),
+      loserRef.get(),
+    ]);
+
+    const winnerData = winnerSnap.data() || {};
+    const loserData = loserSnap.data() || {};
+
+    // Update stats
+    await Promise.all([
+      winnerRef.update({
+        matchesPlayed: (winnerData.matchesPlayed || 0) + 1,
+        matchesWon: (winnerData.matchesWon || 0) + 1,
+      }),
+      loserRef.update({
+        matchesPlayed: (loserData.matchesPlayed || 0) + 1,
+      }),
+    ]);
+
+    // Award badges
+    const badgeUpdates = [
+      fromUserId,
+      toUserId,
+    ].map((uid) =>
+      db.collection("players").doc(uid).set(
+        {
+          badges: admin.firestore.FieldValue.arrayUnion("firstMatchComplete"),
+        },
+        { merge: true }
+      )
+    );
+
+    badgeUpdates.push(
+      db
+        .collection("players")
+        .doc(winnerId)
+        .set(
+          {
+            badges: admin.firestore.FieldValue.arrayUnion("firstWin"),
+          },
+          { merge: true }
+        )
+    );
+
+    await Promise.all(badgeUpdates);
+
+    console.log(`✅ Processed completed match: ${matchId}`);
+  }
+);

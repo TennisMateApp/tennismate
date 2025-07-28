@@ -1,28 +1,21 @@
-// lib/firebaseMessaging.ts
-import { getMessaging, getToken, onMessage, isSupported, Messaging } from "firebase/messaging";
-import { initializeApp, FirebaseApp, getApps } from "firebase/app";
-import { firebaseConfig, vapidKey } from "./firebaseConfig";
+export async function getMessagingClient() {
+  if (typeof window === "undefined") return null;
 
-let messaging: Messaging | null = null;
-
-export const getMessagingClient = async (): Promise<Messaging | null> => {
-  if (typeof window === "undefined" || typeof navigator === "undefined") {
-    return null; // SSR-safe
-  }
+  const [{ getApps }, { getMessaging, isSupported, getToken, onMessage }] = await Promise.all([
+    import("firebase/app"),
+    import("firebase/messaging"),
+  ]);
 
   const supported = await isSupported();
   if (!supported) {
-    console.warn("❌ Firebase messaging is not supported in this browser.");
+    console.warn("🚫 Messaging not supported");
     return null;
   }
 
-  if (!messaging) {
-    const app: FirebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-    messaging = getMessaging(app);
-  }
-
-  return messaging;
-};
-
-// ✅ Add these exports
-export { getToken, onMessage, vapidKey };
+  const app = getApps()[0];
+  return {
+    messaging: getMessaging(app),
+    getToken,
+    onMessage,
+  };
+}

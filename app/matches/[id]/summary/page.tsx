@@ -103,16 +103,34 @@ export default function MatchSummaryPage() {
     setRematchRequested(true);
   };
 
-  const handleComplete = async () => {
-    if (!matchId || !currentUserId || !match?.winnerId) return;
+const handleComplete = async () => {
+  if (!matchId || !currentUserId || !match?.winnerId) return;
 
-    try {
-      const matchRef = doc(db, "match_requests", matchId as string);
-      const matchSnap = await getDoc(matchRef);
-      if (!matchSnap.exists()) return;
-      const matchData = matchSnap.data();
+  try {
+    const matchRef = doc(db, "match_requests", matchId as string);
+    const matchSnap = await getDoc(matchRef);
+    if (!matchSnap.exists()) return;
+    const matchData = matchSnap.data();
 
-      // Move to history
+    const alreadyCompletedBy = matchData.completedBy || [];
+    if (alreadyCompletedBy.includes(currentUserId)) return;
+
+    const updatedCompletedBy = [...alreadyCompletedBy, currentUserId];
+
+    // Update match with current user’s completion
+await updateDoc(matchRef, {
+  status: "completed",
+  completedBy: arrayUnion(currentUserId),
+});
+
+// ✅ STEP 2: Optional secondary update for backend fields
+await updateDoc(matchRef, {
+  completed: true,
+  completedAt: serverTimestamp(),
+});
+
+    if (updatedCompletedBy.length === 2) {
+      // ✅ Both players have completed — archive and trigger backend processing
       const historyRef = doc(collection(db, "match_history"));
       await setDoc(historyRef, {
         ...matchData,
@@ -121,51 +139,32 @@ export default function MatchSummaryPage() {
         movedAt: serverTimestamp(),
       });
 
-      // Remove original request
       await deleteDoc(matchRef);
 
-      // Update player stats
-      const winnerRef = doc(db, "players", matchData.winnerId);
-      const loserId = matchData.winnerId === matchData.fromUserId ? matchData.toUserId : matchData.fromUserId;
-      const loserRef = doc(db, "players", loserId);
-      const [winnerSnap, loserSnap] = await Promise.all([
-        getDoc(winnerRef),
-        getDoc(loserRef),
-      ]);
-      const winnerData = winnerSnap.data() || {};
-      const loserData = loserSnap.data() || {};
-
-      await Promise.all([
-        updateDoc(winnerRef, {
-          matchesPlayed: (winnerData.matchesPlayed || 0) + 1,
-          matchesWon: (winnerData.matchesWon || 0) + 1,
-        }),
-        updateDoc(loserRef, {
-          matchesPlayed: (loserData.matchesPlayed || 0) + 1,
-        }),
-      ]);
-
-      // Award "First Match Complete" badge to both players
-      const users = [matchData.fromUserId, matchData.toUserId];
-      for (const uid of users) {
-        await setDoc(
-          doc(db, "players", uid),
-          { badges: arrayUnion("firstMatchComplete") },
-          { merge: true }
-        );
-        // Award First Win to the match winner
-await setDoc(
-  doc(db, "players", matchData.winnerId),
-  { badges: arrayUnion("firstWin") },
-  { merge: true }
-);
-      }
-
-      router.push(`/matches/${matchId}/feedback`);
-    } catch (error) {
-      console.error("Failed to complete match:", error);
+      // 🔥 Write to completed_matches to trigger Cloud Function
+      await setDoc(doc(db, "completed_matches", matchId), {
+        matchId,
+        winnerId: matchData.winnerId,
+        fromUserId: matchData.fromUserId,
+        toUserId: matchData.toUserId,
+        timestamp: serverTimestamp(),
+      });
     }
-  };
+
+    // ✅ Always create feedback doc (both players can access it)
+const feedbackDocId = `${matchId}_${currentUserId}`;
+await setDoc(doc(db, "match_feedback", feedbackDocId), {
+  matchId,
+  userId: currentUserId,
+  createdAt: serverTimestamp(),
+  feedback: {}
+});
+
+    router.push(`/matches/${matchId}/feedback`);
+  } catch (error) {
+    console.error("Failed to complete match:", error);
+  }
+};
 
   if (loading) return <div className="p-6">Loading summary...</div>;
 

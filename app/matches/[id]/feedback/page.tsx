@@ -43,13 +43,14 @@ export default function MatchFeedbackPage() {
 
     setSubmitting(true);
     try {
-      const feedbackRef = doc(collection(db, "match_feedback"));
-      await setDoc(feedbackRef, {
-        ...form,
-        matchId,
-        userId,
-        timestamp: serverTimestamp(),
-      });
+    const docId = `${matchId}_${userId}`;
+const feedbackRef = doc(db, "match_feedback", docId);
+await setDoc(feedbackRef, {
+  ...form,
+  matchId,
+  userId,
+  timestamp: serverTimestamp(),
+});
       router.push("/directory");
     } catch (error) {
       console.error("Error submitting feedback:", error);

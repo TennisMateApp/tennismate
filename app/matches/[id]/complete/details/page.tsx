@@ -48,33 +48,59 @@ function MatchDetailsForm() {
     return () => unsub();
   }, [matchId]);
 
-  useEffect(() => {
-    const fetchMatch = async () => {
-      const matchRef = doc(db, "match_requests", matchId as string);
-      const matchSnap = await getDoc(matchRef);
-      if (matchSnap.exists()) {
-        const match = matchSnap.data();
-        const playerARef = doc(db, "players", match.fromUserId);
-        const playerBRef = doc(db, "players", match.toUserId);
-        const [aSnap, bSnap] = await Promise.all([getDoc(playerARef), getDoc(playerBRef)]);
-        setPlayerA({ id: match.fromUserId, ...aSnap.data() });
-        setPlayerB({ id: match.toUserId, ...bSnap.data() });
+// 1. Fetch match and set players
+useEffect(() => {
+  const fetchMatch = async () => {
+    const matchRef = doc(db, "match_requests", matchId as string);
+    const matchSnap = await getDoc(matchRef);
+    if (matchSnap.exists()) {
+      const match = matchSnap.data();
+      const playerARef = doc(db, "players", match.fromUserId);
+      const playerBRef = doc(db, "players", match.toUserId);
+      const [aSnap, bSnap] = await Promise.all([getDoc(playerARef), getDoc(playerBRef)]);
+      setPlayerA({ id: match.fromUserId, ...aSnap.data() });
+      setPlayerB({ id: match.toUserId, ...bSnap.data() });
+    }
+  };
+  fetchMatch();
+}, [matchId]);
+
+// 2. Initialize match_scores if it doesn't exist
+useEffect(() => {
+  if (playerA && playerB) {
+    const initMatchScore = async () => {
+      const matchScoreRef = doc(db, "match_scores", matchId as string);
+      const scoreSnap = await getDoc(matchScoreRef);
+      if (!scoreSnap.exists()) {
+        await setDoc(matchScoreRef, {
+          players: [playerA.id, playerB.id],
+          sets: Array(6).fill({ A: 0, B: 0 }),
+          points: { A: 0, B: 0 },
+          tieBreakerPoints: { A: 0, B: 0 },
+          currentSetIndex: 0,
+          tieBreaker: false,
+          createdAt: serverTimestamp(),
+        });
       }
     };
-    fetchMatch();
-  }, [matchId]);
+    initMatchScore();
+  }
+}, [playerA, playerB, matchId]);
 
-  const updateFirestoreState = async (updatedFields: any) => {
-    const matchRef = doc(db, "match_scores", matchId as string);
-    await setDoc(
-      matchRef,
-      {
-        ...updatedFields,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-  };
+const updateFirestoreState = async (updatedFields: any) => {
+  if (!playerA || !playerB) return;
+
+  const matchRef = doc(db, "match_scores", matchId as string);
+  await setDoc(
+    matchRef,
+    {
+      players: [playerA.id, playerB.id], // ✅ Include players for security rule
+      ...updatedFields,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+};
 
   const handleWinGame = async (winner: "A" | "B") => {
     const updatedSets = [...sets];

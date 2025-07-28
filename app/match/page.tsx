@@ -141,16 +141,17 @@ export default function MatchPage() {
     if (!myProfile || !user) return;
 
     try {
-      await addDoc(collection(db, "match_requests"), {
-        fromUserId: user.uid,
-        fromName: myProfile.name,
-        fromEmail: myProfile.email,
-        toUserId: match.id,
-        toName: match.name,
-        message: `Hey ${match.name}, I’d love to play sometime soon!`,
-        timestamp: serverTimestamp(),
-        status: "unread"
-      });
+await addDoc(collection(db, "match_requests"), {
+  fromUserId: user.uid,
+  fromName: myProfile.name,
+  fromEmail: myProfile.email,
+  toUserId: match.id,
+  toName: match.name,
+  message: `Hey ${match.name}, I’d love to play sometime soon!`,
+  timestamp: serverTimestamp(),
+  status: "unread",
+  players: [user.uid, match.id], // ✅ Required for Firestore rules
+});
 
       setSentRequests((prev) => new Set(prev).add(match.id));
       alert(`✅ Request sent to ${match.name}`);

@@ -15,7 +15,9 @@ import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import InstallPwaAndroidPrompt from "@/components/InstallPwaAndroidPrompt";
 import InstallPwaIosPrompt from "@/components/InstallPwaIosPrompt";
-import PushPermissionPrompt from "@/components/PushPermissionPrompt";
+import dynamic from "next/dynamic";
+
+const PushClientOnly = dynamic(() => import("./PushClientOnly"), { ssr: false });
 
 // ---- Add the useSystemTheme hook after imports ----
 function useSystemTheme() {
@@ -164,7 +166,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   <div className={`bg-gray-100 min-h-screen text-gray-900 ${hideNav ? "" : "pb-20"}`}>
     <InstallPwaAndroidPrompt />
     <InstallPwaIosPrompt />
-    <PushPermissionPrompt />
+    <PushClientOnly />
       {!hideNav && (
         <header className="bg-white border-b p-4 mb-6 shadow-sm">
           <div className="max-w-5xl mx-auto flex justify-between items-center">
