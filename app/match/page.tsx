@@ -141,7 +141,7 @@ export default function MatchPage() {
     if (!myProfile || !user) return;
 
     try {
-await addDoc(collection(db, "match_requests"), {
+const matchRef = await addDoc(collection(db, "match_requests"), {
   fromUserId: user.uid,
   fromName: myProfile.name,
   fromEmail: myProfile.email,
@@ -150,7 +150,17 @@ await addDoc(collection(db, "match_requests"), {
   message: `Hey ${match.name}, I’d love to play sometime soon!`,
   timestamp: serverTimestamp(),
   status: "unread",
-  players: [user.uid, match.id], // ✅ Required for Firestore rules
+  players: [user.uid, match.id],
+});
+
+// ✅ Also create a notification for push
+await addDoc(collection(db, "notifications"), {
+  recipientId: match.id,
+  matchId: matchRef.id,
+  message: `${myProfile.name} has challenged you to a match!`,
+  url: "/matches", // or `/matches/${matchRef.id}` if you support direct linking
+  timestamp: serverTimestamp(),
+  read: false,
 });
 
       setSentRequests((prev) => new Set(prev).add(match.id));
