@@ -141,25 +141,13 @@ export default function MatchPage() {
     if (!myProfile || !user) return;
 
     try {
-const matchRef = await addDoc(collection(db, "match_requests"), {
-  fromUserId: user.uid,
-  fromName: myProfile.name,
-  fromEmail: myProfile.email,
-  toUserId: match.id,
-  toName: match.name,
-  message: `Hey ${match.name}, I’d love to play sometime soon!`,
-  timestamp: serverTimestamp(),
-  status: "unread",
-  players: [user.uid, match.id],
-});
-
-// ✅ Also create a notification for push
 await addDoc(collection(db, "notifications"), {
   recipientId: match.id,
   matchId: matchRef.id,
   title: "New Match Request 🎾",
-  body: `${myProfile.name} has challenged you to a match!`, // 🔁 was `message` before
-  url: `/matches/${matchRef.id}`, // More specific navigation
+  message: `${myProfile.name} has challenged you to a match!`, // ✅ add this field
+  body: "Tap to view", // or remove entirely if unused
+  url: `/matches/${matchRef.id}`,
   timestamp: serverTimestamp(),
   read: false,
 });

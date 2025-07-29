@@ -18,11 +18,13 @@ import { Bell } from "lucide-react";
 type Notification = {
   id: string;
   read: boolean;
-  message: string;
+  title: string;
+  body: string;
   timestamp: any;
-  type: string;
+  type?: string;
   matchId?: string;
 };
+
 
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -96,7 +98,10 @@ export default function NotificationBell() {
                   className="p-3 hover:bg-gray-100 cursor-pointer"
                   onClick={() => handleNotificationClick(notif)}
                 >
-                  {notif.message}
+                  <div>
+  <p className="font-semibold text-gray-800">{notif.title}</p>
+  <p className="text-gray-600 text-sm">{notif.body}</p>
+</div>
                 </li>
               ))}
             </ul>
