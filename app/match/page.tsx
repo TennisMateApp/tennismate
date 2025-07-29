@@ -157,8 +157,9 @@ const matchRef = await addDoc(collection(db, "match_requests"), {
 await addDoc(collection(db, "notifications"), {
   recipientId: match.id,
   matchId: matchRef.id,
-  message: `${myProfile.name} has challenged you to a match!`,
-  url: "/matches", // or `/matches/${matchRef.id}` if you support direct linking
+  title: "New Match Request 🎾",
+  body: `${myProfile.name} has challenged you to a match!`, // 🔁 was `message` before
+  url: `/matches/${matchRef.id}`, // More specific navigation
   timestamp: serverTimestamp(),
   read: false,
 });
