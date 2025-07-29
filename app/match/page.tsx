@@ -137,41 +137,54 @@ export default function MatchPage() {
     return () => unsubscribeAuth();
   }, [router]);
 
-  const handleMatchRequest = async (match: Player) => {
-    if (!myProfile || !user) return;
+const [isSubmitting, setIsSubmitting] = useState(false);
 
-    try {
-const matchRef = await addDoc(collection(db, "match_requests"), {
-  fromUserId: user.uid,
-  toUserId: match.id,
-  fromName: myProfile.name,
-  fromEmail: myProfile.email,
-  toName: match.name,
-  message: `Hey ${match.name}, I’d love to play sometime soon!`,
-  status: "unread",
-  timestamp: serverTimestamp(),
-});
+const handleMatchRequest = async (match: Player) => {
+  if (!myProfile || !user || isSubmitting) return;
 
+  setIsSubmitting(true);
+  try {
+    const matchRef = await addDoc(collection(db, "match_requests"), {
+      fromUserId: user.uid,
+      toUserId: match.id,
+      fromName: myProfile.name,
+      fromEmail: myProfile.email,
+      toName: match.name,
+      message: `Hey ${match.name}, I’d love to play sometime soon!`,
+      status: "unread",
+      timestamp: serverTimestamp(),
+    });
 
-// ✅ Now you can use matchRef.id
-await addDoc(collection(db, "notifications"), {
-  recipientId: match.id,
-  matchId: matchRef.id,
-  title: "New Match Request 🎾",
-  body: `${myProfile.name} has challenged you to a match!`,
-  url: `/matches/${matchRef.id}`,
-  timestamp: serverTimestamp(),
-  read: false,
-});
+    const notifQuery = query(
+      collection(db, "notifications"),
+      where("matchId", "==", matchRef.id),
+      where("recipientId", "==", match.id)
+    );
+    const existingNotifs = await getDocs(notifQuery);
 
-
-      setSentRequests((prev) => new Set(prev).add(match.id));
-      alert(`✅ Request sent to ${match.name}`);
-    } catch (err) {
-      console.error("Failed to send match request:", err);
-      alert("❌ Could not send request. Try again.");
+    if (existingNotifs.empty) {
+      await addDoc(collection(db, "notifications"), {
+        recipientId: match.id,
+        matchId: matchRef.id,
+        title: "New Match Request 🎾",
+        body: `${myProfile.name} has challenged you to a match!`,
+        url: `/matches/${matchRef.id}`,
+        timestamp: serverTimestamp(),
+        read: false,
+      });
+    } else {
+      console.log("⚠️ Notification already exists, skipping duplicate.");
     }
-  };
+
+    setSentRequests((prev) => new Set(prev).add(match.id));
+    alert(`✅ Request sent to ${match.name}`);
+  } catch (err) {
+    console.error("Failed to send match request:", err);
+    alert("❌ Could not send request. Try again.");
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   // Sort matches based on user choice
   const sortedMatches = useMemo(() => {
