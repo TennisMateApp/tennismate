@@ -255,11 +255,11 @@ export const sendPushNotification = onDocumentCreated(
 
 const payload = {
   notification: {
-    title: notifData.message || "🎾 TennisMate Notification",
-    body: "Tap to view",
+    title: notifData.title || "🎾 TennisMate Notification",
+    body: notifData.body || "Tap to view",
   },
   data: {
-    url: notifData.url || "https://tennis-match.com.au", // fallback to homepage
+    url: notifData.url || "https://tennis-match.com.au",
   },
 };
 
