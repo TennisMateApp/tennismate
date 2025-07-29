@@ -144,9 +144,14 @@ export default function MatchPage() {
 const matchRef = await addDoc(collection(db, "match_requests"), {
   fromUserId: user.uid,
   toUserId: match.id,
-  status: "pending",
+  fromName: myProfile.name,
+  fromEmail: myProfile.email,
+  toName: match.name,
+  message: `Hey ${match.name}, I’d love to play sometime soon!`,
+  status: "unread",
   timestamp: serverTimestamp(),
 });
+
 
 // ✅ Now you can use matchRef.id
 await addDoc(collection(db, "notifications"), {
