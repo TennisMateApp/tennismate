@@ -57,10 +57,7 @@ export default function PushPermissionPrompt() {
         }
 
         // 🔔 Listen for foreground messages
-        onMessage(messaging, (payload) => {
-          console.log("🔔 Foreground push:", payload);
-          alert(payload.notification?.title || "📬 New notification received");
-        });
+      
       } catch (err) {
         console.error("❌ Push notification setup failed:", err);
       }
