@@ -141,16 +141,24 @@ export default function MatchPage() {
     if (!myProfile || !user) return;
 
     try {
+const matchRef = await addDoc(collection(db, "match_requests"), {
+  fromUserId: user.uid,
+  toUserId: match.id,
+  status: "pending",
+  timestamp: serverTimestamp(),
+});
+
+// ✅ Now you can use matchRef.id
 await addDoc(collection(db, "notifications"), {
   recipientId: match.id,
   matchId: matchRef.id,
   title: "New Match Request 🎾",
-  message: `${myProfile.name} has challenged you to a match!`, // ✅ add this field
-  body: "Tap to view", // or remove entirely if unused
+  body: `${myProfile.name} has challenged you to a match!`,
   url: `/matches/${matchRef.id}`,
   timestamp: serverTimestamp(),
   read: false,
 });
+
 
       setSentRequests((prev) => new Set(prev).add(match.id));
       alert(`✅ Request sent to ${match.name}`);
