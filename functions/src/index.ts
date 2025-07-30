@@ -255,20 +255,26 @@ export const sendPushNotification = onDocumentCreated(
 
 const payload = {
   notification: {
-    title: notifData.title || "🎾 TennisMate Notification",
-    body: notifData.body || "Tap to view",
+    title: notifData.message || "🎾 TennisMate Notification",
+    body: "Tap to view",
   },
   data: {
-    url: notifData.url || "https://tennis-match.com.au",
+    url: notifData.url || "https://tennis-match.com.au", // fallback to homepage
   },
 };
 
     try {
-      await admin.messaging().sendToDevice(token, payload);
-      console.log(`✅ Push notification sent to ${recipientId}`);
-    } catch (error) {
-      console.error("❌ Error sending push notification:", error);
-    }
-  }
-);
+await admin.messaging().send({
+  token,
+  notification: {
+    title: "🎾 New Match Request",
+    body: "You have a new match request from another player!",
+  },
+  data: {
+    type: "match_request",
+    fromUserId,
+    url: "https://tennis-match.com.au/matches", // 📍 update this to the correct path
+  },
+});
+
 
