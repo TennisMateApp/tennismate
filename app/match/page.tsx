@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 interface Player {
   id: string;
@@ -155,28 +156,15 @@ const handleMatchRequest = async (match: Player) => {
       timestamp: serverTimestamp(),
     });
 
-    const notifQuery = query(
-      collection(db, "notifications"),
-      where("matchId", "==", matchRef.id),
-      where("recipientId", "==", match.id)
-    );
-    const existingNotifs = await getDocs(notifQuery);
+    // ✅ Call the backend function to create the notification
+    const functions = getFunctions();
+    const sendMatchNotification = httpsCallable(functions, "sendMatchRequestNotification");
 
-    if (existingNotifs.empty) {
-     await addDoc(collection(db, "notifications"), {
-  recipientId: match.id,
-  matchId: matchRef.id,
-  fromUserId: user.uid, // ✅ required by backend
-  type: "match_request", // ✅ helps future filtering
-  message: `${myProfile.name} has challenged you to a match!`, // ✅ becomes notification title
-  url: `/matches/${matchRef.id}`, // ✅ required for navigation
-  timestamp: serverTimestamp(),
-  read: false,
-});
-
-    } else {
-      console.log("⚠️ Notification already exists, skipping duplicate.");
-    }
+    await sendMatchNotification({
+      recipientId: match.id,
+      matchId: matchRef.id,
+      fromUserId: user.uid,
+    });
 
     setSentRequests((prev) => new Set(prev).add(match.id));
     alert(`✅ Request sent to ${match.name}`);
