@@ -145,6 +145,7 @@ const handleMatchRequest = async (match: Player) => {
 
   setIsSubmitting(true);
   try {
+    // Step 1: Create the match request
     const matchRef = await addDoc(collection(db, "match_requests"), {
       fromUserId: user.uid,
       toUserId: match.id,
@@ -156,20 +157,22 @@ const handleMatchRequest = async (match: Player) => {
       timestamp: serverTimestamp(),
     });
 
-    // ✅ Call the backend function to create the notification
+    // Step 2: Trigger notification via Firebase Callable Function
     const functions = getFunctions();
     const sendMatchNotification = httpsCallable(functions, "sendMatchRequestNotification");
 
-    await sendMatchNotification({
+    const result = await sendMatchNotification({
       recipientId: match.id,
       matchId: matchRef.id,
       fromUserId: user.uid,
     });
 
+    console.log("✅ Callable success:", result);
+
     setSentRequests((prev) => new Set(prev).add(match.id));
     alert(`✅ Request sent to ${match.name}`);
-  } catch (err) {
-    console.error("Failed to send match request:", err);
+  } catch (error: any) {
+    console.error("❌ Callable error:", error.message || error);
     alert("❌ Could not send request. Try again.");
   } finally {
     setIsSubmitting(false);
