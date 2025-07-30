@@ -15,7 +15,6 @@ import {
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getFunctions, httpsCallable } from "firebase/functions";
 
 interface Player {
   id: string;
@@ -145,7 +144,6 @@ const handleMatchRequest = async (match: Player) => {
 
   setIsSubmitting(true);
   try {
-    // Step 1: Create the match request
     const matchRef = await addDoc(collection(db, "match_requests"), {
       fromUserId: user.uid,
       toUserId: match.id,
@@ -157,22 +155,33 @@ const handleMatchRequest = async (match: Player) => {
       timestamp: serverTimestamp(),
     });
 
-    // Step 2: Trigger notification via Firebase Callable Function
-    const functions = getFunctions();
-    const sendMatchNotification = httpsCallable(functions, "sendMatchRequestNotification");
+    const notifQuery = query(
+      collection(db, "notifications"),
+      where("matchId", "==", matchRef.id),
+      where("recipientId", "==", match.id)
+    );
+    const existingNotifs = await getDocs(notifQuery);
 
-    const result = await sendMatchNotification({
-      recipientId: match.id,
-      matchId: matchRef.id,
-      fromUserId: user.uid,
-    });
+    if (existingNotifs.empty) {
+     await addDoc(collection(db, "notifications"), {
+  recipientId: match.id,
+  matchId: matchRef.id,
+  fromUserId: user.uid, // ✅ required by backend
+  type: "match_request", // ✅ helps future filtering
+  message: `${myProfile.name} has challenged you to a match!`, // ✅ becomes notification title
+  url: `/matches/${matchRef.id}`, // ✅ required for navigation
+  timestamp: serverTimestamp(),
+  read: false,
+});
 
-    console.log("✅ Callable success:", result);
+    } else {
+      console.log("⚠️ Notification already exists, skipping duplicate.");
+    }
 
     setSentRequests((prev) => new Set(prev).add(match.id));
     alert(`✅ Request sent to ${match.name}`);
-  } catch (error: any) {
-    console.error("❌ Callable error:", error.message || error);
+  } catch (err) {
+    console.error("Failed to send match request:", err);
     alert("❌ Could not send request. Try again.");
   } finally {
     setIsSubmitting(false);
