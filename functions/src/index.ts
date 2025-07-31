@@ -403,7 +403,7 @@ export const notifyMatchAccepted = onDocumentUpdated(
     if (!before || !after) return;
     if (before.status === "accepted" || after.status !== "accepted") return;
 
-    const { fromUserId, toUserId } = after;
+    const { fromUserId } = after;
 
     // Get FCM token of sender
     const tokenSnap = await db
