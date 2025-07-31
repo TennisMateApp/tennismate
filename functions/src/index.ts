@@ -299,9 +299,16 @@ export const notifyOnNewMessage = onDocumentCreated(
     if (!recipientId || !text || read === true) return;
 
     // ✅ Get token from device_tokens
-    const tokenSnap = await db.collection("device_tokens").doc(recipientId).get();
-    const fcmToken = tokenSnap.exists ? tokenSnap.get("token") : null;
+  const tokenQuery = await db
+  .collection("device_tokens")
+  .where("uid", "==", recipientId)
+  .limit(1)
+  .get();
 
+  
+
+const fcmToken = tokenQuery.empty ? null : tokenQuery.docs[0].get("token");
+console.log(`📲 Retrieved token: ${fcmToken}`);
     if (!fcmToken) {
       console.log(`❌ No FCM token found for ${recipientId}`);
       return;
@@ -317,25 +324,29 @@ export const notifyOnNewMessage = onDocumentCreated(
 
     const senderDoc = await db.collection("players").doc(senderId).get();
     const senderName = senderDoc.get("name") || "A player";
-    const senderAvatar = senderDoc.get("photoURL") || "";
 
-    await admin.messaging().send({
-      token: fcmToken,
-      notification: {
-        title: `New message from ${senderName}`,
-        body: text.length > 60 ? text.slice(0, 60) + "…" : text,
-        imageUrl: senderAvatar,
-      },
-      data: {
-        type: "new_message",
-        conversationId,
-        fromUserId: senderId,
-      },
-    });
+try {
+  await admin.messaging().send({
+    token: fcmToken,
+    data: {
+      title: `New message from ${senderName}`,
+      body: text.length > 60 ? text.slice(0, 60) + "…" : text,
+      url: "https://tennismate.vercel.app/messages",
+      type: "new_message",
+      conversationId,
+      fromUserId: senderId,
+    },
+  });
 
-    console.log(`✅ Push sent to ${recipientId}`);
+  console.log(`✅ Push sent to ${recipientId}`);
+} catch (error) {
+  console.error("❌ Failed to send push notification:", error);
+}
+
   }
 );
+
+
 export const sendMatchRequestNotification = onDocumentCreated(
   "match_requests/{matchId}",
   async (event) => {
@@ -345,8 +356,13 @@ export const sendMatchRequestNotification = onDocumentCreated(
     const { toUserId, fromUserId } = data;
 
     // Get recipient's FCM token
-    const tokenSnap = await db.collection("device_tokens").doc(toUserId).get();
-const fcmToken = tokenSnap.exists ? tokenSnap.get("token") : null;
+    const tokenSnap = await db
+      .collection("device_tokens")
+      .where("uid", "==", toUserId)
+      .limit(1)
+      .get();
+
+    const fcmToken = tokenSnap.empty ? null : tokenSnap.docs[0].get("token");
 
     if (!fcmToken) {
       console.log(`❌ No FCM token found for user ${toUserId}`);
@@ -357,22 +373,27 @@ const fcmToken = tokenSnap.exists ? tokenSnap.get("token") : null;
     const senderDoc = await db.collection("players").doc(fromUserId).get();
     const senderName = senderDoc.exists ? senderDoc.get("name") : "A player";
 
-    // Send push notification
-    await admin.messaging().send({
-      token: fcmToken,
-      notification: {
-        title: "🎾 New Match Request",
-        body: `${senderName} sent you a match request!`,
-      },
-      data: {
-        type: "match_request",
-        fromUserId,
-      },
-    });
+    try {
+      // Send push notification
+      await admin.messaging().send({
+        token: fcmToken,
+        data: {
+          title: "New match request!",
+          body: `${senderName} has challenged you to a match.`,
+          url: "https://tennismate.vercel.app/matches",
+          type: "match_request",
+          matchId: event.params.matchId,
+          fromUserId,
+        },
+      });
 
-    console.log(`✅ Match request notification sent to ${toUserId}`);
+      console.log(`✅ Match request notification sent to ${toUserId}`);
+    } catch (error) {
+      console.error("❌ Failed to send match request push notification:", error);
+    }
   }
 );
+
 
 
 

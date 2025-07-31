@@ -163,17 +163,6 @@ const handleMatchRequest = async (match: Player) => {
     const existingNotifs = await getDocs(notifQuery);
 
     if (existingNotifs.empty) {
-     await addDoc(collection(db, "notifications"), {
-  recipientId: match.id,
-  matchId: matchRef.id,
-  fromUserId: user.uid, // ✅ required by backend
-  type: "match_request", // ✅ helps future filtering
-  message: `${myProfile.name} has challenged you to a match!`, // ✅ becomes notification title
-  url: `/matches/${matchRef.id}`, // ✅ required for navigation
-  timestamp: serverTimestamp(),
-  read: false,
-});
-
     } else {
       console.log("⚠️ Notification already exists, skipping duplicate.");
     }
