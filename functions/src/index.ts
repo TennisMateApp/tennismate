@@ -257,7 +257,7 @@ export const sendPushNotification = onDocumentCreated(
     const payload = {
       notification: {
         title: notifData.message || "🎾 TennisMate Notification",
-        body: "Tap to view",
+        body: "You have a new notification",
       },
       data: {
         type: notifData.type || "general",
