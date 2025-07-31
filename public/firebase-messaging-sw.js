@@ -19,13 +19,13 @@ messaging.onBackgroundMessage(function (payload) {
 
   const title = payload?.notification?.title || "🎾 TennisMate";
   const body = payload?.notification?.body || "You have a new message!";
-  const url = payload?.data?.url || "https://tennismate.vercel.app";
-  const avatar = payload?.data?.senderAvatar || "/logo.png";
+  const url = payload?.data?.url || "https://tennismate.vercel.app/messages";
+  const fallbackIcon = "/logo.png";
 
   const notificationOptions = {
     body,
-    icon: avatar,
-    badge: avatar,
+    icon: fallbackIcon,
+    badge: fallbackIcon,
     data: { url },
   };
 
