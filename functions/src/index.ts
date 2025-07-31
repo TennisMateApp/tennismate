@@ -291,33 +291,32 @@ export const notifyOnNewMessage = onDocumentCreated(
 
     if (!message) return;
 
-  const senderId = message.senderId as string;
-const recipientId = message.recipientId as string;
-const text = message.text as string;
-const read = message.read as boolean;
-
+    const senderId = message.senderId as string;
+    const recipientId = message.recipientId as string;
+    const text = message.text as string;
+    const read = message.read as boolean;
 
     if (!recipientId || !text || read === true) return;
 
-    const recipientDoc = await db.collection("users").doc(recipientId).get();
-    const fcmToken =
-      recipientDoc.get("fcmToken") || null;
-
-    const activeConversationId =
-      recipientDoc.get("activeConversationId") || null;
+    // ✅ Get token from device_tokens
+    const tokenSnap = await db.collection("device_tokens").doc(recipientId).get();
+    const fcmToken = tokenSnap.exists ? tokenSnap.get("token") : null;
 
     if (!fcmToken) {
       console.log(`❌ No FCM token found for ${recipientId}`);
       return;
     }
 
+    const userSnap = await db.collection("users").doc(recipientId).get();
+    const activeConversationId = userSnap.get("activeConversationId");
+
     if (activeConversationId === conversationId) {
-      console.log(`👀 User ${recipientId} is already viewing conversation ${conversationId}, skipping push.`);
+      console.log(`👀 User is viewing this conversation. No push sent.`);
       return;
     }
 
     const senderDoc = await db.collection("players").doc(senderId).get();
-    const senderName = senderDoc.get("name") || "TennisMate";
+    const senderName = senderDoc.get("name") || "A player";
     const senderAvatar = senderDoc.get("photoURL") || "";
 
     await admin.messaging().send({
@@ -328,12 +327,13 @@ const read = message.read as boolean;
         imageUrl: senderAvatar,
       },
       data: {
-        conversationId,
         type: "new_message",
+        conversationId,
+        fromUserId: senderId,
       },
     });
 
-    console.log(`✅ Push sent to ${recipientId} for conversation ${conversationId}`);
+    console.log(`✅ Push sent to ${recipientId}`);
   }
 );
 export const sendMatchRequestNotification = onDocumentCreated(
@@ -345,8 +345,8 @@ export const sendMatchRequestNotification = onDocumentCreated(
     const { toUserId, fromUserId } = data;
 
     // Get recipient's FCM token
-    const recipientDoc = await db.collection("users").doc(toUserId).get();
-    const fcmToken = recipientDoc.get("fcmToken");
+    const tokenSnap = await db.collection("device_tokens").doc(toUserId).get();
+const fcmToken = tokenSnap.exists ? tokenSnap.get("token") : null;
 
     if (!fcmToken) {
       console.log(`❌ No FCM token found for user ${toUserId}`);

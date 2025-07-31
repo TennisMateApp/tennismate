@@ -17,18 +17,19 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage(function (payload) {
   console.log("🌙 Background message received:", payload);
 
-  const notificationTitle = payload?.notification?.title || "TennisMate";
+  const title = payload?.notification?.title || "🎾 TennisMate";
+  const body = payload?.notification?.body || "You have a new message!";
+  const url = payload?.data?.url || "https://tennismate.vercel.app";
+  const avatar = payload?.data?.senderAvatar || "/logo.png";
+
   const notificationOptions = {
-    body: payload?.notification?.body || "You have a new message!",
-    icon: "/logo.png",
-    badge: "/logo.png",
-    data: {
-      // Use absolute URL pointing to your deployed Vercel domain
-      url: "https://tennismate.vercel.app/directory", // update this if needed
-    },
+    body,
+    icon: avatar,
+    badge: avatar,
+    data: { url },
   };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+  self.registration.showNotification(title, notificationOptions);
 });
 
 self.addEventListener("notificationclick", function (event) {
@@ -39,12 +40,10 @@ self.addEventListener("notificationclick", function (event) {
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        // Focus if already open
         if (client.url === destination && "focus" in client) {
           return client.focus();
         }
       }
-      // Otherwise, open new tab/window (PWA handles this gracefully)
       if (clients.openWindow) {
         return clients.openWindow(destination);
       }
