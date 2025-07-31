@@ -17,9 +17,10 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage(function (payload) {
   console.log("🌙 Background message received:", payload);
 
-  const title = payload?.notification?.title || "🎾 TennisMate";
-  const body = payload?.notification?.body || "You have a new message!";
-  const url = payload?.data?.url || "https://tennismate.vercel.app/messages";
+  // ✅ Only use `payload.data`, NOT `payload.notification`
+  const title = payload.data?.title || "🎾 TennisMate";
+  const body = payload.data?.body || "You have a new message!";
+  const url = payload.data?.url || "https://tennismate.vercel.app/messages";
   const fallbackIcon = "/logo.png";
 
   const notificationOptions = {
