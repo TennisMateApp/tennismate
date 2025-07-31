@@ -116,24 +116,6 @@ function MatchesPage() {
         players: [fromUserId, toUserId],
       });
 
-// Notify the sender of the match request
-const playerDoc = await getDoc(doc(db, "players", toUserId));
-const senderDoc = await getDoc(doc(db, "players", fromUserId));
-const recipientName = playerDoc.data()?.name || "A player";
-const senderExists = senderDoc.exists();
-
-if (senderExists) {
-  await addDoc(collection(db, "notifications"), {
-    recipientId: fromUserId,
-    matchId,
-    message: `${recipientName} accepted your match request!`,
-    timestamp: serverTimestamp(),
-    read: false,
-  });
-} else {
-  console.error("❌ Could not send notification — sender player record missing.");
-}
-
       // Award first match badge
       await setDoc(
         doc(db, "players", toUserId),
