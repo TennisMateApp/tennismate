@@ -393,6 +393,49 @@ export const sendMatchRequestNotification = onDocumentCreated(
     }
   }
 );
+export const notifyMatchAccepted = onDocumentUpdated(
+  "match_requests/{matchId}",
+  async (event) => {
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    const matchId = event.params.matchId;
+
+    if (!before || !after) return;
+    if (before.status === "accepted" || after.status !== "accepted") return;
+
+    const { fromUserId, toUserId } = after;
+
+    // Get FCM token of sender
+    const tokenSnap = await db
+      .collection("device_tokens")
+      .where("uid", "==", fromUserId)
+      .limit(1)
+      .get();
+
+    const fcmToken = tokenSnap.empty ? null : tokenSnap.docs[0].get("token");
+    if (!fcmToken) {
+      console.log(`❌ No FCM token for match accepted sender: ${fromUserId}`);
+      return;
+    }
+
+    // Send push
+    try {
+      await admin.messaging().send({
+        token: fcmToken,
+        data: {
+          title: "🎾 TennisMate",
+          body: "Your match request has been accepted!",
+          type: "match_accepted",
+          matchId,
+          url: "https://tennismate.vercel.app/matches",
+        },
+      });
+      console.log(`✅ Sent match accepted push to ${fromUserId}`);
+    } catch (error) {
+      console.error("❌ Error sending match accepted push:", error);
+    }
+  }
+);
 
 
 
