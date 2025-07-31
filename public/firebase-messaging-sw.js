@@ -30,9 +30,6 @@ messaging.onBackgroundMessage(function (payload) {
     data: { url },
   };
 
-  self.registration.showNotification(title, notificationOptions);
-});
-
 self.addEventListener("notificationclick", function (event) {
   event.notification.close();
 
@@ -40,8 +37,9 @@ self.addEventListener("notificationclick", function (event) {
 
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      // 🔁 Always open a new tab if destination not matched
       for (const client of clientList) {
-        if (client.url === destination && "focus" in client) {
+        if (client.url.includes(destination) && "focus" in client) {
           return client.focus();
         }
       }
