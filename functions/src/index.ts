@@ -4,6 +4,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 
+
 // ✅ Set correct region for Firestore: australia-southeast2
 setGlobalOptions({ maxInstances: 10, region: "australia-southeast2" });
 
@@ -253,28 +254,129 @@ export const sendPushNotification = onDocumentCreated(
       return;
     }
 
-const payload = {
-  notification: {
-    title: notifData.message || "🎾 TennisMate Notification",
-    body: "Tap to view",
-  },
-  data: {
-    url: notifData.url || "https://tennis-match.com.au", // fallback to homepage
-  },
-};
+    const payload = {
+      notification: {
+        title: notifData.message || "🎾 TennisMate Notification",
+        body: "Tap to view",
+      },
+      data: {
+        type: notifData.type || "general",
+        fromUserId: notifData.fromUserId || "",
+        url: notifData.url || "https://tennis-match.com.au",
+      },
+    };
 
     try {
-await admin.messaging().send({
-  token,
-  notification: {
-    title: "🎾 New Match Request",
-    body: "You have a new match request from another player!",
-  },
-  data: {
-    type: "match_request",
-    fromUserId,
-    url: "https://tennis-match.com.au/matches", // 📍 update this to the correct path
-  },
-});
+      console.log("📲 Sending push to token:", token);
+      await admin.messaging().send({ token, ...payload });
+      console.log(`✅ Notification sent to ${recipientId}`);
+    } catch (error: any) {
+      console.error("❌ Failed to send push notification:", error);
+
+      if (
+        error.code === "messaging/invalid-registration-token" ||
+        error.code === "messaging/registration-token-not-registered"
+      ) {
+        await db.collection("device_tokens").doc(recipientId).delete();
+        console.log(`🧹 Deleted invalid FCM token for ${recipientId}`);
+      }
+    }
+  }
+);
+export const notifyOnNewMessage = onDocumentCreated(
+  "conversations/{conversationId}/messages/{messageId}",
+  async (event) => {
+    const message = event.data?.data();
+    const { conversationId } = event.params;
+
+    if (!message) return;
+
+  const senderId = message.senderId as string;
+const recipientId = message.recipientId as string;
+const text = message.text as string;
+const read = message.read as boolean;
+
+
+    if (!recipientId || !text || read === true) return;
+
+    const recipientDoc = await db.collection("users").doc(recipientId).get();
+    const fcmToken =
+      recipientDoc.get("fcmToken") || null;
+
+    const activeConversationId =
+      recipientDoc.get("activeConversationId") || null;
+
+    if (!fcmToken) {
+      console.log(`❌ No FCM token found for ${recipientId}`);
+      return;
+    }
+
+    if (activeConversationId === conversationId) {
+      console.log(`👀 User ${recipientId} is already viewing conversation ${conversationId}, skipping push.`);
+      return;
+    }
+
+    const senderDoc = await db.collection("players").doc(senderId).get();
+    const senderName = senderDoc.get("name") || "TennisMate";
+    const senderAvatar = senderDoc.get("photoURL") || "";
+
+    await admin.messaging().send({
+      token: fcmToken,
+      notification: {
+        title: `New message from ${senderName}`,
+        body: text.length > 60 ? text.slice(0, 60) + "…" : text,
+        imageUrl: senderAvatar,
+      },
+      data: {
+        conversationId,
+        type: "new_message",
+      },
+    });
+
+    console.log(`✅ Push sent to ${recipientId} for conversation ${conversationId}`);
+  }
+);
+export const sendMatchRequestNotification = onDocumentCreated(
+  "match_requests/{matchId}",
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+
+    const { toUserId, fromUserId } = data;
+
+    // Get recipient's FCM token
+    const recipientDoc = await db.collection("users").doc(toUserId).get();
+    const fcmToken = recipientDoc.get("fcmToken");
+
+    if (!fcmToken) {
+      console.log(`❌ No FCM token found for user ${toUserId}`);
+      return;
+    }
+
+    // Get sender name
+    const senderDoc = await db.collection("players").doc(fromUserId).get();
+    const senderName = senderDoc.exists ? senderDoc.get("name") : "A player";
+
+    // Send push notification
+    await admin.messaging().send({
+      token: fcmToken,
+      notification: {
+        title: "🎾 New Match Request",
+        body: `${senderName} sent you a match request!`,
+      },
+      data: {
+        type: "match_request",
+        fromUserId,
+      },
+    });
+
+    console.log(`✅ Match request notification sent to ${toUserId}`);
+  }
+);
+
+
+
+
+
 
 

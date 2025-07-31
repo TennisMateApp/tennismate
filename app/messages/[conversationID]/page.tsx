@@ -18,6 +18,7 @@ import { useParams, useRouter } from "next/navigation";
 import debounce from "lodash.debounce";
 import { ArrowLeft } from "lucide-react";
 import withAuth from "@/components/withAuth";
+import { writeBatch } from "firebase/firestore"; 
 
 function ChatPage() {
   const { conversationID } = useParams();
@@ -31,65 +32,93 @@ function ChatPage() {
   const [otherUserTyping, setOtherUserTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (u) => {
-      if (!u) return;
-      setUser(u);
+useEffect(() => {
+  let unsubscribeTyping: () => void = () => {};
+  let currentUserId: string | null = null;
 
-      const convoRef = doc(db, "conversations", conversationID as string);
-      let convoSnap = await getDoc(convoRef);
+  const unsubscribeAuth = auth.onAuthStateChanged(async (u) => {
+    if (!u) return;
+    setUser(u);
+    currentUserId = u.uid;
 
-      const allIds = (conversationID as string).split("_");
-      const otherUserId = allIds.find((id) => id !== u.uid);
-
-      if (!convoSnap.exists() && otherUserId) {
-        await setDoc(convoRef, {
-          participants: [u.uid, otherUserId],
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          typing: {},
-          lastRead: { [u.uid]: serverTimestamp() },
-        });
-      } else {
-        await updateDoc(convoRef, {
-          [`lastRead.${u.uid}`]: serverTimestamp(),
-        });
-      }
-
-      convoSnap = await getDoc(convoRef);
-
-      if (otherUserId) {
-        try {
-          const otherUserRef = doc(db, "players", otherUserId);
-          const otherSnap = await getDoc(otherUserRef);
-
-          if (otherSnap.exists()) {
-            const otherData = otherSnap.data();
-            setOtherUserName(otherData.name || "TennisMate");
-            setOtherUserAvatar(otherData.photoURL || null);
-          }
-        } catch (err) {
-          console.error("🔥 Error loading other user profile:", err);
-        }
-      }
-
-      const meRef = doc(db, "players", u.uid);
-      const meSnap = await getDoc(meRef);
-      if (meSnap.exists()) {
-        setUserAvatar(meSnap.data().photoURL || null);
-      }
-
-      const unsubscribeTyping = onSnapshot(convoRef, (snap) => {
-        const typingData = snap.data()?.typing || {};
-        const otherTypingId = snap.data()?.participants?.find((id: string) => id !== u.uid);
-        setOtherUserTyping(typingData[otherTypingId] === true);
+    // ✅ Set activeConversationId
+    try {
+      await updateDoc(doc(db, "users", u.uid), {
+        activeConversationId: conversationID,
       });
+    } catch (err) {
+      console.error("🔥 Failed to set activeConversationId:", err);
+    }
 
-      return () => unsubscribeTyping();
+    const convoRef = doc(db, "conversations", conversationID as string);
+    let convoSnap = await getDoc(convoRef);
+
+    const allIds = (conversationID as string).split("_");
+    const otherUserId = allIds.find((id) => id !== u.uid);
+
+    if (!convoSnap.exists() && otherUserId) {
+      await setDoc(convoRef, {
+        participants: [u.uid, otherUserId],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        typing: {},
+        lastRead: { [u.uid]: serverTimestamp() },
+      });
+    } else {
+      await updateDoc(convoRef, {
+        [`lastRead.${u.uid}`]: serverTimestamp(),
+      });
+    }
+
+    convoSnap = await getDoc(convoRef);
+
+    if (otherUserId) {
+      try {
+        const otherUserRef = doc(db, "players", otherUserId);
+        const otherSnap = await getDoc(otherUserRef);
+
+        if (otherSnap.exists()) {
+          const otherData = otherSnap.data();
+          setOtherUserName(otherData.name || "TennisMate");
+          setOtherUserAvatar(otherData.photoURL || null);
+        }
+      } catch (err) {
+        console.error("🔥 Error loading other user profile:", err);
+      }
+    }
+
+    const meRef = doc(db, "players", u.uid);
+    const meSnap = await getDoc(meRef);
+    if (meSnap.exists()) {
+      setUserAvatar(meSnap.data().photoURL || null);
+    }
+
+    unsubscribeTyping = onSnapshot(convoRef, (snap) => {
+      const typingData = snap.data()?.typing || {};
+      const otherTypingId = snap.data()?.participants?.find((id: string) => id !== u.uid);
+      setOtherUserTyping(typingData[otherTypingId] === true);
     });
+  });
 
-    return () => unsubscribe();
-  }, [conversationID]);
+  // ✅ Outer useEffect return: cleanup logic for unmount
+  return () => {
+    unsubscribeAuth();
+    unsubscribeTyping();
+
+    if (currentUserId) {
+      const clearActive = async () => {
+        try {
+          await updateDoc(doc(db, "users", currentUserId!), {
+            activeConversationId: null,
+          });
+        } catch (err) {
+          console.error("🔥 Failed to clear activeConversationId:", err);
+        }
+      };
+      clearActive();
+    }
+  };
+}, [conversationID]);
 
   useEffect(() => {
     if (!conversationID) return;
@@ -97,42 +126,64 @@ function ChatPage() {
     const msgRef = collection(db, "conversations", conversationID as string, "messages");
     const q = query(msgRef, orderBy("timestamp"));
 
-    const unsub = onSnapshot(q, (snap) => {
-      const msgs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      setMessages(msgs);
+   const unsub = onSnapshot(q, (snap) => {
+  const msgs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  setMessages(msgs);
 
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          bottomRef.current?.scrollIntoView({ behavior: "auto" });
-        });
-      });
+  // ✅ Mark unread messages as read
+  const markAsRead = async () => {
+    const batch = writeBatch(db);
+    snap.docs.forEach((doc) => {
+      const msg = doc.data();
+      if (msg.recipientId === user?.uid && msg.read === false) {
+        batch.update(doc.ref, { read: true });
+      }
     });
+    await batch.commit();
+  };
+
+  markAsRead();
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
+    });
+  });
+});
 
     return () => unsub();
   }, [conversationID]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || !user) return;
+const sendMessage = async () => {
+  if (!input.trim() || !user) return;
 
-    const newMessage = {
-      senderId: user.uid,
-      text: input,
-      timestamp: serverTimestamp(),
-    };
+  // ✅ Split to get recipientId
+  const allIds = (conversationID as string).split("_");
+  const recipientId = allIds.find((id) => id !== user.uid);
 
-    await addDoc(
-      collection(db, "conversations", conversationID as string, "messages"),
-      newMessage
-    );
+  if (!recipientId) return; // Optional safeguard
 
-    setInput("");
-
-    await updateDoc(doc(db, "conversations", conversationID as string), {
-      [`lastRead.${user.uid}`]: serverTimestamp(),
-      [`typing.${user.uid}`]: false,
-      latestMessage: newMessage,
-    });
+  const newMessage = {
+    senderId: user.uid,
+    recipientId,
+    text: input,
+    timestamp: serverTimestamp(),
+    read: false,
   };
+
+  await addDoc(
+    collection(db, "conversations", conversationID as string, "messages"),
+    newMessage
+  );
+
+  setInput("");
+
+  await updateDoc(doc(db, "conversations", conversationID as string), {
+    [`lastRead.${user.uid}`]: serverTimestamp(),
+    [`typing.${user.uid}`]: false,
+    latestMessage: newMessage,
+  });
+};
 
   const updateTypingStatus = debounce(async (isTyping: boolean) => {
     if (!user) return;
