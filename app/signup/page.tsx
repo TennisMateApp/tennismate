@@ -148,7 +148,7 @@ const handleSubmit = async (e: React.FormEvent) => {
         photoURL,
         profileComplete: true,
         timestamp: serverTimestamp(),
-        badges,
+        // badges, ← remove or comment this line out
       });
 
       await setDoc(doc(db, "users", user.uid), {
