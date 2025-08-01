@@ -27,6 +27,7 @@ interface Player {
   photoURL?: string;
   timestamp?: any;
   score?: number;
+  distance?: number;
 }
 
 interface PostcodeCoords {
