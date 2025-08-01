@@ -297,7 +297,10 @@ const handleMatchRequest = async (match: Player) => {
                   <p className="text-sm">
                     <strong>Availability:</strong> {match.availability.join(", ")}
                   </p>
-                  <p className="mt-1 text-sm">{match.bio}</p>
+                 <p className="mt-1 text-sm text-gray-700">
+  {match.bio?.slice(0, 180)}
+  {match.bio?.length > 180 && "..."}
+</p>
                   <div className="mt-3 flex gap-3">
                     {alreadySent ? (
                       <span className="text-green-600 text-sm font-medium">✅ Request Sent</span>
