@@ -61,81 +61,101 @@ export default function MatchPage() {
   const [sortBy, setSortBy] = useState<string>("score");
   const router = useRouter();
 
-  useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/login");
-        return;
-      }
-      setUser(currentUser);
+useEffect(() => {
+  const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+    if (!currentUser) {
+      router.push("/login");
+      return;
+    }
+    setUser(currentUser);
 
-      const myRef = doc(db, "players", currentUser.uid);
-      const mySnap = await getDoc(myRef);
-      if (!mySnap.exists()) {
-        alert("Please complete your profile first.");
-        router.push("/profile");
-        return;
-      }
+    const myRef = doc(db, "players", currentUser.uid);
+    const mySnap = await getDoc(myRef);
+    if (!mySnap.exists()) {
+      alert("Please complete your profile first.");
+      router.push("/profile");
+      return;
+    }
 
-      const myData = mySnap.data() as Player;
-      setMyProfile(myData);
+    const myData = mySnap.data() as Player;
+    setMyProfile(myData);
 
-      // Load postcode coordinates
-      const postcodeSnap = await getDocs(collection(db, "postcodes"));
-      const coords: PostcodeCoords = {};
-      postcodeSnap.forEach((d) => {
-        coords[d.id] = d.data() as { lat: number; lng: number };
-      });
-      setPostcodeCoords(coords);
+    // Load postcode coordinates
+    const postcodeSnap = await getDocs(collection(db, "postcodes"));
+    const coords: PostcodeCoords = {};
+    postcodeSnap.forEach((d) => {
+      coords[d.id] = d.data() as { lat: number; lng: number };
+    });
+    setPostcodeCoords(coords);
 
-      // Load sent requests
-      const reqQuery = query(
-        collection(db, "match_requests"),
-        where("fromUserId", "==", currentUser.uid)
-      );
-      const reqSnap = await getDocs(reqQuery);
-      const sentTo = new Set<string>();
-      reqSnap.forEach((d) => {
-        const data = d.data();
-        if (data.toUserId) sentTo.add(data.toUserId);
-      });
-      setSentRequests(sentTo);
+    // Load sent match requests
+    const reqQuery = query(
+      collection(db, "match_requests"),
+      where("fromUserId", "==", currentUser.uid)
+    );
+    const reqSnap = await getDocs(reqQuery);
+    const sentTo = new Set<string>();
+    reqSnap.forEach((d) => {
+      const data = d.data();
+      if (data.toUserId) sentTo.add(data.toUserId);
+    });
+    setSentRequests(sentTo);
 
-      // Load all players and score
-      const snapshot = await getDocs(collection(db, "players"));
-      const allPlayers = snapshot.docs.map((d) => {
-  const data = d.data() as Player;
-  const { id: _id, ...rest } = data; // remove any id from data
-  return { ...rest, id: d.id };      // always set id from doc.id last
-});
-      const scored = allPlayers
-        .filter((p) => p.id !== currentUser.uid)
-        .map((p) => {
-          let score = 0;
-          // Skill match
-          if (p.skillLevel === myData.skillLevel) score += 2;
-          else if (
-            (p.skillLevel === "Intermediate" && myData.skillLevel === "Beginner") ||
-            (p.skillLevel === "Beginner" && myData.skillLevel === "Intermediate")
-          ) {
-            score += 1;
-          }
-          // Availability overlap
-          const shared = p.availability.filter((a) => myData.availability.includes(a)).length;
-          score += shared;
-          // Postcode proximity (first digit)
-          if (p.postcode.startsWith(myData.postcode.slice(0, 1))) score += 1;
-
-          return { ...p, score };
-        })
-        .filter((p) => (p.score ?? 0) > 0);
-
-      setRawMatches(scored);
-      setLoading(false);
+    // Load players and compute match scores
+    const snapshot = await getDocs(collection(db, "players"));
+    const allPlayers = snapshot.docs.map((d) => {
+      const data = d.data() as Player;
+      return { ...data, id: d.id };
     });
 
-    return () => unsubscribeAuth();
-  }, [router]);
+    const scoredPlayers = allPlayers
+      .filter((p) => p.id !== currentUser.uid)
+      .map((p) => {
+        let score = 0;
+        let distance = Infinity;
+
+        // Skill match
+        if (p.skillLevel === myData.skillLevel) {
+          score += 2;
+        } else if (
+          ["Beginner", "Intermediate"].includes(p.skillLevel) &&
+          ["Beginner", "Intermediate"].includes(myData.skillLevel)
+        ) {
+          score += 1;
+        }
+
+        // Availability match
+        const shared = p.availability.filter((a) =>
+          myData.availability.includes(a)
+        ).length;
+        score += shared;
+
+        // Distance match
+        const myC = coords[myData.postcode];
+        const theirC = coords[p.postcode];
+        if (myC && theirC) {
+          distance = getDistanceFromLatLonInKm(
+            myC.lat,
+            myC.lng,
+            theirC.lat,
+            theirC.lng
+          );
+
+          if (distance < 5) score += 3;
+          else if (distance < 10) score += 2;
+          else if (distance < 20) score += 1;
+        }
+
+        return { ...p, score, distance };
+      })
+      .filter((p) => p.score > 0);
+
+    setRawMatches(scoredPlayers);
+    setLoading(false);
+  });
+
+  return () => unsubscribeAuth();
+}, [router]); // ✅ this line was missing
 
 const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -178,36 +198,63 @@ const handleMatchRequest = async (match: Player) => {
 };
 
   // Sort matches based on user choice
-  const sortedMatches = useMemo(() => {
-    if (!myProfile) return rawMatches;
-    return [...rawMatches].sort((a, b) => {
-      if (sortBy === "distance") {
-        const myC = postcodeCoords[myProfile.postcode];
-        const aC = postcodeCoords[a.postcode];
-        const bC = postcodeCoords[b.postcode];
-        const da = myC && aC
-          ? getDistanceFromLatLonInKm(myC.lat, myC.lng, aC.lat, aC.lng)
-          : Infinity;
-        const db_ = myC && bC
-          ? getDistanceFromLatLonInKm(myC.lat, myC.lng, bC.lat, bC.lng)
-          : Infinity;
-        return da - db_;
-      }
-      if (sortBy === "availability") {
-        const sa = a.availability.filter((t) => myProfile.availability.includes(t)).length;
-        const sb = b.availability.filter((t) => myProfile.availability.includes(t)).length;
-        return sb - sa;
-      }
-      if (sortBy === "skill") {
-        const scoreFn = (p: Player) =>
-          p.skillLevel === myProfile.skillLevel ? 2 :
-          (["Beginner","Intermediate"].includes(p.skillLevel) && ["Beginner","Intermediate"].includes(myProfile.skillLevel)) ? 1 : 0;
-        return scoreFn(b) - scoreFn(a);
-      }
-      // default: best match score
-      return (b.score ?? 0) - (a.score ?? 0);
-    });
-  }, [rawMatches, sortBy, postcodeCoords, myProfile]);
+const sortedMatches = useMemo(() => {
+  if (!myProfile) return rawMatches;
+  return [...rawMatches].sort((a, b) => {
+    if (sortBy === "distance") {
+      const myC = postcodeCoords[myProfile.postcode];
+      const aC = postcodeCoords[a.postcode];
+      const bC = postcodeCoords[b.postcode];
+      const da = myC && aC
+        ? getDistanceFromLatLonInKm(myC.lat, myC.lng, aC.lat, aC.lng)
+        : Infinity;
+      const db_ = myC && bC
+        ? getDistanceFromLatLonInKm(myC.lat, myC.lng, bC.lat, bC.lng)
+        : Infinity;
+      return da - db_;
+    }
+
+    if (sortBy === "availability") {
+      const sa = a.availability.filter((t) =>
+        myProfile.availability.includes(t)
+      ).length;
+      const sb = b.availability.filter((t) =>
+        myProfile.availability.includes(t)
+      ).length;
+      return sb - sa;
+    }
+
+    if (sortBy === "skill") {
+      const scoreFn = (p: Player) =>
+        p.skillLevel === myProfile.skillLevel
+          ? 2
+          : ["Beginner", "Intermediate"].includes(p.skillLevel) &&
+            ["Beginner", "Intermediate"].includes(myProfile.skillLevel)
+          ? 1
+          : 0;
+      return scoreFn(b) - scoreFn(a);
+    }
+
+    // Default: best match score
+    if (sortBy === "score") {
+      const scoreDiff = (b.score ?? 0) - (a.score ?? 0);
+
+      // ✅ Debug: show comparison details
+      console.log(
+        `Comparing ${a.name} (score: ${a.score}, distance: ${a.distance} km) vs ${b.name} (score: ${b.score}, distance: ${b.distance} km)`
+      );
+
+      if (scoreDiff !== 0) return scoreDiff;
+
+      const distA = a.distance ?? Infinity;
+      const distB = b.distance ?? Infinity;
+      return distA - distB;
+    }
+
+    return 0;
+  });
+}, [rawMatches, sortBy, postcodeCoords, myProfile]);
+
 
   if (loading) return <p className="p-6">Looking for matches...</p>;
 
