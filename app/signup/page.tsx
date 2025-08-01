@@ -137,11 +137,6 @@ const handleSubmit = async (e: React.FormEvent) => {
       photoURL = await getDownloadURL(imageRef);
     }
 
-    const now = new Date();
-    const mvpStart = new Date("2025-07-16");
-    const mvpEnd = new Date("2025-08-01");
-    const badges = now >= mvpStart && now <= mvpEnd ? ["mvpLaunch"] : [];
-
     if (isVictorian) {
       await setDoc(doc(db, "players", user.uid), {
         name: formData.name,
