@@ -150,13 +150,13 @@ function MessagesHome() {
                   </div>
                 )}
 
-                <div className="min-w-0">
-                  <p className="font-semibold text-sm truncate">
-                    {convo.otherUserName}
-                  </p>
-                  <p className="text-gray-500 text-sm truncate">
-                    {convo.latestMessage?.text?.slice(0, 80) || "New conversation"}
-                  </p>
+                <div className="flex flex-col overflow-hidden max-w-[180px] sm:max-w-[220px]">
+                <p className="font-semibold text-sm truncate w-full">
+  {convo.otherUserName}
+</p>
+<p className="text-gray-500 text-sm truncate w-full">
+  {convo.latestMessage?.text?.slice(0, 80) || "New conversation"}
+</p>
                 </div>
               </div>
 
