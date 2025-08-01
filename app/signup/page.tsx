@@ -26,6 +26,8 @@ export default function SignupPage() {
     bio: "",
   });
 
+  const [showWaitlistModal, setShowWaitlistModal] = useState(false);
+  const [postcodeError, setPostcodeError] = useState("");
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [status, setStatus] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -105,37 +107,42 @@ const canSubmit = isFormComplete && isPasswordValid;
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-      if (!isPasswordValid) {
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  if (!isPasswordValid) {
     setStatus("⚠️ Please meet all password requirements.");
     return;
   }
-    setStatus("Submitting...");
-    try {
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        formData.email,
-        formData.password
+
+  setStatus("Submitting...");
+
+  const isVictorian = formData.postcode.startsWith("3");
+
+  try {
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      formData.email,
+      formData.password
+    );
+    const user = userCredential.user;
+
+    let photoURL = "";
+    if (croppedImage) {
+      const imageRef = ref(
+        storage,
+        `profile_pictures/${user.uid}/profile.jpg`
       );
-      const user = userCredential.user;
+      await uploadBytes(imageRef, croppedImage);
+      photoURL = await getDownloadURL(imageRef);
+    }
 
-      let photoURL = "";
-      if (croppedImage) {
-        const imageRef = ref(
-          storage,
-          `profile_pictures/${user.uid}/profile.jpg`
-        );
-        await uploadBytes(imageRef, croppedImage);
-        photoURL = await getDownloadURL(imageRef);
-      }
+    const now = new Date();
+    const mvpStart = new Date("2025-07-16");
+    const mvpEnd = new Date("2025-08-01");
+    const badges = now >= mvpStart && now <= mvpEnd ? ["mvpLaunch"] : [];
 
-      const now = new Date();
-      const mvpStart = new Date("2025-07-16");
-      const mvpEnd = new Date("2025-08-01");
-      const badges =
-        now >= mvpStart && now <= mvpEnd ? ["mvpLaunch"] : [];
-
+    if (isVictorian) {
       await setDoc(doc(db, "players", user.uid), {
         name: formData.name,
         email: formData.email,
@@ -156,18 +163,29 @@ const canSubmit = isFormComplete && isPasswordValid;
 
       setStatus("✅ Signup successful!");
       router.replace("/profile");
-    } catch (error: any) {
-      if (error.code === "auth/email-already-in-use") {
-        setShowEmailExistsModal(true);
-      } else if (error.code === "auth/weak-password") {
-        setStatus("⚠️ Password must be at least 6 characters.");
-      } else {
-        console.error("Signup error:", error);
-        setStatus("❌ Something went wrong. Please try again.");
-      }
-    }
-  };
+    } else {
+      await setDoc(doc(db, "waitlist_users", user.uid), {
+        name: formData.name,
+        email: formData.email,
+        postcode: formData.postcode,
+        timestamp: serverTimestamp(),
+        source: "signupForm",
+      });
 
+      setShowWaitlistModal(true);
+
+    }
+  } catch (error: any) {
+    if (error.code === "auth/email-already-in-use") {
+      setShowEmailExistsModal(true);
+    } else if (error.code === "auth/weak-password") {
+      setStatus("⚠️ Password must be at least 6 characters.");
+    } else {
+      console.error("Signup error:", error);
+      setStatus("❌ Something went wrong. Please try again.");
+    }
+  }
+};
   return (
     <>
       {showEmailExistsModal && (
@@ -269,6 +287,9 @@ const canSubmit = isFormComplete && isPasswordValid;
             required
             className="w-full p-2 border rounded"
           />
+{postcodeError && (
+  <p className="text-red-600 text-sm mt-1">{postcodeError}</p>
+)}
 
           <select
             name="skillLevel"
@@ -391,6 +412,23 @@ const canSubmit = isFormComplete && isPasswordValid;
         <a href="/privacy" className="text-blue-600 underline">
           Privacy Policy
         </a>.
+        {showWaitlistModal && (
+  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="bg-white rounded-xl shadow-lg p-6 max-w-md text-center space-y-4">
+      <h2 className="text-xl font-semibold">Thanks for signing up!</h2>
+      <p className="text-gray-700 text-sm">
+        📍 TennisMate is currently only available in Victoria.<br />
+        We’ve saved your interest and will notify you when we launch in your area.
+      </p>
+      <button
+        onClick={() => setShowWaitlistModal(false)}
+        className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+      >
+        Got it
+      </button>
+    </div>
+  </div>
+)}
       </div>
     </>
   );

@@ -254,17 +254,15 @@ export const sendPushNotification = onDocumentCreated(
       return;
     }
 
-    const payload = {
-      notification: {
-        title: notifData.message || "🎾 TennisMate Notification",
-        body: "You have a new notification",
-      },
-      data: {
-        type: notifData.type || "general",
-        fromUserId: notifData.fromUserId || "",
-        url: notifData.url || "https://tennis-match.com.au",
-      },
-    };
+const payload = {
+  data: {
+    title: notifData.message || "🎾 TennisMate Notification",
+    body: "You have a new notification",
+    type: notifData.type || "general",
+    fromUserId: notifData.fromUserId || "",
+    url: notifData.url || "https://tennis-match.com.au",
+  },
+};
 
     try {
       console.log("📲 Sending push to token:", token);

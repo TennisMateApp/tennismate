@@ -19,7 +19,7 @@ messaging.onBackgroundMessage(function (payload) {
 
   // ✅ Only use `payload.data`, NOT `payload.notification`
   const title = payload.data?.title || "🎾 TennisMate";
-  const body = payload.data?.body || "You have a new message!";
+  const body = payload.data?.body || "You have a new notification!";
   const url = payload.data?.url || "https://tennismate.vercel.app/messages";
   const fallbackIcon = "/logo.png";
 
