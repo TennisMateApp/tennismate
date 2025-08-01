@@ -236,9 +236,10 @@ const showCroppedImage = async () => {
 {/* Badges Box */}
 <div className="border rounded-xl p-4 bg-white shadow mt-2">
   {/* Single flex row for all badges, aligned at the top */}
-  <div className="flex items-start gap-4">
+  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
     {/* MVP Launch badge */}
-    <div className="flex flex-col items-center">
+    <div className="flex flex-col items-center w-[80px]">
+
       <img
         src="/badges/mvp-badge.svg"
         width={64}
@@ -249,7 +250,7 @@ const showCroppedImage = async () => {
     </div>
 
     {/* First Match badge */}
-    <div className="flex flex-col items-center">
+    <div className="flex flex-col items-center w-[80px]">
       <img
         src={
           formData.badges.includes("firstMatch")
@@ -264,7 +265,7 @@ const showCroppedImage = async () => {
       <span className="text-xs mt-1">First Match</span>
     </div>
 {/* First Match Complete badge */}
-<div className="flex flex-col items-center">
+<div className="flex flex-col items-center w-[80px]">
   <img
     src={
       formData.badges.includes("firstMatchComplete")
@@ -279,7 +280,7 @@ const showCroppedImage = async () => {
   <span className="text-xs mt-1">First Match Complete</span>
 </div>
 {/* **New** First Win badge */}
-<div className="flex flex-col items-center">
+<div className="flex flex-col items-center w-[80px]">
   <img
     src={
       formData.badges.includes("firstWin")
