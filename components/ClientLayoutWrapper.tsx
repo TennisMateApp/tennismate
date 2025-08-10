@@ -162,6 +162,19 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
   const totalNotifications = unreadMessages.length + unreadMatchRequests.length + notifications.length;
 
+    // Floating feedback button component
+  function FloatingFeedbackButton() {
+    const router = useRouter();
+    return (
+      <button
+        onClick={() => router.push("/support")}
+        className="fixed bottom-20 right-6 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-full shadow-lg flex items-center gap-2 transition-all duration-200 z-50"
+      >
+        <span className="text-sm font-medium">Give Feedback</span>
+      </button>
+    );
+  }
+
   return (
   <div className={`bg-gray-100 min-h-screen text-gray-900 ${hideNav ? "" : "pb-20"}`}>
     <InstallPwaAndroidPrompt />
@@ -331,6 +344,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           </div>
         </footer>
       )}
+      {user && !hideNav && <FloatingFeedbackButton />}
     </div>
   );
 }

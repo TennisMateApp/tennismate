@@ -109,21 +109,30 @@ useEffect(() => {
 
       {/* Top Section: Player Info */}
       <section className="flex flex-col gap-4">
-        <div className="flex items-start gap-6">
-          <div className="w-28 h-28 relative rounded-full overflow-hidden bg-gray-300">
-            {player.photoURL ? (
-              <Image src={player.photoURL} alt={player.name} fill className="object-cover" />
-            ) : (
-              <div className="flex items-center justify-center w-full h-full text-white text-xl">
-                {player.name.slice(0, 2).toUpperCase()}
-              </div>
-            )}
-          </div>
-          <div className="flex flex-col justify-center gap-2">
-            <p className="text-base font-medium text-gray-800">📍 Postcode: <span className="font-semibold">{player.postcode}</span></p>
-            <p className="text-base font-medium text-gray-800">🎾 Skill Level: <span className="font-semibold">{player.skillLevel}</span></p>
-          </div>
-        </div>
+  <div className="flex items-start gap-6">
+  <div className="w-28 h-28 relative rounded-full overflow-hidden bg-gray-300">
+    {player.photoURL ? (
+      <Image src={player.photoURL} alt={player.name} fill className="object-cover" />
+    ) : (
+      <div className="flex items-center justify-center w-full h-full text-white text-xl">
+        {player.name.slice(0, 2).toUpperCase()}
+      </div>
+    )}
+  </div>
+
+  {/* ▶️ Name added here */}
+  <div className="flex-1">
+    <h1 className="text-2xl font-bold leading-tight">{player.name}</h1>
+    <div className="mt-1 flex flex-col gap-1 text-gray-800">
+      <p className="text-base font-medium">
+        📍 Postcode: <span className="font-semibold">{player.postcode}</span>
+      </p>
+      <p className="text-base font-medium">
+        🎾 Skill Level: <span className="font-semibold">{player.skillLevel}</span>
+      </p>
+    </div>
+  </div>
+</div>
 
         {/* Bio */}
         {player.bio && (
