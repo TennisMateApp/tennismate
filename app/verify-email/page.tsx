@@ -4,14 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { auth } from "@/lib/firebaseConfig";
+import { getContinueUrl } from "@/lib/auth/getContinueUrl";
 import { onAuthStateChanged, sendEmailVerification, signOut } from "firebase/auth";
 import { Mail, ShieldCheck, Loader2 } from "lucide-react";
-
-function getContinueUrl() {
-  const base =
-    typeof window !== "undefined" ? window.location.origin : "https://tennis-mate.com.au";
-  return `${base}/match?verified=1`;
-}
 
 export default function VerifyEmailPage() {
   const router = useRouter();
@@ -45,7 +40,7 @@ export default function VerifyEmailPage() {
     if (!auth.currentUser || cooldown > 0) return;
     setSending(true);
     try {
-      await sendEmailVerification(auth.currentUser, { url: getContinueUrl() });
+      await sendEmailVerification(auth.currentUser, { url: getContinueUrl() handleCodeInApp: true,});
       setCooldown(60);
       alert("Verification email sent. Check your inbox.");
     } catch (e) {
