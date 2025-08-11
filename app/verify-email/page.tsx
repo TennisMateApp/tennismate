@@ -40,7 +40,10 @@ export default function VerifyEmailPage() {
     if (!auth.currentUser || cooldown > 0) return;
     setSending(true);
     try {
-      await sendEmailVerification(auth.currentUser, { url: getContinueUrl() handleCodeInApp: true,});
+      await sendEmailVerification(auth.currentUser, {
+  url: getContinueUrl(),
+  handleCodeInApp: true,
+});
       setCooldown(60);
       alert("Verification email sent. Check your inbox.");
     } catch (e) {
