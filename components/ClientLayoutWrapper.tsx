@@ -65,11 +65,16 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showVerify, setShowVerify] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const pathname = usePathname();
+  const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
+  const [gateReady, setGateReady] = useState(false);
 
-  const hideNav = pathname?.startsWith("/messages/");
+ const hideNavMessages = pathname?.startsWith("/messages/");
+const hideNavVerify = pathname?.startsWith("/verify-email"); // 👈 hide chrome on verify page
+const hideAllNav = hideNavMessages || hideNavVerify;
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -96,6 +101,11 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       if (u) {
         await u.reload();
         setUser(auth.currentUser);
+
+          const userDocSnap = await getDoc(doc(db, "users", u.uid));
+    const requireVerification =
+      userDocSnap.exists() && userDocSnap.data()?.requireVerification === true;
+    setShowVerify(requireVerification && !u.emailVerified);
 
         const playerRef = doc(db, "players", u.uid);
         unsubPlayer = onSnapshot(playerRef, (docSnap) => {
@@ -155,6 +165,59 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     };
   }, []);
 
+ useEffect(() => {
+  let cancelled = false;
+
+  (async () => {
+    // Public routes: render immediately (no gating)
+    if (PUBLIC_ROUTES.has(pathname || "")) {
+      if (!cancelled) setGateReady(true);
+      return;
+    }
+
+    // Start gating → hide content until we decide
+    if (!cancelled) setGateReady(false);
+
+    const u = auth.currentUser;
+
+    // Not signed in: let page-level logic handle redirects
+    if (!u) {
+      if (!cancelled) setGateReady(true);
+      return;
+    }
+
+    await u.reload();
+
+    // Check Firestore flag
+    const snap = await getDoc(doc(db, "users", u.uid));
+    const requireVerification =
+      snap.exists() && snap.data()?.requireVerification === true;
+
+    const needsVerify = requireVerification && !u.emailVerified;
+
+    // Needs verification and not on /verify-email → force /verify-email
+    if (needsVerify && !pathname?.startsWith("/verify-email")) {
+      router.replace("/verify-email");
+      return; // we'll render verify page on next route
+    }
+
+    // Already verified but on /verify-email → send to /match
+    if (!needsVerify && pathname?.startsWith("/verify-email")) {
+      router.replace("/match");
+      return;
+    }
+
+    // All good → render current page
+    if (!cancelled) setGateReady(true);
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [pathname, router]);
+
+
+
   const handleLogout = async () => {
     await signOut(auth);
     router.push("/login");
@@ -175,12 +238,16 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     );
   }
 
+    if (!gateReady && !PUBLIC_ROUTES.has(pathname || "")) {
+    return null; // prevent first-paint flicker on gated pages
+  }
+
   return (
-  <div className={`bg-gray-100 min-h-screen text-gray-900 ${hideNav ? "" : "pb-20"}`}>
+ <div className={`min-h-screen text-gray-900 ${hideAllNav ? "" : "bg-gray-100"} ${hideAllNav ? "" : "pb-20"}`}>
     <InstallPwaAndroidPrompt />
     <InstallPwaIosPrompt />
     <PushClientOnly />
-      {!hideNav && (
+      {!hideAllNav && (
         <header className="bg-white border-b p-4 mb-6 shadow-sm">
           <div className="max-w-5xl mx-auto flex justify-between items-center">
             <Link href="/" className="flex items-center">
@@ -322,10 +389,10 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
         </header>
       )}
 
-<main className={`max-w-5xl mx-auto px-4 ${hideNav ? "pb-0" : "pb-20"}`}>
+<main className={`max-w-5xl mx-auto px-4 ${hideAllNav ? "pb-0" : "pb-20"}`}>
   {children}
 </main>
-      {user && !hideNav && (
+      {user && !hideAllNav && (
         <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
           <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm">
             <Link href="/match" className="flex flex-col items-center text-green-600 hover:text-green-800">
@@ -344,7 +411,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           </div>
         </footer>
       )}
-      {user && !hideNav && <FloatingFeedbackButton />}
+      {user && !hideAllNav && <FloatingFeedbackButton />}
     </div>
   );
 }

@@ -2,19 +2,16 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { db, auth } from "@/lib/firebaseConfig";
-import { onAuthStateChanged } from "firebase/auth";
 import {
-  collection,
-  getDocs,
-  doc,
-  getDoc,
-  addDoc,
-  serverTimestamp,
-  query,
-  where
+  collection, getDocs, doc, getDoc, addDoc,
+  serverTimestamp, query, where, updateDoc,
 } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { onAuthStateChanged, applyActionCode } from "firebase/auth";
+import { CheckCircle2 } from "lucide-react";
+// import { getContinueUrl } from "@/lib/auth/getContinueUrl";
+
 
 interface Player {
   id: string;
@@ -33,6 +30,7 @@ interface Player {
 interface PostcodeCoords {
   [postcode: string]: { lat: number; lng: number };
 }
+
 
 function getDistanceFromLatLonInKm(
   lat1: number,
@@ -62,14 +60,118 @@ export default function MatchPage() {
   const [sortBy, setSortBy] = useState<string>("score");
   const router = useRouter();
 
+  const params = useSearchParams();
+const [justVerified, setJustVerified] = useState(false);
+  
+
+  async function finalizeVerification() {
+  if (!auth.currentUser) return;
+
+  // Refresh local user + ID token so rules see email_verified=true
+  await auth.currentUser.reload();
+  await auth.currentUser.getIdToken(true);
+
+  // If verified, clear your Firestore flag
+  if (auth.currentUser.emailVerified) {
+    try {
+      await updateDoc(doc(db, "users", auth.currentUser.uid), {
+        requireVerification: false,
+        verifiedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("Failed to update requireVerification:", e);
+    }
+  }
+}
+
 useEffect(() => {
-  const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+  const mode = params.get("mode");
+  const code = params.get("oobCode");
+  const verifiedFlag = params.get("verified");
+
+  // Case 1: Firebase appended verify params to /match
+  if (mode === "verifyEmail" && code) {
+    (async () => {
+      const key = `tm_oob_${code}`; // remember we've handled this one already
+
+      // If we already processed this code in this browser, just clean the URL
+      if (typeof window !== "undefined" && sessionStorage.getItem(key)) {
+        router.replace("/match");
+        return;
+      }
+
+      try {
+        // If user already verified (e.g. refresh), don't try to consume again
+        await auth.currentUser?.reload();
+        if (auth.currentUser?.emailVerified) {
+          await finalizeVerification(); // ensure Firestore flag is cleared
+          router.replace("/match");
+          return;
+        }
+
+        // Consume the code once
+        await applyActionCode(auth, code);
+        sessionStorage.setItem(key, "1");
+
+        // Finalize: refresh token + clear Firestore flag
+        await finalizeVerification();
+        setJustVerified(true);
+      } catch (e: any) {
+        // If code is invalid/expired but user *is* verified, treat as success
+        await auth.currentUser?.reload();
+        if (e?.code === "auth/invalid-action-code" && auth.currentUser?.emailVerified) {
+          await finalizeVerification();
+          router.replace("/match");
+          return;
+        }
+        console.error("applyActionCode failed", e);
+        alert("Verification link is invalid or expired. Please resend the email.");
+      } finally {
+        // Clean the URL so refresh doesn't re-run this block
+        router.replace("/match");
+      }
+    })();
+    return;
+  }
+
+  // Case 2: Hosted handler redirected back with ?verified=1
+  if (verifiedFlag === "1") {
+    (async () => {
+      await finalizeVerification();
+      setJustVerified(true);
+      router.replace("/match");
+    })();
+  }
+}, [params, router]);
+
+useEffect(() => {
+if (!justVerified) return;
+const { overflow } = document.body.style;
+document.body.style.overflow = "hidden";
+return () => { document.body.style.overflow = overflow; };
+}, [justVerified]);
+
+useEffect(() => {
+  const unsub = onAuthStateChanged(auth, async (currentUser) => {
+    const isVerifyAction = params.get("mode") === "verifyEmail" && !!params.get("oobCode");
     if (!currentUser) {
       router.push("/login");
       return;
     }
     setUser(currentUser);
 
+    // 🚦 NEW: redirect unverified-but-required users
+    const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+    const requireFlag =
+      userDoc.exists() && (userDoc.data() as any)?.requireVerification === true;
+
+  // Skip redirect if we are currently processing an email verify action on this page
+if (requireFlag && !currentUser.emailVerified && !isVerifyAction) {
+  router.replace("/verify-email");
+  return;
+}
+
+    // Load my profile (only runs if user is allowed to be here)
     const myRef = doc(db, "players", currentUser.uid);
     const mySnap = await getDoc(myRef);
     if (!mySnap.exists()) {
@@ -77,7 +179,6 @@ useEffect(() => {
       router.push("/profile");
       return;
     }
-
     const myData = mySnap.data() as Player;
     setMyProfile(myData);
 
@@ -97,7 +198,7 @@ useEffect(() => {
     const reqSnap = await getDocs(reqQuery);
     const sentTo = new Set<string>();
     reqSnap.forEach((d) => {
-      const data = d.data();
+      const data = d.data() as any;
       if (data.toUserId) sentTo.add(data.toUserId);
     });
     setSentRequests(sentTo);
@@ -141,7 +242,6 @@ useEffect(() => {
             theirC.lat,
             theirC.lng
           );
-
           if (distance < 5) score += 3;
           else if (distance < 10) score += 2;
           else if (distance < 20) score += 1;
@@ -155,8 +255,8 @@ useEffect(() => {
     setLoading(false);
   });
 
-  return () => unsubscribeAuth();
-}, [router]); // ✅ this line was missing
+  return () => unsub();
+}, [router, params]);
 
 const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -269,6 +369,48 @@ const sortedMatches = useMemo(() => {
         🔄 Refresh Matches
       </button>
 
+{justVerified && (
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="verified-title"
+    className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+  >
+    {/* Dim backdrop */}
+    <div
+      className="absolute inset-0 bg-black/50"
+      onClick={() => setJustVerified(false)}
+    />
+
+    {/* Modal card */}
+    <div className="relative z-[101] w-full max-w-sm rounded-2xl bg-white shadow-xl ring-1 ring-black/5 p-6">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
+          <CheckCircle2 className="h-6 w-6 text-green-600" aria-hidden="true" />
+        </div>
+        <div>
+          <h2 id="verified-title" className="text-lg font-semibold">
+            Email verified
+          </h2>
+          <p className="mt-1 text-sm text-gray-600">
+            You can now send match requests.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-6 flex justify-end gap-2">
+        <button
+          onClick={() => setJustVerified(false)}
+          className="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+          autoFocus
+        >
+          Got it
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
       {/* Sort Selector */}
       <div className="mb-4 flex items-center gap-3">
         <label className="text-sm font-medium">Sort by:</label>
@@ -353,13 +495,16 @@ const sortedMatches = useMemo(() => {
                     {alreadySent ? (
                       <span className="text-green-600 text-sm font-medium">✅ Request Sent</span>
                     ) : (
-                      <button
-                        onClick={() => handleMatchRequest(match)}
-                        aria-label={`Request match with ${match.name}`}
-                        className="text-sm text-white bg-green-600 hover:bg-blue-700 px-3 py-2 rounded transition-all"
-                      >
-                        Request to Play
-                      </button>
+                     <button
+  onClick={() => handleMatchRequest(match)}
+  aria-label={`Request match with ${match.name}`}
+className="text-sm text-white px-3 py-2 rounded transition-all bg-green-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+disabled={alreadySent || isSubmitting}
+title=""
+>
+  Request to Play
+</button>
+
                     )}
                     <Link href={`/players/${match.id}`}> 
                       <button className="text-sm bg-gray-200 rounded px-3 py-2">View Profile</button>

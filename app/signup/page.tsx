@@ -52,14 +52,15 @@ export default function SignupPage() {
 
   // Calculate criteria state
   const passwordCriteria = getPasswordCriteria(formData.password);
-const isPasswordValid = Object.values(passwordCriteria).every(Boolean);
-const isFormComplete =
-  formData.name &&
-  formData.email &&
-  formData.password &&
-  formData.postcode &&
-  formData.skillLevel;
-const canSubmit = isFormComplete && isPasswordValid;
+  const isPasswordValid = Object.values(passwordCriteria).every(Boolean);
+  const isFormComplete =
+    formData.name &&
+    formData.email &&
+    formData.password &&
+    formData.postcode &&
+    formData.skillLevel;
+  const canSubmit = isFormComplete && isPasswordValid;
+
   const handleChange = (
     e: React.ChangeEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
@@ -93,7 +94,7 @@ const canSubmit = isFormComplete && isPasswordValid;
 
   // Cropper handlers
   const handleCropComplete = (_: any, areaPix: any) => setCroppedAreaPixels(areaPix);
-  
+
   const showCroppedImage = async () => {
     if (!imageSrc || !croppedAreaPixels) return;
     try {
@@ -117,9 +118,10 @@ const handleSubmit = async (e: React.FormEvent) => {
 
   setStatus("Submitting...");
 
-  const isVictorian = formData.postcode.startsWith("3");
+  const isVictorian = formData.postcode.trim().startsWith("3");
 
   try {
+    // 1) Create Auth user
     const userCredential = await createUserWithEmailAndPassword(
       auth,
       formData.email,
@@ -127,17 +129,28 @@ const handleSubmit = async (e: React.FormEvent) => {
     );
     const user = userCredential.user;
 
+    // 2) Upload profile photo (optional)
     let photoURL = "";
     if (croppedImage) {
-      const imageRef = ref(
-        storage,
-        `profile_pictures/${user.uid}/profile.jpg`
-      );
+      const imageRef = ref(storage, `profile_pictures/${user.uid}/profile.jpg`);
       await uploadBytes(imageRef, croppedImage);
       photoURL = await getDownloadURL(imageRef);
     }
 
+    // 3) Create users/{uid} first with verification flag
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        name: formData.name,
+        email: formData.email,
+        requireVerification: true,
+        createdAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
     if (isVictorian) {
+      // 4) Create players/{uid}
       await setDoc(doc(db, "players", user.uid), {
         name: formData.name,
         email: formData.email,
@@ -148,17 +161,13 @@ const handleSubmit = async (e: React.FormEvent) => {
         photoURL,
         profileComplete: true,
         timestamp: serverTimestamp(),
-        // badges, ← remove or comment this line out
       });
 
-      await setDoc(doc(db, "users", user.uid), {
-        name: formData.name,
-        email: formData.email,
-      });
-
-      setStatus("✅ Signup successful!");
-      router.replace("/profile");
+      // 5) Go to the dedicated verify page—the user will send the email there
+      setStatus("");
+      router.replace("/verify-email");
     } else {
+      // Waitlist flow (no verification email necessary)
       await setDoc(doc(db, "waitlist_users", user.uid), {
         name: formData.name,
         email: formData.email,
@@ -168,25 +177,24 @@ const handleSubmit = async (e: React.FormEvent) => {
       });
 
       setShowWaitlistModal(true);
-
+      setStatus("");
     }
   } catch (error: any) {
-    if (error.code === "auth/email-already-in-use") {
+    if (error?.code === "auth/email-already-in-use") {
       setShowEmailExistsModal(true);
-    } else if (error.code === "auth/weak-password") {
+    } else if (error?.code === "auth/weak-password") {
       setStatus("⚠️ Password must be at least 6 characters.");
     } else {
       console.error("Signup error:", error);
       setStatus("❌ Something went wrong. Please try again.");
     }
   }
-};
+}; // ← closes handleSubmit
+
   return (
     <>
       {showEmailExistsModal && (
-        <SignupErrorModal
-          onClose={() => setShowEmailExistsModal(false)}
-        />
+        <SignupErrorModal onClose={() => setShowEmailExistsModal(false)} />
       )}
 
       <div className="relative max-w-xl mx-auto p-6">
@@ -230,48 +238,48 @@ const handleSubmit = async (e: React.FormEvent) => {
             required
             className="w-full p-2 border rounded"
           />
-<input
-  type="password"
-  name="password"
-  value={formData.password}
-  onChange={handleChange}
-  placeholder="Password"
-  required
-  className="w-full p-2 border rounded"
-  onFocus={() => setIsPasswordFocused(true)}
-  onBlur={() => setIsPasswordFocused(false)}
-/>
-{isPasswordFocused && (
-  <div className="bg-gray-50 border border-gray-300 rounded px-3 py-2 mt-1 text-sm text-gray-800 shadow min-w-[220px]">
-    <strong>Password requirements:</strong>
-    <ul className="list-none mt-1 space-y-1">
-      <li className="flex items-center gap-2">
-        {passwordCriteria.length ? (
-          <span className="text-green-600 font-bold">✔</span>
-        ) : (
-          <span className="text-red-500 font-bold">✘</span>
-        )}
-        At least 6 characters
-      </li>
-      <li className="flex items-center gap-2">
-        {passwordCriteria.uppercase ? (
-          <span className="text-green-600 font-bold">✔</span>
-        ) : (
-          <span className="text-red-500 font-bold">✘</span>
-        )}
-        1 uppercase letter
-      </li>
-      <li className="flex items-center gap-2">
-        {passwordCriteria.special ? (
-          <span className="text-green-600 font-bold">✔</span>
-        ) : (
-          <span className="text-red-500 font-bold">✘</span>
-        )}
-        1 special character (e.g. !@#$%)
-      </li>
-    </ul>
-  </div>
-)}
+          <input
+            type="password"
+            name="password"
+            value={formData.password}
+            onChange={handleChange}
+            placeholder="Password"
+            required
+            className="w-full p-2 border rounded"
+            onFocus={() => setIsPasswordFocused(true)}
+            onBlur={() => setIsPasswordFocused(false)}
+          />
+          {isPasswordFocused && (
+            <div className="bg-gray-50 border border-gray-300 rounded px-3 py-2 mt-1 text-sm text-gray-800 shadow min-w-[220px]">
+              <strong>Password requirements:</strong>
+              <ul className="list-none mt-1 space-y-1">
+                <li className="flex items-center gap-2">
+                  {passwordCriteria.length ? (
+                    <span className="text-green-600 font-bold">✔</span>
+                  ) : (
+                    <span className="text-red-500 font-bold">✘</span>
+                  )}
+                  At least 6 characters
+                </li>
+                <li className="flex items-center gap-2">
+                  {passwordCriteria.uppercase ? (
+                    <span className="text-green-600 font-bold">✔</span>
+                  ) : (
+                    <span className="text-red-500 font-bold">✘</span>
+                  )}
+                  1 uppercase letter
+                </li>
+                <li className="flex items-center gap-2">
+                  {passwordCriteria.special ? (
+                    <span className="text-green-600 font-bold">✔</span>
+                  ) : (
+                    <span className="text-red-500 font-bold">✘</span>
+                  )}
+                  1 special character (e.g. !@#$%)
+                </li>
+              </ul>
+            </div>
+          )}
 
           <input
             type="text"
@@ -282,9 +290,9 @@ const handleSubmit = async (e: React.FormEvent) => {
             required
             className="w-full p-2 border rounded"
           />
-{postcodeError && (
-  <p className="text-red-600 text-sm mt-1">{postcodeError}</p>
-)}
+          {postcodeError && (
+            <p className="text-red-600 text-sm mt-1">{postcodeError}</p>
+          )}
 
           <select
             name="skillLevel"
@@ -301,12 +309,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
           <fieldset>
             <legend className="font-medium mb-2">Availability</legend>
-            {[
-              "Weekdays AM",
-              "Weekdays PM",
-              "Weekends AM",
-              "Weekends PM",
-            ].map((slot) => (
+            {["Weekdays AM", "Weekdays PM", "Weekends AM", "Weekends PM"].map((slot) => (
               <label key={slot} className="block">
                 <input
                   type="checkbox"
@@ -388,42 +391,44 @@ const handleSubmit = async (e: React.FormEvent) => {
             </div>
           )}
 
-         <button
-  type="submit"
-  className={`bg-blue-600 text-white px-4 py-2 rounded ${!canSubmit ? "opacity-50 cursor-not-allowed" : ""}`}
-  disabled={!canSubmit}
->
-  Submit
-</button>
+          <button
+            type="submit"
+            className={`bg-blue-600 text-white px-4 py-2 rounded ${!canSubmit ? "opacity-50 cursor-not-allowed" : ""}`}
+            disabled={!canSubmit}
+          >
+            Submit
+          </button>
 
           {status && <p className="mt-2 text-sm">{status}</p>}
         </form>
       </div>
+
       <div className="text-xs text-gray-600 text-center mt-4">
-        By signing up, you agree to our{' '}
+        By signing up, you agree to our{" "}
         <a href="/terms" className="text-blue-600 underline">
           Terms
-        </a>{' '}and{' '}
+        </a>{" "}
+        and{" "}
         <a href="/privacy" className="text-blue-600 underline">
           Privacy Policy
         </a>.
         {showWaitlistModal && (
-  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-    <div className="bg-white rounded-xl shadow-lg p-6 max-w-md text-center space-y-4">
-      <h2 className="text-xl font-semibold">Thanks for signing up!</h2>
-      <p className="text-gray-700 text-sm">
-        📍 TennisMate is currently only available in Victoria.<br />
-        We’ve saved your interest and will notify you when we launch in your area.
-      </p>
-      <button
-        onClick={() => setShowWaitlistModal(false)}
-        className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
-      >
-        Got it
-      </button>
-    </div>
-  </div>
-)}
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-lg p-6 max-w-md text-center space-y-4">
+              <h2 className="text-xl font-semibold">Thanks for signing up!</h2>
+              <p className="text-gray-700 text-sm">
+                📍 TennisMate is currently only available in Victoria.<br />
+                We’ve saved your interest and will notify you when we launch in your area.
+              </p>
+              <button
+                onClick={() => setShowWaitlistModal(false)}
+                className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
