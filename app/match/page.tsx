@@ -31,6 +31,8 @@ interface PostcodeCoords {
   [postcode: string]: { lat: number; lng: number };
 }
 
+const A = <T,>(x: T[] | undefined | null): T[] => Array.isArray(x) ? x : [];
+
 
 function getDistanceFromLatLonInKm(
   lat1: number,
@@ -203,56 +205,58 @@ if (requireFlag && !currentUser.emailVerified && !isVerifyAction) {
     });
     setSentRequests(sentTo);
 
-    // Load players and compute match scores
-    const snapshot = await getDocs(collection(db, "players"));
-    const allPlayers = snapshot.docs.map((d) => {
-      const data = d.data() as Player;
-      return { ...data, id: d.id };
-    });
+// Load players and compute match scores (safe)
+try {
+  const snapshot = await getDocs(collection(db, "players"));
+  const allPlayers = snapshot.docs.map((d) => {
+    const data = d.data() as Player;
+    return { ...data, id: d.id };
+  });
 
-    const scoredPlayers = allPlayers
-      .filter((p) => p.id !== currentUser.uid)
-      .map((p) => {
-        let score = 0;
-        let distance = Infinity;
+  const scoredPlayers = allPlayers
+    .filter((p) => p.id !== currentUser.uid)
+    .map((p) => {
+      let score = 0;
+      let distance = Infinity;
 
-        // Skill match
-        if (p.skillLevel === myData.skillLevel) {
-          score += 2;
-        } else if (
-          ["Beginner", "Intermediate"].includes(p.skillLevel) &&
-          ["Beginner", "Intermediate"].includes(myData.skillLevel)
-        ) {
-          score += 1;
-        }
+      // Skill match
+      if (p.skillLevel === myData.skillLevel) {
+        score += 2;
+      } else if (
+        ["Beginner", "Intermediate"].includes(p.skillLevel) &&
+        ["Beginner", "Intermediate"].includes(myData.skillLevel)
+      ) {
+        score += 1;
+      }
 
-        // Availability match
-        const shared = p.availability.filter((a) =>
-          myData.availability.includes(a)
-        ).length;
-        score += shared;
+      // Availability match (SAFE)
+      const shared = A(p.availability).filter((a) =>
+        A(myData.availability).includes(a)
+      ).length;
+      score += shared;
 
-        // Distance match
-        const myC = coords[myData.postcode];
-        const theirC = coords[p.postcode];
-        if (myC && theirC) {
-          distance = getDistanceFromLatLonInKm(
-            myC.lat,
-            myC.lng,
-            theirC.lat,
-            theirC.lng
-          );
-          if (distance < 5) score += 3;
-          else if (distance < 10) score += 2;
-          else if (distance < 20) score += 1;
-        }
+      // Distance match
+      const myC = coords[myData.postcode];
+      const theirC = coords[p.postcode];
+      if (myC && theirC) {
+        distance = getDistanceFromLatLonInKm(myC.lat, myC.lng, theirC.lat, theirC.lng);
+        if (distance < 5) score += 3;
+        else if (distance < 10) score += 2;
+        else if (distance < 20) score += 1;
+      }
 
-        return { ...p, score, distance };
-      })
-      .filter((p) => p.score > 0);
+      return { ...p, score, distance };
+    })
+    .filter((p) => (p.score ?? 0) > 0);
 
-    setRawMatches(scoredPlayers);
-    setLoading(false);
+  setRawMatches(scoredPlayers);
+} catch (e) {
+  console.error("Compute matches failed:", e);
+  setRawMatches([]); // fail safe
+} finally {
+  setLoading(false);
+}
+
   });
 
   return () => unsub();
@@ -315,15 +319,15 @@ const sortedMatches = useMemo(() => {
       return da - db_;
     }
 
-    if (sortBy === "availability") {
-      const sa = a.availability.filter((t) =>
-        myProfile.availability.includes(t)
-      ).length;
-      const sb = b.availability.filter((t) =>
-        myProfile.availability.includes(t)
-      ).length;
-      return sb - sa;
-    }
+if (sortBy === "availability") {
+  const sa = A(a.availability).filter((t) =>
+    A(myProfile.availability).includes(t)
+  ).length;
+  const sb = A(b.availability).filter((t) =>
+    A(myProfile.availability).includes(t)
+  ).length;
+  return sb - sa;
+}
 
     if (sortBy === "skill") {
       const scoreFn = (p: Player) =>
@@ -339,11 +343,6 @@ const sortedMatches = useMemo(() => {
     // Default: best match score
     if (sortBy === "score") {
       const scoreDiff = (b.score ?? 0) - (a.score ?? 0);
-
-      // ✅ Debug: show comparison details
-      console.log(
-        `Comparing ${a.name} (score: ${a.score}, distance: ${a.distance} km) vs ${b.name} (score: ${b.score}, distance: ${b.distance} km)`
-      );
 
       if (scoreDiff !== 0) return scoreDiff;
 
@@ -485,7 +484,7 @@ const sortedMatches = useMemo(() => {
                   </p>
                   {distanceText && <p className="text-sm text-gray-600">{distanceText}</p>}
                   <p className="text-sm">
-                    <strong>Availability:</strong> {match.availability.join(", ")}
+                  <strong>Availability:</strong> {A(match.availability).join(", ")}
                   </p>
                  <p className="mt-1 text-sm text-gray-700">
   {match.bio?.slice(0, 180)}
