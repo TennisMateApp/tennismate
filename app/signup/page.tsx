@@ -11,6 +11,9 @@ import Cropper from "react-easy-crop";
 import getCroppedImg from "../utils/cropImage";
 import Link from "next/link";
 import Image from "next/image";
+import { Mail, Lock, User, MapPin } from "lucide-react";
+
+const DEFAULT_AVATAR = "/images/default-avatar.jpg";
 
 export default function SignupPage() {
   const [showEmailExistsModal, setShowEmailExistsModal] = useState(false);
@@ -27,11 +30,9 @@ export default function SignupPage() {
   });
 
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
-  const [postcodeError, setPostcodeError] = useState("");
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [status, setStatus] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [previewURL, setPreviewURL] = useState<string | null>(null);
+const [previewURL, setPreviewURL] = useState<string>(DEFAULT_AVATAR);
 
   // Cropper state
   const [showCropper, setShowCropper] = useState(false);
@@ -40,6 +41,7 @@ export default function SignupPage() {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
+  const [errors, setErrors] = useState<{[k:string]: string}>({});
 
   // Password criteria helper function
   function getPasswordCriteria(password: string) {
@@ -53,13 +55,16 @@ export default function SignupPage() {
   // Calculate criteria state
   const passwordCriteria = getPasswordCriteria(formData.password);
   const isPasswordValid = Object.values(passwordCriteria).every(Boolean);
-  const isFormComplete =
-    formData.name &&
-    formData.email &&
-    formData.password &&
-    formData.postcode &&
-    formData.skillLevel;
-  const canSubmit = isFormComplete && isPasswordValid;
+const isFormComplete =
+  !!formData.name &&
+  !!formData.email &&
+  !!formData.password &&
+  !!formData.postcode &&
+  !!formData.skillLevel &&
+  formData.availability.length > 0;
+
+const canSubmit = isFormComplete && isPasswordValid;
+
 
   const handleChange = (
     e: React.ChangeEvent<
@@ -68,6 +73,7 @@ export default function SignupPage() {
   ) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+setErrors((prev) => ({ ...prev, [name]: "" }));
   };
 
   const handleCheckbox = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,6 +122,18 @@ const handleSubmit = async (e: React.FormEvent) => {
     return;
   }
 
+  // Basic required validation (incl. availability)
+const newErrors: {[k:string]: string} = {};
+if (!formData.name) newErrors.name = "Name is required.";
+if (!formData.email) newErrors.email = "Email is required.";
+if (!formData.password) newErrors.password = "Password is required.";
+if (!formData.postcode) newErrors.postcode = "Postcode is required.";
+if (!formData.skillLevel) newErrors.skillLevel = "Skill level is required.";
+if (formData.availability.length === 0) newErrors.availability = "Pick at least one time slot.";
+
+setErrors(newErrors);
+if (Object.keys(newErrors).length > 0) return;
+
   setStatus("Submitting...");
 
   const isVictorian = formData.postcode.trim().startsWith("3");
@@ -130,12 +148,12 @@ const handleSubmit = async (e: React.FormEvent) => {
     const user = userCredential.user;
 
     // 2) Upload profile photo (optional)
-    let photoURL = "";
-    if (croppedImage) {
-      const imageRef = ref(storage, `profile_pictures/${user.uid}/profile.jpg`);
-      await uploadBytes(imageRef, croppedImage);
-      photoURL = await getDownloadURL(imageRef);
-    }
+let photoURL = DEFAULT_AVATAR; // ✅ default until they upload
+if (croppedImage) {
+  const imageRef = ref(storage, `profile_pictures/${user.uid}/profile.jpg`);
+  await uploadBytes(imageRef, croppedImage);
+  photoURL = await getDownloadURL(imageRef);
+}
 
     // 3) Create users/{uid} first with verification flag
     await setDoc(
@@ -197,7 +215,23 @@ const handleSubmit = async (e: React.FormEvent) => {
         <SignupErrorModal onClose={() => setShowEmailExistsModal(false)} />
       )}
 
-      <div className="relative max-w-xl mx-auto p-6">
+  <div className="relative min-h-screen">
+  {/* Background image */}
+  <Image
+    src="/images/login-tennis-court.jpg"
+    alt=""
+    fill
+    priority
+    className="object-cover"
+  />
+  {/* Overlay */}
+  <div className="absolute inset-0 bg-black/40" />
+
+  {/* Content wrapper */}
+<div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4">
+  <div className="relative w-full max-w-xl bg-white/95 backdrop-blur-md p-8 rounded-2xl shadow-xl ring-1 ring-black/5">
+
+
         <Link
           href="/login"
           className="absolute top-4 left-4 text-sm bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded"
@@ -220,35 +254,67 @@ const handleSubmit = async (e: React.FormEvent) => {
         </h1>
 
         <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-          <input
-            type="text"
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
-            placeholder="Your name"
-            required
-            className="w-full p-2 border rounded"
-          />
-          <input
-            type="email"
-            name="email"
-            value={formData.email}
-            onChange={handleChange}
-            placeholder="Email address"
-            required
-            className="w-full p-2 border rounded"
-          />
-          <input
-            type="password"
-            name="password"
-            value={formData.password}
-            onChange={handleChange}
-            placeholder="Password"
-            required
-            className="w-full p-2 border rounded"
-            onFocus={() => setIsPasswordFocused(true)}
-            onBlur={() => setIsPasswordFocused(false)}
-          />
+<label className="block text-sm font-medium mb-1">
+  Name <span className="text-red-600">*</span>
+</label>
+<div className="relative mb-1">
+  <User className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+  <input
+    type="text"
+    name="name"
+    value={formData.name}
+    onChange={handleChange}
+    placeholder="Your name"
+    required
+      autoComplete="name"
+  autoCapitalize="words"
+    className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+  />
+</div>
+{errors.name && <p className="text-sm text-red-600 mb-2">{errors.name}</p>}
+
+<label className="block text-sm font-medium mb-1">
+  Email address <span className="text-red-600">*</span>
+</label>
+<div className="relative mb-1">
+  <Mail className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+  <input
+    type="email"
+    name="email"
+    value={formData.email}
+    onChange={handleChange}
+    placeholder="you@example.com"
+    required
+    autoComplete="email"
+    autoCapitalize="none"
+  autoCorrect="off"
+    inputMode="email"
+    className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+  />
+</div>
+{errors.email && <p className="text-sm text-red-600 mb-2">{errors.email}</p>}
+
+<label className="block text-sm font-medium mb-1">
+  Password <span className="text-red-600">*</span>
+</label>
+<div className="relative mb-1">
+  <Lock className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+  <input
+    type="password"
+    name="password"
+    value={formData.password}
+    onChange={handleChange}
+    placeholder="Password"
+    required
+    autoComplete="new-password"
+    className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+    onFocus={() => setIsPasswordFocused(true)}
+    onBlur={() => setIsPasswordFocused(false)}
+     autoComplete="postal-code"
+  />
+</div>
+{errors.password && <p className="text-sm text-red-600 mb-2">{errors.password}</p>}
+
           {isPasswordFocused && (
             <div className="bg-gray-50 border border-gray-300 rounded px-3 py-2 mt-1 text-sm text-gray-800 shadow min-w-[220px]">
               <strong>Password requirements:</strong>
@@ -281,47 +347,68 @@ const handleSubmit = async (e: React.FormEvent) => {
             </div>
           )}
 
-          <input
-            type="text"
-            name="postcode"
-            value={formData.postcode}
-            onChange={handleChange}
-            placeholder="Postcode"
-            required
-            className="w-full p-2 border rounded"
-          />
-          {postcodeError && (
-            <p className="text-red-600 text-sm mt-1">{postcodeError}</p>
-          )}
+<label className="block text-sm font-medium mb-1">
+  Postcode <span className="text-red-600">*</span>
+</label>
+<div className="relative mb-1">
+  <MapPin className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+<input
+  type="text"
+  name="postcode"
+  value={formData.postcode}
+  onChange={handleChange}
+  placeholder="e.g. 3000"
+  required
+  inputMode="numeric"
+  pattern="^\d{4}$"
+  maxLength={4}
+  className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+/>
+</div>
+{errors.postcode && <p className="text-sm text-red-600 mb-2">{errors.postcode}</p>}
 
-          <select
-            name="skillLevel"
-            value={formData.skillLevel}
-            onChange={handleChange}
-            required
-            className="w-full p-2 border rounded"
-          >
-            <option value="">Select skill level</option>
-            <option value="Beginner">Beginner</option>
-            <option value="Intermediate">Intermediate</option>
-            <option value="Advanced">Advanced</option>
-          </select>
 
-          <fieldset>
-            <legend className="font-medium mb-2">Availability</legend>
-            {["Weekdays AM", "Weekdays PM", "Weekends AM", "Weekends PM"].map((slot) => (
-              <label key={slot} className="block">
-                <input
-                  type="checkbox"
-                  value={slot}
-                  checked={formData.availability.includes(slot)}
-                  onChange={handleCheckbox}
-                  className="mr-2"
-                />
-                {slot}
-              </label>
-            ))}
-          </fieldset>
+<label className="block text-sm font-medium mb-1">
+  Skill level <span className="text-red-600">*</span>
+</label>
+<select
+  name="skillLevel"
+  value={formData.skillLevel}
+  onChange={handleChange}
+  required
+  className="w-full pl-3 pr-8 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+>
+  <option value="">Select skill level</option>
+  <option value="Beginner">Beginner</option>
+  <option value="Intermediate">Intermediate</option>
+  <option value="Advanced">Advanced</option>
+</select>
+{errors.skillLevel && <p className="text-sm text-red-600 mt-1">{errors.skillLevel}</p>}
+
+
+<fieldset className="mt-2">
+  <legend className="block text-sm font-medium mb-2">
+    Availability <span className="text-red-600">*</span>
+  </legend>
+
+  {["Weekdays AM", "Weekdays PM", "Weekends AM", "Weekends PM"].map((slot) => {
+    const checked = formData.availability.includes(slot);
+    return (
+      <label key={slot} className="flex items-center gap-2 mb-2">
+        <input
+          type="checkbox"
+          value={slot}
+          checked={checked}
+          onChange={handleCheckbox}
+          className="h-4 w-4 accent-green-600"
+        />
+        <span>{slot}</span>
+      </label>
+    );
+  })}
+  {errors.availability && <p className="text-sm text-red-600 mt-1">{errors.availability}</p>}
+</fieldset>
+
 
           <textarea
             name="bio"
@@ -334,13 +421,12 @@ const handleSubmit = async (e: React.FormEvent) => {
 
           <div className="flex flex-col items-start gap-2">
             <label className="text-sm font-medium">Profile Picture:</label>
-            {previewURL && (
-              <img
-                src={previewURL}
-                alt="Preview"
-                className="w-20 h-20 object-cover rounded-full border"
-              />
-            )}
+            <img
+  src={previewURL}
+  alt="Profile preview"
+  className="w-20 h-20 object-cover rounded-full border bg-gray-100"
+/>
+
             <label
               htmlFor="upload"
               className="cursor-pointer inline-block bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 rounded"
@@ -391,45 +477,54 @@ const handleSubmit = async (e: React.FormEvent) => {
             </div>
           )}
 
-          <button
-            type="submit"
-            className={`bg-blue-600 text-white px-4 py-2 rounded ${!canSubmit ? "opacity-50 cursor-not-allowed" : ""}`}
-            disabled={!canSubmit}
-          >
-            Submit
-          </button>
+<button
+  type="submit"
+  className={`w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-lg transition ${!canSubmit ? "opacity-60 cursor-not-allowed" : ""}`}
+  disabled={!canSubmit}
+>
+  Create Account
+</button>
 
-          {status && <p className="mt-2 text-sm">{status}</p>}
+          {status && (
+  <div role="status" aria-live="polite" className="mt-2 text-sm text-gray-800">
+    {status}
+  </div>
+)}
+
+  <div className="text-xs text-gray-600 text-center mt-4">
+  By signing up, you agree to our{" "}
+  <a href="/terms" className="text-blue-600 underline">Terms</a>{" "}
+  and{" "}
+  <a href="/privacy" className="text-blue-600 underline">Privacy Policy</a>.
+</div>
+
         </form>
       </div>
 
-      <div className="text-xs text-gray-600 text-center mt-4">
-        By signing up, you agree to our{" "}
-        <a href="/terms" className="text-blue-600 underline">
-          Terms
-        </a>{" "}
-        and{" "}
-        <a href="/privacy" className="text-blue-600 underline">
-          Privacy Policy
-        </a>.
-        {showWaitlistModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-lg p-6 max-w-md text-center space-y-4">
-              <h2 className="text-xl font-semibold">Thanks for signing up!</h2>
-              <p className="text-gray-700 text-sm">
-                📍 TennisMate is currently only available in Victoria.<br />
-                We’ve saved your interest and will notify you when we launch in your area.
-              </p>
-              <button
-                onClick={() => setShowWaitlistModal(false)}
-                className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
-              >
-                Got it
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </>
-  );
+
+{showWaitlistModal && (
+  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="bg-white rounded-xl shadow-lg p-6 max-w-md text-center space-y-4">
+      <h2 className="text-xl font-semibold">Thanks for signing up!</h2>
+      <p className="text-gray-700 text-sm">
+        📍 TennisMate is currently only available in Victoria.<br />
+        We’ve saved your interest and will notify you when we launch in your area.
+      </p>
+      <button
+        onClick={() => setShowWaitlistModal(false)}
+        className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+      >
+        Got it
+      </button>
+    </div>
+  </div>
+)}
+
+    </div>  {/* closes content wrapper */}
+  </div>    {/* closes background wrapper */}
+</>
+);
 }
+
+
+

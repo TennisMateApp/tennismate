@@ -67,6 +67,22 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showVerify, setShowVerify] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
+
+useEffect(() => {
+  function onKey(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      setDropdownOpen(false);
+      setShowSettings(false);
+    }
+  }
+  if (dropdownOpen || showSettings) {
+    window.addEventListener("keydown", onKey);
+  }
+  return () => window.removeEventListener("keydown", onKey);
+}, [dropdownOpen, showSettings]);
+
+
   const router = useRouter();
   const pathname = usePathname();
   const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
@@ -76,19 +92,26 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 const hideNavVerify = pathname?.startsWith("/verify-email"); // 👈 hide chrome on verify page
 const hideAllNav = hideNavMessages || hideNavVerify;
 
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setDropdownOpen(false);
-      }
+useEffect(() => {
+  function handleClickOutside(event: MouseEvent) {
+    const target = event.target as Node;
+
+    if (dropdownRef.current && !dropdownRef.current.contains(target)) {
+      setDropdownOpen(false);
     }
-    if (dropdownOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
+    if (settingsRef.current && !settingsRef.current.contains(target)) {
+      setShowSettings(false);
     }
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [dropdownOpen]);
+  }
+
+  if (dropdownOpen || showSettings) {
+    document.addEventListener("mousedown", handleClickOutside);
+  }
+  return () => {
+    document.removeEventListener("mousedown", handleClickOutside);
+  };
+}, [dropdownOpen, showSettings]);
+
 
   useEffect(() => {
     let unsubAuth = () => {};
@@ -248,8 +271,8 @@ const hideAllNav = hideNavMessages || hideNavVerify;
     <InstallPwaIosPrompt />
     <PushClientOnly />
       {!hideAllNav && (
-        <header className="bg-white border-b p-4 mb-6 shadow-sm">
-          <div className="max-w-5xl mx-auto flex justify-between items-center">
+       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
+  <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center">
               <img src="/logo.png" alt="TennisMate" className="w-[40px] h-[40px] rounded-full object-cover" />
             </Link>
@@ -351,7 +374,7 @@ const hideAllNav = hideNavMessages || hideNavVerify;
                       </div>
                     )}
                   </div>
-                  <div className="relative">
+                  <div className="relative" ref={settingsRef}>
                     <button onClick={() => setShowSettings(!showSettings)} title="Settings">
                       <Settings className="w-6 h-6 text-green-600 hover:text-green-800" />
                     </button>
