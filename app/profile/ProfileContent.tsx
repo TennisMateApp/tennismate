@@ -217,7 +217,7 @@ return (
           <span className="pointer-events-none absolute -bottom-8 -left-8 h-24 w-24 rounded-full bg-emerald-100/60 blur-2xl" />
 
           <img
-            src={previewURL || "/default-avatar.png"}
+            src={previewURL || "/images/default-avatar.png"}
             alt={`${formData.name || "User"} avatar`}
             className="h-24 w-24 rounded-full object-cover ring-4 ring-white"
           />
@@ -573,3 +573,4 @@ return (
     {status && <p className="text-sm mt-2">{status}</p>}
   </div>
 );
+}
