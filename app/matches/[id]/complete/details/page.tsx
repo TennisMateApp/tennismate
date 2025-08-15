@@ -15,8 +15,11 @@ import {
 import Image from "next/image";
 import withAuth from "@/components/withAuth";
 import { ComponentType } from "react"; // ✅ Add this for typing
+import { GiTennisBall } from "react-icons/gi";
 
 const tennisPoints = ["0", "15", "30", "40", "Adv"];
+const pointText = (isTB: boolean, pts: number, tbPts: number) =>
+  isTB ? String(tbPts) : tennisPoints[pts] ?? "0";
 
 function MatchDetailsForm() {
   const { id: matchId } = useParams();
@@ -250,83 +253,263 @@ router.push(`/matches/${matchId}/summary`);
 
   if (!playerA || !playerB) return <div className="p-6 text-center">Loading...</div>;
 
-  return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Match Scoreboard</h1>
-      {tieBreaker && <p className="text-red-600 font-semibold mb-2">🏆 Tie-breaker in progress</p>}
-
-      <div className="overflow-x-auto">
-        <table className="min-w-[640px] table-auto border-collapse border border-gray-400 text-center">
-          <thead>
-            <tr>
-              <th rowSpan={2} className="border border-gray-400 px-2 py-2 w-40">Player</th>
-              <th colSpan={6} className="border border-gray-400 px-4 py-2">Sets</th>
-              <th rowSpan={2} className="border border-gray-400 px-4 py-2">Points</th>
-            </tr>
-            <tr>
-              {[1, 2, 3, 4, 5, 6].map((num) => (
-                <th key={num} className="border border-gray-400 px-2 py-1 text-sm">{num}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {["A", "B"].map((player) => {
-              const p = player === "A" ? playerA : playerB;
-              const playerSets = sets.map((s) => player === "A" ? s.A : s.B);
-              const tieScores = sets.map((s) => player === "A" ? s.tieBreakA : s.tieBreakB);
-              return (
-                <tr key={player}>
-<td className="border border-gray-400 px-2 py-2 text-left min-w-[140px] max-w-[160px]">
-  <div className="flex items-center gap-2 overflow-hidden">
-    <Image
-      src={p.photoURL || "/default-avatar.png"}
-      width={30}
-      height={30}
-      className="rounded-full shrink-0"
-      alt={`Player ${player}`}
-    />
-    <span className="truncate text-sm block w-full">{p.name || `Player ${player}`}</span>
+return (
+  <div className="mx-auto max-w-3xl p-4 pb-40 sm:pb-8">
+  {/* Page title */}
+<div className="mb-3">
+  <div className="flex items-center gap-3">
+    <GiTennisBall className="h-6 w-6 text-green-600" aria-hidden="true" />
+    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Match Scoreboard</h1>
   </div>
-</td>
-                  {[0, 1, 2, 3, 4, 5].map((i) => (
-                    <td key={i} className="border border-gray-400 px-2 py-1 text-sm">
-                      {playerSets[i] ?? "-"}
-                      {tieScores[i] !== undefined && (
-                        <sup className="text-[10px] ml-1 text-gray-600">{tieScores[i]}</sup>
+
+  {/* subtitle aligned under the title */}
+  <p className="mt-1 ml-9 text-sm text-gray-600">
+    Live scoring — the highlighted column is the current set.
+  </p>
+
+  {/* optional: keep tie-break notice here (otherwise move it to the sticky toolbar) */}
+  {tieBreaker && (
+    <p
+      className="mt-1 ml-9 inline-block rounded-full bg-amber-50 px-2 py-1 text-xs text-amber-700 ring-1 ring-amber-200"
+      aria-live="polite"
+    >
+      🏆 Tie-break in progress
+    </p>
+  )}
+</div>
+{/* Sticky toolbar */}
+<div className="sticky top-[56px] z-10 mb-3 rounded-xl bg-white/90 backdrop-blur ring-1 ring-black/5 p-3">
+  <div className="flex flex-wrap items-center gap-3">
+    <span className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-2.5 py-1 text-sm">
+      Current set
+      <span className="rounded-md bg-white px-1.5 py-0.5 ring-1 ring-black/5 font-medium">
+        {currentSetIndex + 1}
+      </span>
+    </span>
+
+    {tieBreaker && (
+      <span className="text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+        Tie-break
+      </span>
+    )}
+
+    <button
+      onClick={() =>
+        updateFirestoreState({
+          points: { A: 0, B: 0 },
+          tieBreakerPoints: { A: 0, B: 0 },
+        })
+      }
+      className="ml-auto rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50"
+    >
+      Reset points
+    </button>
+  </div>
+</div>
+
+    {/* ---------- Mobile: card layout (sm:hidden) ---------- */}
+    <div className="sm:hidden space-y-3">
+      {(["A", "B"] as const).map((playerKey) => {
+        const p = playerKey === "A" ? playerA : playerB;
+        const pSets = sets.map((s) => (playerKey === "A" ? s.A : s.B));
+        const pTBs  = sets.map((s) => (playerKey === "A" ? s.tieBreakA : s.tieBreakB));
+        const pt    = pointText(tieBreaker, points[playerKey], tieBreakerPoints[playerKey]);
+
+        return (
+          <div key={playerKey} className="rounded-xl border bg-white p-3 shadow-sm">
+            {/* Header: avatar + name */}
+            <div className="flex items-center gap-3">
+              <Image
+                src={p.photoURL || "/images/default-avatar.jpg"}
+                alt={p.name || `Player ${playerKey}`}
+                width={40}
+                height={40}
+                className="rounded-full"
+              />
+              <div className="min-w-0">
+                <div className="font-medium truncate">{p.name || `Player ${playerKey}`}</div>
+                {/* Set chips */}
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {pSets.map((val, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs text-gray-700"
+                      title={pTBs[i] != null ? `Tiebreak: ${pTBs[i]}` : undefined}
+                    >
+                      Set {i + 1}: {val ?? "-"}
+                      {pTBs[i] != null && (
+                        <sup className="ml-1 text-[10px] text-gray-500">{pTBs[i]}</sup>
                       )}
-                    </td>
+                    </span>
                   ))}
-                  <td className="border border-gray-400 px-4 py-2">
-                    {tieBreaker ? tieBreakerPoints[player as "A" | "B"] : tennisPoints[points[player as "A" | "B"]]}
-                    <div className="flex justify-center gap-1 mt-1">
-                      <button
-                        onClick={() => incrementPoint(player as "A" | "B")}
-                        className="px-2 py-1 bg-green-500 text-white rounded text-xs"
-                      >
-                        +
-                      </button>
-                      <button
-                        onClick={() => decrementPoint(player as "A" | "B")}
-                        className="px-2 py-1 bg-red-500 text-white rounded text-xs"
-                      >
-                        −
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                </div>
+              </div>
+            </div>
+
+            {/* Points row */}
+            <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
+              <div className="text-sm text-gray-600">Points</div>
+              <div className="text-lg font-semibold tabular-nums">{pt}</div>
+            </div>
+
+            {/* Controls */}
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => incrementPoint(playerKey)}
+                className="h-10 rounded-lg bg-green-600 text-white font-medium active:scale-[.98]"
+                aria-label={`Add point for ${p.name || `Player ${playerKey}`}`}
+              >
+                + Point
+              </button>
+              <button
+                onClick={() => decrementPoint(playerKey)}
+                className="h-10 rounded-lg bg-red-50 text-red-700 font-medium active:scale-[.98]"
+                aria-label={`Remove point for ${p.name || `Player ${playerKey}`}`}
+              >
+                − Point
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+
+{/* Table card (tablet & desktop only) */}
+<div className="hidden md:block overflow-x-auto rounded-xl border bg-white shadow-sm">
+  <table className="min-w-full table-auto text-center" role="grid">
+    <caption className="sr-only">Live tennis scoring table</caption>
+    <thead className="bg-gray-50">
+      <tr>
+        <th scope="col" rowSpan={2} className="px-3 py-3 w-48 text-left">Player</th>
+        <th scope="col" colSpan={6} className="px-3 py-3">Sets</th>
+        <th scope="col" rowSpan={2} className="px-2 sm:px-3 py-3 w-[56px] sm:w-auto">
+  Points
+</th>
+      </tr>
+      <tr>
+        {[1, 2, 3, 4, 5, 6].map((num, i) => {
+          const isActive = i === currentSetIndex;
+          return (
+            <th
+              key={num}
+              className={
+                "px-2 py-2 text-sm font-medium " +
+                (isActive ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "")
+              }
+            >
+              {num}
+            </th>
+          );
+        })}
+      </tr>
+    </thead>
+
+    <tbody>
+      {(["A", "B"] as const).map((playerKey) => {
+        const p = playerKey === "A" ? playerA : playerB;
+        const pSets = sets.map((s) => (playerKey === "A" ? s.A : s.B));
+        const pTBs  = sets.map((s) => (playerKey === "A" ? s.tieBreakA : s.tieBreakB));
+        const pt    = pointText(tieBreaker, points[playerKey], tieBreakerPoints[playerKey]);
+
+        return (
+          <tr key={playerKey} className="border-t">
+            {/* Player cell */}
+            <th scope="row" className="px-3 py-3 text-left font-normal">
+              <div className="flex items-center gap-2">
+                <Image
+                  src={p.photoURL || "/images/default-avatar.jpg"}
+                  width={32}
+                  height={32}
+                  alt={`Player ${playerKey}`}
+                  className="rounded-full"
+                />
+                <span className="truncate">{p.name || `Player ${playerKey}`}</span>
+              </div>
+            </th>
+
+            {/* Set cells with active column highlight */}
+            {[0, 1, 2, 3, 4, 5].map((i) => {
+              const isActive = i === currentSetIndex;
+              return (
+                <td
+                  key={i}
+                  className={
+                    "px-2 py-2 text-sm tabular-nums " +
+                    (isActive ? "bg-green-50 ring-1 ring-green-200" : "")
+                  }
+                  title={pTBs[i] != null ? `Tie-break: ${pTBs[i]}` : undefined}
+                >
+                  {pSets[i] ?? "-"}
+                  {pTBs[i] != null && (
+                    <sup className="ml-1 text-[10px] text-gray-500">{pTBs[i]}</sup>
+                  )}
+                </td>
               );
             })}
-          </tbody>
-        </table>
-      </div>
 
-      <div className="flex justify-end mt-6">
-        <button onClick={handleSubmit} className="px-4 py-2 bg-green-600 text-white rounded">
-          Game, Set & Match
-        </button>
-      </div>
+            {/* Points + compact controls */}
+            <td className="px-2 sm:px-3 py-3">
+  <div className="inline-flex items-center gap-2">
+    <span className="font-semibold tabular-nums">{pt}</span>
+
+    {/* Hide table controls on mobile; keep them on desktop */}
+    <div className="hidden sm:flex items-center gap-1">
+      <button
+        onClick={() => incrementPoint(playerKey)}
+        className="px-2 py-1 rounded bg-green-600 text-white text-xs hover:bg-green-700"
+        aria-label={`Add point for ${p.name || `Player ${playerKey}`}`}
+      >
+        +
+      </button>
+      <button
+        onClick={() =>
+          decrementPoint(playerKey)
+        }
+        disabled={!(tieBreaker ? tieBreakerPoints[playerKey] > 0 : points[playerKey] > 0)}
+        className="px-2 py-1 rounded bg-red-50 text-red-700 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+        aria-label={`Remove point for ${p.name || `Player ${playerKey}`}`}
+      >
+        −
+      </button>
     </div>
-  );
+  </div>
+</td>
+
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+</div>
+
+{/* Primary action: fixed on mobile (above bottom nav/FAB), inline on desktop */}
+<div className="sm:mt-6">
+  <div
+    className="fixed left-0 right-0 px-4 sm:static sm:px-0 z-50 pointer-events-none sm:pointer-events-auto"
+    // keep the button safely above bottom bars + safe area
+    style={{ bottom: 'max(6rem, env(safe-area-inset-bottom))' }} // ~96px on phones; adjust if needed
+  >
+    <div className="max-w-3xl mx-auto">
+      <button
+        onClick={handleSubmit}
+        className="pointer-events-auto w-full sm:w-auto rounded-lg bg-green-600 px-4 py-3 text-white font-semibold shadow-lg hover:bg-green-700"
+      >
+        Game, Set &amp; Match
+      </button>
+    </div>
+  </div>
+</div>
+
+<style jsx global>{`
+  /* Hide the floating “Give Feedback” FAB on this page */
+  button.fixed.bottom-6.right-6 {
+    display: none !important;
+  }
+`}</style>
+
+  </div>
+);
+
 }
 
 // ✅ Correct export to fix build type error

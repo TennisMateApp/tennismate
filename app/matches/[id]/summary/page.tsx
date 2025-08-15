@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { db, auth } from "@/lib/firebase";
 import {
@@ -15,6 +15,8 @@ import {
   arrayUnion,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
+import { Trophy } from "lucide-react";
+import { GiTennisBall } from "react-icons/gi";
 
 export default function MatchSummaryPage() {
   const { id: matchId } = useParams();
@@ -27,6 +29,7 @@ export default function MatchSummaryPage() {
   const [loading, setLoading] = useState(true);
   const [rematchRequested, setRematchRequested] = useState(false);
 
+  // ---- auth ----
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) setCurrentUserId(user.uid);
@@ -34,6 +37,7 @@ export default function MatchSummaryPage() {
     return () => unsubscribe();
   }, []);
 
+  // ---- data ----
   useEffect(() => {
     async function fetchMatchData() {
       if (!matchId) return;
@@ -72,6 +76,17 @@ export default function MatchSummaryPage() {
     fetchMatchData();
   }, [matchId]);
 
+  // ---- helpers for UI ----
+  const parsedSets = useMemo(
+    () =>
+      scoreArray.map((s) => {
+        const [a, b] = s.split("-").map((n) => Number(n || 0));
+        return { A: a, B: b };
+      }),
+    [scoreArray]
+  );
+
+  // ---- actions ----
   const handleRematch = async () => {
     if (!currentUserId || !match) return;
     const { fromUserId, toUserId, fromName, toName } = match;
@@ -104,138 +119,194 @@ export default function MatchSummaryPage() {
   };
 
 const handleComplete = async () => {
-  if (!matchId || !currentUserId || !match?.winnerId) return;
+  const cleanId =
+    Array.isArray(matchId) ? matchId[0] : (matchId as string | undefined);
+
+  if (!cleanId) return; // no route without an id
 
   try {
-    const matchRef = doc(db, "match_requests", matchId as string);
-    const matchSnap = await getDoc(matchRef);
-    if (!matchSnap.exists()) return;
-    const matchData = matchSnap.data();
-
-    const alreadyCompletedBy = matchData.completedBy || [];
-    if (alreadyCompletedBy.includes(currentUserId)) return;
-
-    const updatedCompletedBy = [...alreadyCompletedBy, currentUserId];
-
-    // Update match with current user’s completion
-await updateDoc(matchRef, {
-  status: "completed",
-  completedBy: arrayUnion(currentUserId),
-});
-
-// ✅ STEP 2: Optional secondary update for backend fields
-await updateDoc(matchRef, {
-  completed: true,
-  completedAt: serverTimestamp(),
-});
-
-    if (updatedCompletedBy.length === 2) {
-      // ✅ Both players have completed — archive and trigger backend processing
-      const historyRef = doc(collection(db, "match_history"));
-      await setDoc(historyRef, {
-        ...matchData,
-        completed: true,
-        status: "completed",
-        movedAt: serverTimestamp(),
-      });
-
-      await deleteDoc(matchRef);
-
-      // 🔥 Write to completed_matches to trigger Cloud Function
-await setDoc(doc(db, "completed_matches", Array.isArray(matchId) ? matchId[0] : matchId), {
-        matchId,
-        winnerId: matchData.winnerId,
-        fromUserId: matchData.fromUserId,
-        toUserId: matchData.toUserId,
-        timestamp: serverTimestamp(),
-      });
+    // If we don't have auth or winner yet, just go to feedback anyway.
+    if (!currentUserId || !match?.winnerId) {
+      router.push(`/matches/${cleanId}/feedback`);
+      return;
     }
 
-    // ✅ Always create feedback doc (both players can access it)
-const feedbackDocId = `${matchId}_${currentUserId}`;
-await setDoc(doc(db, "match_feedback", feedbackDocId), {
-  matchId,
-  userId: currentUserId,
-  createdAt: serverTimestamp(),
-  feedback: {}
-});
+    const matchRef = doc(db, "match_requests", cleanId);
+    const matchSnap = await getDoc(matchRef);
+    if (!matchSnap.exists()) {
+      // If somehow missing, just go to feedback to avoid dead-ends
+      router.push(`/matches/${cleanId}/feedback`);
+      return;
+    }
 
-    router.push(`/matches/${matchId}/feedback`);
+    const matchData = matchSnap.data();
+    const alreadyCompletedBy: string[] = matchData.completedBy || [];
+    const iAlreadyCompleted = alreadyCompletedBy.includes(currentUserId);
+
+    // Only do updates if I haven't completed yet
+    if (!iAlreadyCompleted) {
+      // Step 1: mark as completed by user
+      await updateDoc(matchRef, {
+        status: "completed",
+        completedBy: arrayUnion(currentUserId),
+      });
+
+      // Step 2: mark completed & timestamp
+      await updateDoc(matchRef, {
+        completed: true,
+        completedAt: serverTimestamp(),
+      });
+
+      // Step 3: if both have completed → archive + function trigger
+      if ((alreadyCompletedBy.length + 1) === 2) {
+        const historyRef = doc(collection(db, "match_history"));
+        await setDoc(historyRef, {
+          ...matchData,
+          completed: true,
+          status: "completed",
+          movedAt: serverTimestamp(),
+        });
+
+        await deleteDoc(matchRef);
+
+        await setDoc(doc(db, "completed_matches", cleanId), {
+          matchId: cleanId,
+          winnerId: matchData.winnerId,
+          fromUserId: matchData.fromUserId,
+          toUserId: matchData.toUserId,
+          timestamp: serverTimestamp(),
+        });
+      }
+    }
+
+    // Step 4: ensure feedback doc exists for this user (idempotent)
+    if (currentUserId) {
+      const feedbackDocId = `${cleanId}_${currentUserId}`;
+      await setDoc(
+        doc(db, "match_feedback", feedbackDocId),
+        {
+          matchId: cleanId,
+          userId: currentUserId,
+          createdAt: serverTimestamp(),
+          feedback: {},
+        },
+        { merge: true }
+      );
+    }
+
+    // Always navigate to feedback
+    router.push(`/matches/${cleanId}/feedback`);
   } catch (error) {
     console.error("Failed to complete match:", error);
+    // Even if something fails, still navigate so the user can leave feedback.
+    router.push(`/matches/${cleanId}/feedback`);
   }
 };
 
   if (loading) return <div className="p-6">Loading summary...</div>;
 
   return (
-    <div className="p-6 max-w-2xl mx-auto text-center">
-      <h1 className="text-3xl font-bold mb-6">🎾 Match Summary</h1>
+   <div className="mx-auto max-w-3xl p-4 pb-28 sm:pb-8 text-center">
+      {/* Page title */}
+      <div className="mb-3 text-left">
+        <div className="flex items-center gap-3">
+          <GiTennisBall className="h-6 w-6 text-green-600" aria-hidden="true" />
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Match Summary</h1>
+        </div>
+        <p className="mt-1 ml-9 text-sm text-gray-600">Nice work! Here’s how the sets finished up.</p>
+      </div>
 
       {winner && loser ? (
-        <div className="flex flex-col items-center gap-6">
-          <div className="flex items-center justify-center gap-8">
+        <>
+          {/* Winner highlight */}
+          <div className="mb-6 flex items-center justify-center gap-6">
             {/* Winner */}
-            <div className="flex flex-col items-center">
-              <img
-                src={winner.photoURL || "/default-avatar.png"}
-                className="w-24 h-24 rounded-full border-4 border-green-500 object-cover"
-                alt={winner.name}
-              />
-              <p className="text-green-700 font-semibold mt-2">🏆 {winner.name}</p>
+            <div className="text-center scale-105">
+              <div className="mx-auto h-16 w-16 rounded-full ring-2 ring-yellow-400 ring-offset-2">
+                <img
+                  src={winner.photoURL || "/default-avatar.png"}
+                  alt={winner.name}
+                  className="h-16 w-16 rounded-full object-cover"
+                />
+              </div>
+              <div className="mt-2 text-sm font-medium flex items-center justify-center gap-1 text-green-700">
+                <Trophy className="h-4 w-4 text-yellow-500" />
+                <span>{winner.name}</span>
+              </div>
             </div>
-            <div className="text-xl font-bold text-gray-500">vs</div>
+
+            <span className="text-gray-500">vs</span>
+
             {/* Loser */}
-            <div className="flex flex-col items-center">
-              <img
-                src={loser.photoURL || "/default-avatar.png"}
-                className="w-24 h-24 rounded-full border object-cover"
-                alt={loser.name}
-              />
-              <p className="text-gray-600 font-semibold mt-2">{loser.name}</p>
+            <div className="text-center">
+              <div className="mx-auto h-16 w-16 rounded-full ring-2 ring-gray-200 ring-offset-2">
+                <img
+                  src={loser.photoURL || "/default-avatar.png"}
+                  alt={loser.name}
+                  className="h-16 w-16 rounded-full object-cover"
+                />
+              </div>
+              <div className="mt-2 text-sm font-medium text-gray-700">{loser.name}</div>
             </div>
           </div>
 
-          {/* Scoreboard */}
-          <div className="w-full max-w-md mt-4 bg-white rounded-lg shadow-sm border">
-            <div className="flex justify-center gap-8 font-bold text-gray-800 border-b p-2">
-              <span className="w-20 text-right">Set</span>
-              <span className="w-20 text-center">{winner.name}</span>
-              <span className="w-20 text-center">{loser.name}</span>
-            </div>
-            {scoreArray.map((set, i) => {
-              const [a, b] = set.split("-").map(Number);
-              return (
-                <div key={i} className="flex justify-center gap-8 border-b py-2">
-                  <span className="w-20 text-right">Set {i + 1}</span>
-                  <span className="w-20 text-center">{a}</span>
-                  <span className="w-20 text-center">{b}</span>
-                </div>
-              );
-            })}
+          {/* Mobile summary cards */}
+          <div className="sm:hidden space-y-2 mb-4 text-left">
+            {parsedSets.map((s, i) => (
+              <div key={i} className="flex items-center justify-between rounded-lg border bg-white px-3 py-2">
+                <span className="text-sm text-gray-600">Set {i + 1}</span>
+                <span className="font-semibold tabular-nums">{s.A}–{s.B}</span>
+              </div>
+            ))}
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-4 mt-6">
-            <button
-              onClick={handleRematch}
-              disabled={rematchRequested}
-              className="px-6 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {rematchRequested ? "Rematch Requested" : "Request Rematch"}
-            </button>
-
-            <button
-              onClick={handleComplete}
-              className="px-6 py-2 rounded bg-green-600 text-white hover:bg-green-700"
-            >
-              Complete
-            </button>
+          {/* Desktop/tablet table */}
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="min-w-[540px] mx-auto border-separate border-spacing-0 text-center bg-white rounded-xl overflow-hidden shadow-sm">
+              <thead className="bg-gray-50 text-sm">
+                <tr>
+                  <th className="py-3 px-4 text-left rounded-tl-xl">Set</th>
+                  <th className="py-3 px-4">{winner.name}</th>
+                  <th className="py-3 px-4 rounded-tr-xl">{loser.name}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {parsedSets.map((s, i) => (
+                  <tr key={i} className="border-t">
+                    <th className="py-2.5 px-4 text-left font-medium text-gray-700">Set {i + 1}</th>
+                    <td className="py-2.5 px-4 tabular-nums">{s.A}</td>
+                    <td className="py-2.5 px-4 tabular-nums">{s.B}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+        </>
       ) : (
         <p className="text-lg text-gray-600">This match ended without a declared winner.</p>
       )}
+
+     {/* Sticky actions */}
+<div className="sm:mt-6">
+  <div className="fixed bottom-20 left-0 right-0 px-4 z-50 sm:static sm:px-0">
+    <div className="mx-auto max-w-3xl flex flex-col sm:flex-row gap-3 sm:justify-center">
+      <button
+        onClick={handleRematch}
+        disabled={rematchRequested}
+        className="w-full sm:w-auto rounded-xl bg-blue-600 px-4 py-3 text-white text-sm font-semibold shadow hover:bg-blue-700 disabled:opacity-50"
+      >
+        {rematchRequested ? "Rematch Requested" : "Request Rematch"}
+      </button>
+
+      <button
+        onClick={handleComplete}
+        className="w-full sm:w-auto rounded-xl bg-green-600 px-4 py-3 text-white text-sm font-semibold shadow hover:bg-green-700"
+      >
+        Done
+          </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

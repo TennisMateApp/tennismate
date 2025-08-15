@@ -66,15 +66,23 @@ const isFormComplete =
 const canSubmit = isFormComplete && isPasswordValid;
 
 
-  const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
-  ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-setErrors((prev) => ({ ...prev, [name]: "" }));
-  };
+const handleChange = (
+  e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+) => {
+  const { name, value } = e.target;
+
+  if (name === "postcode") {
+    // keep only digits and cap at 4
+    const digits = value.replace(/\D/g, "").slice(0, 4);
+    setFormData((prev) => ({ ...prev, postcode: digits }));
+    setErrors((prev) => ({ ...prev, postcode: "" }));
+    return;
+  }
+
+  setFormData((prev) => ({ ...prev, [name]: value }));
+  setErrors((prev) => ({ ...prev, [name]: "" }));
+};
+
 
   const handleCheckbox = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { value, checked } = e.target;
@@ -299,19 +307,18 @@ if (croppedImage) {
 </label>
 <div className="relative mb-1">
   <Lock className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-  <input
-    type="password"
-    name="password"
-    value={formData.password}
-    onChange={handleChange}
-    placeholder="Password"
-    required
-    autoComplete="new-password"
-    className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-    onFocus={() => setIsPasswordFocused(true)}
-    onBlur={() => setIsPasswordFocused(false)}
-     autoComplete="postal-code"
-  />
+<input
+  type="password"
+  name="password"
+  value={formData.password}
+  onChange={handleChange}
+  placeholder="Password"
+  required
+  autoComplete="new-password"
+  className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+  onFocus={() => setIsPasswordFocused(true)}
+  onBlur={() => setIsPasswordFocused(false)}
+/>
 </div>
 {errors.password && <p className="text-sm text-red-600 mb-2">{errors.password}</p>}
 
@@ -360,10 +367,13 @@ if (croppedImage) {
   placeholder="e.g. 3000"
   required
   inputMode="numeric"
-  pattern="^\d{4}$"
+  pattern="[0-9]{4}"
   maxLength={4}
+  autoComplete="postal-code"
+  title="Enter a 4-digit postcode, e.g. 3058"
   className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
 />
+
 </div>
 {errors.postcode && <p className="text-sm text-red-600 mb-2">{errors.postcode}</p>}
 

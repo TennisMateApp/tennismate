@@ -6,6 +6,7 @@ import { collection, getDocs, query, orderBy, limit, startAfter, QueryDocumentSn
 import { db } from "@/lib/firebaseConfig";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { GiTennisBall } from "react-icons/gi";
 
 interface Player {
   id: string;
@@ -114,7 +115,16 @@ return players.filter((p) => p.name?.toLowerCase().includes(q));
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
    {/* Heading */}
-<h1 className="text-2xl font-bold mb-3">TennisMates</h1>
+<div className="mb-3">
+  <h1 className="text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
+    <GiTennisBall className="h-6 w-6 text-green-600" />
+    TennisMates
+  </h1>
+  <p className="text-sm text-gray-600">
+    Find partners by name, skill & postcode.
+  </p>
+</div>
+
 
 {/* Sticky search / controls bar (offset equals header height) */}
 <div className="sticky top-[56px] z-30 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border rounded-xl">

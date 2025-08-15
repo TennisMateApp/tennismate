@@ -82,15 +82,26 @@ useEffect(() => {
   return () => window.removeEventListener("keydown", onKey);
 }, [dropdownOpen, showSettings]);
 
+const router = useRouter();
+const pathname = usePathname() || "";
+const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
+const [gateReady, setGateReady] = useState(false);
 
-  const router = useRouter();
-  const pathname = usePathname();
-  const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
-  const [gateReady, setGateReady] = useState(false);
+// Existing hides
+const hideNavMessages = pathname.startsWith("/messages/");
+const hideNavVerify = pathname.startsWith("/verify-email"); // 👈 hide chrome on verify page
 
- const hideNavMessages = pathname?.startsWith("/messages/");
-const hideNavVerify = pathname?.startsWith("/verify-email"); // 👈 hide chrome on verify page
-const hideAllNav = hideNavMessages || hideNavVerify;
+// Hide on match completion/summary routes (supports optional trailing slash)
+const hideFeedback =
+  /^\/matches\/[^/]+\/(complete(?:\/details)?|summary)\/?$/.test(pathname);
+
+// NEW: hide on the feedback form route
+const hideNavFeedback =
+  /^\/matches\/[^/]+\/feedback\/?$/.test(pathname);
+
+// Aggregate: header/footer/FAB should be hidden if any of the above match
+const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFeedback;
+
 
 useEffect(() => {
   function handleClickOutside(event: MouseEvent) {
@@ -254,7 +265,7 @@ useEffect(() => {
     return (
       <button
         onClick={() => router.push("/support")}
-        className="fixed bottom-20 right-6 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-full shadow-lg flex items-center gap-2 transition-all duration-200 z-50"
+        className="fixed bottom-24 right-6 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-full shadow-lg flex items-center gap-2 transition-all duration-200 z-50"
       >
         <span className="text-sm font-medium">Give Feedback</span>
       </button>
@@ -434,7 +445,7 @@ useEffect(() => {
           </div>
         </footer>
       )}
-      {user && !hideAllNav && <FloatingFeedbackButton />}
+     {user && !hideAllNav && !hideFeedback && <FloatingFeedbackButton />}
     </div>
   );
 }

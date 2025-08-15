@@ -8,6 +8,7 @@ import Image from "next/image";
 import withAuth from "@/components/withAuth";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { CalendarDays, CheckCircle2, Trophy } from "lucide-react";
 
 
 type Player = {
@@ -105,88 +106,127 @@ useEffect(() => {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto text-gray-800 space-y-10">
+  <div className="mx-auto max-w-3xl p-4 sm:p-6 pb-28 text-gray-800 space-y-6">
+    {/* HERO HEADER */}
+    <section className="relative overflow-hidden rounded-2xl border border-gray-200 bg-gradient-to-b from-white to-emerald-50 p-5 sm:p-6 shadow-sm">
+      {/* decorative blobs */}
+      <span className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full bg-emerald-200/40 blur-2xl" />
+      <span className="pointer-events-none absolute -bottom-8 -left-8 h-24 w-24 rounded-full bg-emerald-100/60 blur-2xl" />
 
-      {/* Top Section: Player Info */}
-      <section className="flex flex-col gap-4">
-  <div className="flex items-start gap-6">
-  <div className="w-28 h-28 relative rounded-full overflow-hidden bg-gray-300">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+  {/* Avatar (keep it round) */}
+  <div className="relative h-24 w-24 shrink-0 rounded-full overflow-hidden ring-4 ring-white bg-gray-100 aspect-square">
     {player.photoURL ? (
-      <Image src={player.photoURL} alt={player.name} fill className="object-cover" />
+      <Image
+        src={player.photoURL}
+        alt={`${player.name} avatar`}
+        fill
+        className="object-cover"
+        sizes="96px"
+      />
     ) : (
-      <div className="flex items-center justify-center w-full h-full text-white text-xl">
+      <div className="flex h-full w-full items-center justify-center text-xl text-gray-500">
         {player.name.slice(0, 2).toUpperCase()}
       </div>
     )}
   </div>
 
-  {/* ▶️ Name added here */}
-  <div className="flex-1">
-    <h1 className="text-2xl font-bold leading-tight">{player.name}</h1>
-    <div className="mt-1 flex flex-col gap-1 text-gray-800">
-      <p className="text-base font-medium">
-        📍 Postcode: <span className="font-semibold">{player.postcode}</span>
-      </p>
-      <p className="text-base font-medium">
-        🎾 Skill Level: <span className="font-semibold">{player.skillLevel}</span>
-      </p>
+  {/* Name + meta */}
+  <div className="min-w-0">
+    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight break-words">
+      {player.name}
+    </h1>
+
+    {/* Chips */}
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+      <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
+        Skill: {player.skillLevel || "—"}
+      </span>
+      {player.postcode ? (
+        <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
+          Postcode {player.postcode}
+        </span>
+      ) : null}
     </div>
+
+    {/* Bio */}
+    {player.bio && (
+      <div className="mt-3">
+        <p
+          className={`text-[15px] leading-relaxed text-gray-700 ${
+            showFullBio ? "" : "line-clamp-3"
+          }`}
+        >
+          {player.bio}
+        </p>
+        {player.bio.length > 160 && (
+          <button
+            type="button"
+            onClick={() => setShowFullBio((v) => !v)}
+            className="mt-1 text-sm text-gray-600 underline"
+          >
+            {showFullBio ? "Show less" : "Read more"}
+          </button>
+        )}
+      </div>
+    )}
   </div>
 </div>
 
-        {/* Bio */}
-        {player.bio && (
-          <div className="mt-2 text-sm text-gray-700">
-            <h3 className="font-semibold text-md mb-1">Bio</h3>
-            <p>
-              {showFullBio ? player.bio : `${player.bio.slice(0, 100)}...`}
-              {player.bio.length > 100 && (
-                <button
-                  onClick={() => setShowFullBio(!showFullBio)}
-                  className="ml-2 text-blue-600 underline text-xs"
-                >
-                  {showFullBio ? "Show Less" : "Read More"}
-                </button>
-              )}
-            </p>
-          </div>
-        )}
-      </section>
+    </section>
 
-      {/* Middle Section: Availability */}
-      <section className="flex flex-col sm:flex-row sm:items-start sm:gap-6 border-t pt-6">
-        <h2 className="font-semibold text-lg sm:w-1/3">Availability</h2>
-        <ul className="list-disc text-sm text-green-600 space-y-1 pl-5 sm:pl-0 sm:w-2/3">
-          {player.availability?.length > 0 ? (
-            player.availability.map((slot, index) => (
-              <li key={index}>{slot}</li>
-            ))
-          ) : (
-            <li className="text-gray-500">No availability provided</li>
-          )}
-        </ul>
-      </section>
-
-      {/* Bottom Section: Match Stats */}
-      <section className="bg-gradient-to-r from-gray-600 to-gray-800 p-8 rounded-xl shadow-lg text-white text-center">
-        <h2 className="text-2xl font-semibold mb-4">Match Stats</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <div>
-            <p className="text-2xl font-bold">{matchStats.matches}</p>
-            <p className="text-sm text-gray-300">Total Matches</p>
-          </div>
-          <div>
-            <p className="text-2xl font-bold">{matchStats.completed}</p>
-            <p className="text-sm text-gray-300">Completed Matches</p>
-          </div>
-          <div>
-            <p className="text-2xl font-bold">{matchStats.wins}</p>
-            <p className="text-sm text-gray-300">Wins</p>
-          </div>
+    {/* AVAILABILITY */}
+    <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-semibold">Availability</h2>
+      {player.availability?.length ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {player.availability.map((slot, i) => (
+            <span
+              key={`${slot}-${i}`}
+              className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-1 text-sm"
+            >
+              {slot}
+            </span>
+          ))}
         </div>
-      </section>
-    </div>
-  );
+      ) : (
+        <p className="mt-2 text-sm text-gray-600">No availability provided.</p>
+      )}
+    </section>
+
+    {/* MATCH STATS */}
+    <section className="grid grid-cols-1 sm:grid-cols-3 gap-3" aria-labelledby="stats-heading">
+      <h2 id="stats-heading" className="sr-only">Match stats</h2>
+
+      {/* Card 1 */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm text-center">
+        <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+          <CalendarDays className="h-4 w-4" />
+        </div>
+        <div className="text-2xl font-bold tabular-nums">{matchStats.matches}</div>
+        <div className="mt-1 text-sm text-gray-700">Total Matches</div>
+      </div>
+
+      {/* Card 2 */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm text-center">
+        <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+          <CheckCircle2 className="h-4 w-4" />
+        </div>
+        <div className="text-2xl font-bold tabular-nums">{matchStats.completed}</div>
+        <div className="mt-1 text-sm text-gray-700">Completed Matches</div>
+      </div>
+
+      {/* Card 3 */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm text-center">
+        <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+          <Trophy className="h-4 w-4" />
+        </div>
+        <div className="text-2xl font-bold tabular-nums">{matchStats.wins}</div>
+        <div className="mt-1 text-sm text-gray-700">Wins</div>
+      </div>
+    </section>
+  </div>
+);
 }
 
 export default withAuth(PublicProfilePage);

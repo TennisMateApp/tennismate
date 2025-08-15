@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { auth } from "@/lib/firebaseConfig";
-import { getContinueUrl } from "@/lib/auth/getContinueUrl";
 import { onAuthStateChanged, sendEmailVerification, signOut } from "firebase/auth";
 import { Mail, ShieldCheck, Loader2 } from "lucide-react";
 
@@ -14,21 +13,39 @@ export default function VerifyEmailPage() {
   const [sending, setSending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!u) {
-        router.replace("/login");
-        return;
-      }
-      await u.reload();
-      if (u.emailVerified) {
-        router.replace("/match");
-        return;
-      }
-      setReady(true);
-    });
-    return () => unsub();
-  }, [router]);
+  const CONTINUE_TO = "/directory";
+
+// Build /login URL with helpful flags so the login page can show a banner,
+// prefill the email, and send them on to /directory after sign-in.
+const buildLoginRedirect = (email?: string) => {
+  const params = new URLSearchParams({
+    verified: "1",
+    continue: CONTINUE_TO,
+  });
+  if (email) params.set("email", email);
+  return `/login?${params.toString()}`;
+};
+
+useEffect(() => {
+  const unsub = onAuthStateChanged(auth, async (u) => {
+    if (!u) {
+      router.replace("/login");
+      return;
+    }
+    await u.reload();
+
+    // If they became verified, send them to Login with a clear banner,
+    // email prefilled, and a continue target.
+    if (u.emailVerified) {
+      router.replace(buildLoginRedirect(u.email || ""));
+      return;
+    }
+
+    setReady(true);
+  });
+  return () => unsub();
+}, [router]);
+
 
   useEffect(() => {
     if (!cooldown) return;
@@ -36,23 +53,31 @@ export default function VerifyEmailPage() {
     return () => clearInterval(t);
   }, [cooldown]);
 
-  async function sendEmail() {
-    if (!auth.currentUser || cooldown > 0) return;
-    setSending(true);
-    try {
-      await sendEmailVerification(auth.currentUser, {
-  url: getContinueUrl(),
-  handleCodeInApp: true,
-});
-      setCooldown(60);
-      alert("Verification email sent. Check your inbox.");
-    } catch (e) {
-      console.error(e);
-      alert("Could not send verification email. Please try again shortly.");
-    } finally {
-      setSending(false);
-    }
+  
+
+async function sendEmail() {
+  if (!auth.currentUser || cooldown > 0) return;
+  setSending(true);
+  try {
+    const loginUrl = `${window.location.origin}${buildLoginRedirect(auth.currentUser.email || "")}`;
+
+    await sendEmailVerification(auth.currentUser, {
+      // Use Firebase's hosted verify page; after "Continue", user returns here:
+      url: loginUrl,
+      handleCodeInApp: false,
+      // IMPORTANT: omit handleCodeInApp, or set to false, so the hosted page is used.
+      // handleCodeInApp: false,
+    });
+
+    setCooldown(60);
+    alert("Verification email sent. Check your inbox.");
+  } catch (e) {
+    console.error(e);
+    alert("Could not send verification email. Please try again shortly.");
+  } finally {
+    setSending(false);
   }
+}
 
   const email = auth.currentUser?.email || "";
   const maskedEmail = email ? email.replace(/(.{2}).+(@.+)/, "$1•••$2") : "";
@@ -133,9 +158,10 @@ return (
 
           {/* Helpers */}
           <div className="mt-6 space-y-2 text-sm text-gray-700 dark:text-gray-300">
-            <p className="leading-relaxed">
-              We’ll email you a link. Click it and you’ll be returned to the Match page automatically.
-            </p>
+        <p className="leading-relaxed">
+  We’ll email you a link. Click it, then tap <em>Continue</em>. You’ll return to the
+  login screen with your email pre-filled — sign in and we’ll take you to the Directory.
+</p>
             <div className="flex flex-wrap gap-2">
               <a
                 href="https://mail.google.com"

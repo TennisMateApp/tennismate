@@ -10,11 +10,17 @@ const firebaseConfig = {
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  // measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, // optional
 };
+
+// Optional: fail fast if a required var is missing (helps avoid auth/invalid-api-key)
+for (const [k, v] of Object.entries(firebaseConfig)) {
+  if (!v && k !== "measurementId") {
+    throw new Error(`[Firebase] Missing env: ${k}. Check Vercel env vars.`);
+  }
+}
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-export { auth, db };
+export const auth = getAuth(app);
+export const db = getFirestore(app);
