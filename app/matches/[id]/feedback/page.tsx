@@ -174,7 +174,7 @@ export default function MatchFeedbackPage() {
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-full ring-2 ring-gray-200 overflow-hidden">
             <img
-              src={opponentPhoto || "/default-avatar.png"}
+              src={opponentPhoto || "/images/default-avatar.png"}
               alt={opponentName || "Opponent"}
               className="h-10 w-10 object-cover"
             />
