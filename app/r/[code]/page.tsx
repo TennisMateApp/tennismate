@@ -1,26 +1,22 @@
-// app/r/[code]/route.ts
-import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { code: string } }
 ) {
-  const raw = (params.code ?? "").toUpperCase().trim();
-  const valid = /^[A-Z0-9]{5,12}$/.test(raw);
+  const code = (params.code || "").toUpperCase().trim();
 
-  // where to send them
-  const dest = valid ? `/signup?rc=${raw}` : "/signup";
-  const res = NextResponse.redirect(new URL(dest, req.url));
+  // Redirect to signup with the code in the query string
+  const url = new URL(`/signup?rc=${encodeURIComponent(code)}`, req.url);
+  const res = NextResponse.redirect(url);
 
-  // 30-day cookie so we can still read the code client-side
-  if (valid) {
-    res.cookies.set("referral_code", raw, {
-      path: "/",
-      sameSite: "lax",
-      httpOnly: false,
-      maxAge: 60 * 60 * 24 * 30,
-    });
-  }
+  // Also drop a cookie for 30 days so we still have the code later
+  res.cookies.set("referral_code", code, {
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+    sameSite: "lax",
+  });
+
   return res;
 }
