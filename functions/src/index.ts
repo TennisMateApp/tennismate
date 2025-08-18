@@ -3,6 +3,8 @@ import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/fire
 import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { defineSecret } from "firebase-functions/params";
+import { TransactionalEmailsApi, SendSmtpEmail } from "@getbrevo/brevo";
 
 
 // ✅ Cloud Functions v2 supports australia-southeast1 (Sydney)
@@ -15,6 +17,49 @@ const URLS = {
   messages: `${APP_BASE_URL}/messages`,
   matches:  `${APP_BASE_URL}/matches`,
 };
+
+const ADMIN_BACKFILL_KEY = defineSecret("ADMIN_BACKFILL_KEY");
+
+// === Referral helpers ===
+function makeReferralCode(len = 7) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+  let s = "";
+  for (let i = 0; i < len; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return s;
+}
+
+async function getUniqueReferralCode(): Promise<string> {
+  // Try a few random codes, then fall back to timestamp (ultra-rare)
+  for (let i = 0; i < 10; i++) {
+    const code = makeReferralCode();
+    const snap = await db.collection("users").where("referralCode", "==", code).limit(1).get();
+    if (snap.empty) return code;
+  }
+  return `TM${Date.now()}`;
+}
+
+/** Define what "qualified referral" means for your draw. */
+function referralQualifies(data: FirebaseFirestore.DocumentData) {
+  // You can loosen/tighten these as needed.
+  const emailVerified = !!data.emailVerified;   // mirror this into user doc client-side or via a small callable
+  const photoUploaded = !!data.photoUploaded;
+  const firstMatchActionAt = data.firstMatchRequestAt || data.firstMatchAcceptedAt;
+  return emailVerified && photoUploaded && !!firstMatchActionAt;
+}
+
+
+const BREVO_API_KEY = defineSecret("BREVO_API_KEY");
+// Send the welcome only after verification; how long to wait between checks
+const WELCOME_EMAIL_DELAY_MINUTES = Number(process.env.WELCOME_EMAIL_DELAY_MINUTES) || 15;
+
+
+async function getPostcodeCoords(pc: string): Promise<{lat:number; lng:number} | null> {
+  if (!pc) return null;
+  const snap = await db.collection("postcodes").doc(String(pc)).get();
+  const d = snap.data() as any;
+  return d && typeof d.lat === "number" && typeof d.lng === "number" ? { lat: d.lat, lng: d.lng } : null;
+}
+
 
 const DEFAULT_AVATAR_URL = `${APP_BASE_URL}/images/default-avatar.jpg`;
 
@@ -54,9 +99,597 @@ async function getUserProfile(uid: string) {
 
   return { email, prefs, name };
 }
+// =========================
+//  EMAIL: WELCOME + TOP 3 (Brevo)
+// =========================
+export const sendWelcomeEmailOnPlayerCreate = onDocumentCreated(
+  {
+    document: "players/{uid}",
+    region: "australia-southeast1",
+    timeoutSeconds: 30,
+    memory: "256MiB",
+    secrets: [BREVO_API_KEY],
+  },
+  async (event) => {
+    console.log("🔥 players.create trigger fired", { uid: event.params.uid, exists: !!event.data });
+
+    const uid = event.params.uid as string;
+    const player = event.data?.data() || {};
+
+    // prevent duplicates
+    const markerRef = db.collection("users").doc(uid).collection("meta").doc("welcome");
+    if ((await markerRef.get()).exists) { console.log("🔁 already sent"); return; }
+
+    const userSkill = (player.skillLevel || player.skill || "").toString();
+    const userPostcode = (player.postcode || "").toString();
+    if (!userSkill || !userPostcode) { console.log("⛔ missing skill/postcode"); return; }
+
+    // email + first name
+    let email: string | undefined = player.email;
+    let firstName: string = player.firstName || player.name || "there";
+    if (!email) {
+      const u = await db.doc(`users/${uid}`).get();
+      email = (u.get("email") as string) || undefined;
+    }
+    if (!email) {
+      try {
+        const au = await admin.auth().getUser(uid);
+        email = au.email || undefined;
+        if (!firstName && au.displayName) firstName = au.displayName.split(" ")[0];
+      } catch {}
+    }
+    if (!email) { console.log("⛔ no email anywhere"); return; }
+
+const origin = await getPostcodeCoords(userPostcode);
+if (!origin) {
+  console.log("⚠️ no coords for postcode", userPostcode, "- sending welcome without matches");
+}
+
+// Wait until the user verifies their email before sending the welcome
+let isVerified = false;
+try {
+  const au = await admin.auth().getUser(uid);
+  isVerified = !!au.emailVerified;
+} catch {}
+
+if (!isVerified) {
+  const qref = db.collection("welcome_queue").doc(uid);
+  await qref.set({
+    uid,
+    scheduledAt: admin.firestore.Timestamp.fromDate(
+      new Date(Date.now() + WELCOME_EMAIL_DELAY_MINUTES * 60 * 1000)
+    ),
+    tries: 0,
+    sent: false,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  console.log(`⏳ Queued welcome until email is verified (uid=${uid})`);
+  return; // exit here; the scheduler below will send once verified
+}
+
+
+// candidates (distance-only, scans all players, keeps nearest 3)
+type Cand = {
+  uid: string;
+  name: string;
+  skillLevel: string;
+  distance_km: number;
+  avatar_url: string;
+  request_url: string;
+  _score: number; // distance in km
+};
+
+const pcCache = new Map<string, { lat: number; lng: number }>();
+async function coordsFor(pc: string) {
+  if (!pc) return null;
+  if (pcCache.has(pc)) return pcCache.get(pc)!;
+  const c = await getPostcodeCoords(pc);
+  if (c) pcCache.set(pc, c);
+  return c;
+}
+
+let top3: Cand[] = [];
+
+if (origin) {
+  let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+  const pageSize = 500;
+
+  while (true) {
+    let q = db.collection("players")
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(pageSize);
+    if (lastDoc) q = q.startAfter(lastDoc);
+
+    const page = await q.get();
+    if (page.empty) break;
+
+    for (const d of page.docs) {
+      if (d.id === uid) continue;
+      const p = d.data() || {};
+      const pc = String(p.postcode || "");
+      const coords = pc ? await coordsFor(pc) : null;
+      if (!coords) continue;
+
+      const distKm = calculateDistance(origin, coords);
+      const cand: Cand = {
+        uid: d.id,
+        name: String(p.name || p.firstName || "Player"),
+        skillLevel: String(p.skillLevel || p.skill || "Intermediate"),
+        distance_km: Math.round(distKm * 10) / 10, // 1 decimal place
+        avatar_url: String(p.avatar || p.photoURL || DEFAULT_AVATAR_URL),
+        request_url: `${APP_BASE_URL}/match`, // all links -> match page
+        _score: distKm,
+      };
+
+      // keep only the 3 closest
+      if (top3.length < 3) {
+        top3.push(cand);
+        top3.sort((a, b) => a._score - b._score);
+      } else if (cand._score < top3[2]._score) {
+        top3[2] = cand;
+        top3.sort((a, b) => a._score - b._score);
+      }
+    }
+
+    lastDoc = page.docs[page.docs.length - 1];
+  }
+} else {
+  console.log("⚠️ no coords for postcode", userPostcode, "- sending welcome without matches");
+}
+
+console.log("🧮 email top3", top3.map(x => ({ name: x.name, km: x.distance_km })));
+
+
+
+    // send via Brevo
+    const api = new TransactionalEmailsApi();
+    (api as any).authentications.apiKey.apiKey = BREVO_API_KEY.value();
+
+    const msg: SendSmtpEmail = {
+      to: [{ email, name: firstName }],
+      sender: { email: "hello@tennis-mate.com.au", name: "TennisMate" },
+      templateId: 2,
+      params: {
+        first_name: firstName,
+        cta_url: `${APP_BASE_URL}/match-me?utm_source=welcome&utm_medium=email&utm_campaign=welcome_v1`,
+        explore_url: `${APP_BASE_URL}/directory?utm_source=welcome&utm_medium=email&utm_campaign=welcome_v1`,
+        matches: top3.map(m => ({
+          name: m.name,
+          skill_level: m.skillLevel,
+          distance_km: m.distance_km,
+          avatar_url: m.avatar_url,
+          request_url: m.request_url,
+        })),
+      },
+      tags: ["welcome","top3"],
+    };
+
+try {
+  await api.sendTransacEmail(msg);
+  await markerRef.set({ sentAt: admin.firestore.FieldValue.serverTimestamp() });
+  console.log(`✅ Welcome email sent to ${email} (uid=${uid})`);
+} catch (e) {
+  console.error("❌ Brevo send failed:", e);
+  return; // don't set the marker on failure
+}
+
+  }
+);
+
+export const backfillReferralCodes = onRequest(
+  {
+    region: "australia-southeast1",
+    timeoutSeconds: 540,
+    memory: "512MiB",
+    secrets: [ADMIN_BACKFILL_KEY],
+  },
+  async (req, res) => {
+    const key =
+      (req.query.key as string) ||
+      (req.headers["x-admin-key"] as string) ||
+      "";
+
+    if (key !== ADMIN_BACKFILL_KEY.value()) {
+      res.status(401).send("Unauthorized");
+      return;
+    }
+
+    const pageSize = Math.min(Number(req.query.pageSize) || 200, 450);
+
+    let scanned = 0;
+    let setCode = 0;
+    let setReferrer = 0;
+
+    let last: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+
+    while (true) {
+      let q = admin
+        .firestore()
+        .collection("users")
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(pageSize);
+      if (last) q = q.startAfter(last);
+
+      const snap = await q.get();
+      if (snap.empty) break;
+
+      let batch = admin.firestore().batch();
+      let writes = 0;
+
+      for (const d of snap.docs) {
+        scanned++;
+        const u = d.data() || {};
+
+        // a) ensure referralCode
+        if (!u.referralCode) {
+          const code = await getUniqueReferralCode();
+          batch.set(d.ref, { referralCode: code }, { merge: true });
+          setCode++;
+          writes++;
+        }
+
+        // b) late resolve referredBy from referredByCode (and create signup referral record)
+        const codeStr = (u.referredByCode || "").toString().trim();
+        if (codeStr && !u.referredBy) {
+          const ref = await admin
+            .firestore()
+            .collection("users")
+            .where("referralCode", "==", codeStr)
+            .limit(1)
+            .get();
+
+          if (!ref.empty && ref.docs[0].id !== d.id) {
+            const referrerId = ref.docs[0].id;
+
+            batch.set(d.ref, { referredBy: referrerId }, { merge: true });
+            writes++;
+
+            // deterministic id to avoid dupes; makes it idempotent
+            const signupRefId = `signup_${d.id}`;
+            batch.set(
+              admin.firestore().collection("referrals").doc(signupRefId),
+              {
+                stage: "signup",
+                referredUid: d.id,
+                referrerUid: referrerId,
+                referrerCode: codeStr,
+                ts: admin.firestore.FieldValue.serverTimestamp(),
+                _source: "backfill_v1",
+              },
+              { merge: true }
+            );
+            writes++;
+            setReferrer++;
+          }
+        }
+
+        // guard against 500-writes batch limit
+        if (writes >= 450) {
+          await batch.commit();
+          batch = admin.firestore().batch();
+          writes = 0;
+        }
+      }
+
+      if (writes > 0) await batch.commit();
+
+      last = snap.docs[snap.docs.length - 1];
+      // small yield to be nice to Firestore
+      await new Promise((r) => setTimeout(r, 40));
+    }
+
+    res
+      .status(200)
+      .send(
+        `✅ Backfill complete. scanned=${scanned}, setCode=${setCode}, setReferrer=${setReferrer}`
+      );
+  }
+);
+
+// =========================
+//  REFERRALS: assign code on user create; resolve referredBy
+// =========================
+// =========================
+//  REFERRALS: assign code on user create; resolve referredBy
+// =========================
+export const referralUsersOnCreate = onDocumentCreated(
+  "users/{uid}",
+  async (event) => {
+    const uid = event.params.uid as string;
+    const snap = event.data;
+    if (!snap) return;
+    const data = snap.data() || {};
+
+    const updates: Record<string, any> = {};
+
+    // a) ensure a unique referralCode
+    if (!data.referralCode) {
+      updates.referralCode = await getUniqueReferralCode();
+    }
+
+    // b) stamp referredBy if referredByCode present at create (block self-referrals)
+    const code = (data.referredByCode || "").toString().trim();
+    if (code) {
+      const refSnap = await db.collection("users").where("referralCode", "==", code).limit(1).get();
+      if (!refSnap.empty) {
+        const referrer = refSnap.docs[0];
+        if (referrer.id !== uid) {
+          updates.referredBy = referrer.id;
+
+          await db.collection("referrals").add({
+            stage: "signup",
+            referredUid: uid,
+            referrerUid: referrer.id,
+            referrerCode: code,
+            ts: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    }
+
+    if (Object.keys(updates).length) {
+      await snap.ref.set(updates, { merge: true });
+    }
+  }
+);
+
+// =========================
+//  REFERRALS: react to user updates (late code add + qualification award)
+// =========================
+export const referralUsersOnUpdate = onDocumentUpdated(
+  "users/{uid}",
+  async (event) => {
+    const afterSnap = event.data?.after;
+    const beforeSnap = event.data?.before;
+    if (!afterSnap || !beforeSnap) return;
+
+    const uid = event.params.uid as string;
+    const before = beforeSnap.data() || {};
+    const after = afterSnap.data() || {};
+
+    const batch = db.batch();
+    let touched = false;
+
+    // a) late referredByCode -> resolve to referredBy once (server-stamped)
+    const hadReferrer = !!before.referredBy;
+    const hasReferrer = !!after.referredBy;
+    const codeBefore = (before.referredByCode || "").toString();
+    const codeAfter  = (after.referredByCode  || "").toString();
+
+    if (!hadReferrer && !hasReferrer && codeAfter && codeAfter !== codeBefore) {
+      const refSnap = await db.collection("users").where("referralCode", "==", codeAfter).limit(1).get();
+      if (!refSnap.empty) {
+        const referrer = refSnap.docs[0];
+        if (referrer.id !== uid) {
+          batch.update(afterSnap.ref, { referredBy: referrer.id });
+          batch.create(db.collection("referrals").doc(), {
+            stage: "signup",
+            referredUid: uid,
+            referrerUid: referrer.id,
+            referrerCode: codeAfter,
+            ts: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          touched = true;
+        }
+      }
+    }
+
+    // b) Qualification: first time reaching the bar → +1 entry for the referrer
+    let nowQualified = referralQualifies(after);
+
+    // Safety: if you don't mirror emailVerified on user doc, fall back to Auth once
+    if (!nowQualified && after.referredBy) {
+      try {
+        const au = await admin.auth().getUser(uid);
+        if (au.emailVerified) nowQualified = referralQualifies({ ...after, emailVerified: true });
+      } catch {}
+    }
+
+    const wasQualified = !!before._qualified;
+    if (!wasQualified && nowQualified && after.referredBy) {
+      batch.update(afterSnap.ref, {
+        _qualified: true,
+        _qualifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const statsRef = db.collection("referral_stats").doc(after.referredBy);
+      batch.set(
+        statsRef,
+        {
+          qualifiedCount: admin.firestore.FieldValue.increment(1),
+          entries: admin.firestore.FieldValue.increment(1), // 1 entry per qualified referral
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      batch.create(db.collection("referrals").doc(), {
+        stage: "qualified",
+        referredUid: uid,
+        referrerUid: after.referredBy,
+        ts: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      touched = true;
+    }
+
+    if (touched) await batch.commit();
+  }
+);
+
+// =========================
+//  CRON: deliver queued welcome emails after verification
+// =========================
+export const deliverQueuedWelcomeEmails = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    timeZone: "Australia/Melbourne",
+    region: "australia-southeast1",
+    secrets: [BREVO_API_KEY], 
+  },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+    const due = await db.collection("welcome_queue")
+      .where("sent", "==", false)
+      .where("scheduledAt", "<=", now)
+      .limit(50)
+      .get();
+
+    if (due.empty) return;
+
+    for (const doc of due.docs) {
+      const { uid, tries = 0 } = doc.data() as { uid: string; tries?: number };
+
+      // Already sent elsewhere? (safety)
+      const markerRef = db.collection("users").doc(uid).collection("meta").doc("welcome");
+      if ((await markerRef.get()).exists) {
+        await doc.ref.update({ sent: true, sentAt: admin.firestore.FieldValue.serverTimestamp() });
+        continue;
+      }
+
+      // Only send after verification
+      let verified = false;
+      try {
+        const au = await admin.auth().getUser(uid);
+        verified = !!au.emailVerified;
+      } catch {}
+
+      if (!verified) {
+        // re-schedule, give up after ~24h (96 tries @ 15m)
+        const next = admin.firestore.Timestamp.fromDate(
+          new Date(Date.now() + WELCOME_EMAIL_DELAY_MINUTES * 60 * 1000)
+        );
+        if (tries >= 96) {
+          console.log(`🛑 Dropping welcome for uid=${uid} (not verified after ${tries} tries)`);
+          await doc.ref.update({ abandoned: true, sent: false, tries: tries + 1, scheduledAt: next });
+        } else {
+          await doc.ref.update({ tries: tries + 1, scheduledAt: next });
+        }
+        continue;
+      }
+
+      // Build email inputs (pull player + postcode)
+      const playerSnap = await db.doc(`players/${uid}`).get();
+      const player = playerSnap.data() || {};
+      const firstName: string = player.firstName || player.name || "there";
+
+      // Pick an email (players.email -> users.email -> Auth email)
+      let email: string | undefined = player.email;
+      if (!email) {
+        const u = await db.doc(`users/${uid}`).get();
+        email = (u.get("email") as string) || undefined;
+      }
+      if (!email) {
+        try {
+          const au = await admin.auth().getUser(uid);
+          email = au.email || undefined;
+        } catch {}
+      }
+      if (!email) {
+        console.log(`⚠️ No email found for uid=${uid}; rescheduling`);
+        await doc.ref.update({
+          tries: tries + 1,
+          scheduledAt: admin.firestore.Timestamp.fromDate(
+            new Date(Date.now() + WELCOME_EMAIL_DELAY_MINUTES * 60 * 1000)
+          ),
+        });
+        continue;
+      }
+
+      const userPostcode = String(player.postcode || "");
+      const origin = userPostcode ? await getPostcodeCoords(userPostcode) : null;
+      if (!origin) console.log("⚠️ No coords for postcode", userPostcode, "— sending without matches");
+
+      // Reuse your distance-only top3 (same code you added earlier)
+      type Cand = {
+        uid: string; name: string; skillLevel: string;
+        distance_km: number; avatar_url: string; request_url: string; _score: number;
+      };
+      let top3: Cand[] = [];
+      if (origin) {
+        let last: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+        const pageSize = 500;
+        while (true) {
+          let q = db.collection("players")
+            .orderBy(admin.firestore.FieldPath.documentId())
+            .limit(pageSize);
+          if (last) q = q.startAfter(last);
+          const page = await q.get();
+          if (page.empty) break;
+
+          for (const d of page.docs) {
+            if (d.id === uid) continue;
+            const p = d.data() || {};
+            const pc = String(p.postcode || "");
+            const coords = pc ? await getPostcodeCoords(pc) : null;
+            if (!coords) continue;
+
+            const distKm = calculateDistance(origin, coords);
+            const cand: Cand = {
+              uid: d.id,
+              name: String(p.name || p.firstName || "Player"),
+              skillLevel: String(p.skillLevel || p.skill || "Intermediate"),
+              distance_km: Math.round(distKm * 10) / 10,
+              avatar_url: String(p.avatar || p.photoURL || DEFAULT_AVATAR_URL),
+              request_url: `${APP_BASE_URL}/match`,
+              _score: distKm,
+            };
+            if (top3.length < 3) {
+              top3.push(cand);
+              top3.sort((a, b) => a._score - b._score);
+            } else if (cand._score < top3[2]._score) {
+              top3[2] = cand;
+              top3.sort((a, b) => a._score - b._score);
+            }
+          }
+          last = page.docs[page.docs.length - 1];
+        }
+      }
+
+      // Send via Brevo
+      const api = new TransactionalEmailsApi();
+      (api as any).authentications.apiKey.apiKey = BREVO_API_KEY.value();
+      const msg: SendSmtpEmail = {
+        to: [{ email, name: firstName }],
+        sender: { email: "hello@tennis-mate.com.au", name: "TennisMate" },
+        templateId: 2,
+        params: {
+          first_name: firstName,
+          cta_url: `${APP_BASE_URL}/match`,
+          explore_url: `${APP_BASE_URL}/match`,
+          matches: top3.map(m => ({
+            name: m.name,
+            skill_level: m.skillLevel,
+            distance_km: m.distance_km,
+            avatar_url: m.avatar_url,
+            request_url: m.request_url,
+          })),
+        },
+        tags: ["welcome","verified"],
+      };
+
+      try {
+        await api.sendTransacEmail(msg);
+        await markerRef.set({ sentAt: admin.firestore.FieldValue.serverTimestamp() });
+        await doc.ref.update({ sent: true, sentAt: admin.firestore.FieldValue.serverTimestamp() });
+        console.log(`✅ Welcome (post-verify) sent to ${email} (uid=${uid})`);
+      } catch (e) {
+        console.error("❌ Brevo send (queue) failed:", e);
+        // reschedule on API failure
+        await doc.ref.update({
+          tries: tries + 1,
+          scheduledAt: admin.firestore.Timestamp.fromDate(
+            new Date(Date.now() + WELCOME_EMAIL_DELAY_MINUTES * 60 * 1000)
+          ),
+        });
+      }
+    }
+  }
+);
+
 
 export const queueTestEmail = onRequest({ region: "australia-southeast1" }, async (_req, res) => {
-  const db = admin.firestore();
   await db.collection("mail").add({
     to: ["william.ray.bourke@gmail.com"], // change to your inbox for the test
     message: {
@@ -516,9 +1149,9 @@ export const emailOnMatchRequestCreated = onDocumentCreated(
     ]);
     if (!to.email || to.prefs.matchRequest === false) return;
 
-    const matchRef = db.doc(`match_requests/${event.params.matchId}`);
-    const matchSnap = await matchRef.get();
-    if (matchSnap.get("emailFlags?.requestCreated")) return;
+const matchRef = db.doc(`match_requests/${event.params.matchId}`);
+const matchSnap = await matchRef.get();
+if (matchSnap.get("emailFlags.requestCreated")) return; // <-- do
 
 const subject = `🎾 New match request from ${from.name}`;
 const url = URLS.matches;
@@ -559,9 +1192,9 @@ export const emailOnMatchAccepted = onDocumentUpdated(
     ]);
     if (!requester.email || requester.prefs.requestAccepted === false) return;
 
-    const matchRef = db.doc(`match_requests/${event.params.matchId}`);
-    const matchSnap = await matchRef.get();
-    if (matchSnap.get("emailFlags?.requestAccepted")) return;
+const matchRef = db.doc(`match_requests/${event.params.matchId}`);
+const matchSnap = await matchRef.get();
+if (matchSnap.get("emailFlags.requestAccepted")) return; // <-- dot notation
 
 const subject = `✅ ${accepter.name} accepted your match request`;
 const url = URLS.matches;
