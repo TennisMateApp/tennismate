@@ -2,18 +2,22 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic"; // ensure this is always handled on the server
+export const dynamic = "force-dynamic";
 
-export default function ReferralPage({ params }: { params: { code: string } }) {
-  const code = (params.code || "").toUpperCase().trim();
+export default async function ReferralPage({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}) {
+  const { code } = await params;
 
-  // 30 days cookie for referral tracking
-  cookies().set("referral_code", code, {
+  const normalized = (code || "").toUpperCase().trim();
+
+  cookies().set("referral_code", normalized, {
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: 60 * 60 * 24 * 30, // 30 days
     sameSite: "lax",
   });
 
-  // Prefer rc= for your signup reader
-  redirect(`/signup?rc=${encodeURIComponent(code)}`);
+  redirect(`/signup?rc=${encodeURIComponent(normalized)}`);
 }
