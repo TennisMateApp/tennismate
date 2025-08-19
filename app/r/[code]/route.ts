@@ -1,19 +1,20 @@
 // app/r/[code]/route.ts
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
 
-export async function GET(
-  req: NextRequest,
+export function GET(
+  req: Request,
   { params }: { params: { code: string } }
 ) {
-  const normalized = (params.code ?? "").toUpperCase().trim();
+  const code = (params.code ?? "").toUpperCase().trim();
 
-  const url = new URL(`/signup?rc=${encodeURIComponent(normalized)}`, req.url);
+  // Redirect to signup carrying the code in the URL
+  const url = new URL(`/signup?rc=${encodeURIComponent(code)}`, req.url);
   const res = NextResponse.redirect(url);
 
+  // Also drop a 30-day cookie so signup can read it
   res.cookies.set({
     name: "referral_code",
-    value: normalized,
+    value: code,
     maxAge: 60 * 60 * 24 * 30,
     path: "/",
     sameSite: "lax",
