@@ -14,7 +14,7 @@ const T = {
   CONTACT_EMAIL: "support@tennis-mate.com.au",
   START_DATE: "[Start Date]",
   END_DATE: "[End Date]",
-  DRAW_LOCATION: "[draw location e.g., Melbourne, VIC]",
+  DRAW_LOCATION: "[Melbourne, VIC]",
   PRIVACY_URL: "https://tennismate-s7vk.vercel.app/privacy", // or your path
   TERMS_URL: "https://tennismate-s7vk.vercel.app/legal/referral-competition-terms",
 };
@@ -32,14 +32,14 @@ export default function ReferralCompetitionTermsPage() {
 
         <h2>1. Eligibility</h2>
         <ol>
-          <li><strong>1.1</strong> Entry is open to residents of Australia aged 18 years or over (“Entrants”).</li>
+          <li><strong>1.1</strong> Entry is open to residents of Victoria, Australia aged 18 years or over (“Entrants”).</li>
           <li><strong>1.2</strong> Employees, contractors and immediate family members of the Promoter are ineligible.</li>
           <li><strong>1.3</strong> To participate, Entrants must hold a valid TennisMate account in good standing (not banned/suspended) throughout the Competition Period and at the time of the draw.</li>
         </ol>
 
         <h2>2. Competition Period</h2>
         <ol>
-          <li><strong>2.1</strong> The competition starts <strong>23rd of September, 20205</strong> at 9:00am and ends <strong>23rd of August 2025</strong> at 11:59pm (Australia/Melbourne time) (“Competition Period”).</li>
+          <li><strong>2.1</strong> The competition starts <strong>23rd of September, 2025</strong> at 9:00am and ends <strong>23rd of August 2025</strong> at 11:59pm (Australia/Melbourne time) (“Competition Period”).</li>
           <li><strong>2.2</strong> Entries received outside the Competition Period will not be accepted.</li>
         </ol>
 
