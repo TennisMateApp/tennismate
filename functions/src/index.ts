@@ -12,11 +12,16 @@ setGlobalOptions({ maxInstances: 10, region: "australia-southeast1" });
 
 admin.initializeApp();
 const db = admin.firestore();
+
 const APP_BASE_URL = "https://tennismate-s7vk.vercel.app";
+
 const URLS = {
   messages: `${APP_BASE_URL}/messages`,
   matches:  `${APP_BASE_URL}/matches`,
 };
+
+const DEFAULT_AVATAR_URL = `${APP_BASE_URL}/images/default-avatar.jpg`;
+
 
 const ADMIN_BACKFILL_KEY = defineSecret("ADMIN_BACKFILL_KEY");
 
@@ -38,15 +43,132 @@ async function getUniqueReferralCode(): Promise<string> {
   return `TM${Date.now()}`;
 }
 
-/** Define what "qualified referral" means for your draw. */
-function referralQualifies(data: FirebaseFirestore.DocumentData) {
-  // You can loosen/tighten these as needed.
-  const emailVerified = !!data.emailVerified;   // mirror this into user doc client-side or via a small callable
-  const photoUploaded = !!data.photoUploaded;
-  const firstMatchActionAt = data.firstMatchRequestAt || data.firstMatchAcceptedAt;
-  return emailVerified && photoUploaded && !!firstMatchActionAt;
+// REPLACE computeQualification with this version
+async function computeQualification(uid: string, userData: FirebaseFirestore.DocumentData) {
+  // must have a referrer to qualify
+  const referrerId = (userData.referredBy || "").toString().trim();
+  if (!referrerId) return false;
+
+  // email verified (prefer mirror; fallback to Auth once)
+  let emailVerified = !!userData.emailVerified;
+  if (!emailVerified) {
+    try {
+      const au = await admin.auth().getUser(uid);
+      emailVerified = !!au.emailVerified;
+    } catch {}
+  }
+
+  // profile photo (users.photoURL OR players.photoURL)
+  let hasPhoto = !!(userData.photoURL && String(userData.photoURL).trim());
+  if (!hasPhoto) {
+    const pSnap = await db.doc(`players/${uid}`).get();
+    hasPhoto = !!(pSnap.exists && pSnap.get("photoURL"));
+  }
+
+  // sent at least one match request to someone OTHER than the referrer
+  // prefer the flag if we've already stamped it; otherwise do a light query
+  let hasNonReferrerRequest = !!userData.hasNonReferrerRequest;
+  if (!hasNonReferrerRequest) {
+    const sentSnap = await db
+      .collection("match_requests")
+      .where("fromUserId", "==", uid)
+      .limit(50)
+      .get();
+
+    for (const d of sentSnap.docs) {
+      const to = (d.get("toUserId") || "").toString();
+      const status = (d.get("status") || "").toString();
+      const withdrawn = status === "withdrawn" || status === "deleted";
+      if (to && to !== referrerId && !withdrawn) {
+        hasNonReferrerRequest = true;
+        break;
+      }
+    }
+  }
+
+  return emailVerified && hasPhoto && hasNonReferrerRequest;
 }
 
+
+
+export const referralUsersOnUpdate = onDocumentUpdated(
+  "users/{uid}",
+  async (event) => {
+    const afterSnap = event.data?.after;
+    const beforeSnap = event.data?.before;
+    if (!afterSnap || !beforeSnap) return;
+
+    const uid = event.params.uid as string;
+    const before = beforeSnap.data() || {};
+    const after  = afterSnap.data() || {};
+
+    // ---------- A) Late resolve referredBy from referredByCode ----------
+    if (!after.referredBy) {
+      const beforeCode = (before.referredByCode || "").toString().trim();
+      const afterCode  = (after.referredByCode  || "").toString().trim();
+
+      // Only resolve once and only if code newly present/changed
+      if (afterCode && afterCode !== beforeCode) {
+        const refQ = await db.collection("users")
+          .where("referralCode", "==", afterCode)
+          .limit(1)
+          .get();
+
+        if (!refQ.empty && refQ.docs[0].id !== uid) {
+          await afterSnap.ref.set({ referredBy: refQ.docs[0].id }, { merge: true });
+
+          // Optional: write a deterministic signup event (won’t be double-written)
+          const signupId = `signup_${uid}`;
+          await db.doc(`referrals/${signupId}`).set({
+            stage: "signup",
+            referredUid: uid,
+            referrerUid: refQ.docs[0].id,
+            referrerCode: afterCode,
+            ts: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      }
+    }
+
+    // ---------- B) Qualification gate (single source of truth) ----------
+    const hadQualified = !!before._qualified;
+    const hasReferrer  = !!after.referredBy;
+
+    if (!hadQualified && hasReferrer) {
+      const nowQualified = await computeQualification(uid, after);
+      if (!nowQualified) return;
+
+      const referrerId = String(after.referredBy);
+      const qDocId = `qualified_${referrerId}_${uid}`;
+      const qRef   = db.doc(`referrals/${qDocId}`);
+      const statsRef = db.doc(`referral_stats/${referrerId}`);
+
+      // One atomic transaction → idempotent + consistent counters
+      await db.runTransaction(async (tx) => {
+        const qSnap = await tx.get(qRef);
+        if (qSnap.exists) return; // already counted for this (referrer, referred) pair
+
+        tx.set(qRef, {
+          stage: "qualified",
+          referredUid: uid,
+          referrerUid: referrerId,
+          ts: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        tx.set(afterSnap.ref, {
+          _qualified: true,
+          _qualifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        tx.set(statsRef, {
+          qualifiedCount: admin.firestore.FieldValue.increment(1),
+          entries:        admin.firestore.FieldValue.increment(1),
+          lastUpdated:    admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+    }
+  }
+);
 
 const BREVO_API_KEY = defineSecret("BREVO_API_KEY");
 // Send the welcome only after verification; how long to wait between checks
@@ -59,9 +181,6 @@ async function getPostcodeCoords(pc: string): Promise<{lat:number; lng:number} |
   const d = snap.data() as any;
   return d && typeof d.lat === "number" && typeof d.lng === "number" ? { lat: d.lat, lng: d.lng } : null;
 }
-
-
-const DEFAULT_AVATAR_URL = `${APP_BASE_URL}/images/default-avatar.jpg`;
 
 // Send ONE email if a message stays unread for this long (minutes)
 const UNREAD_EMAIL_DELAY_MINUTES =
@@ -99,6 +218,87 @@ async function getUserProfile(uid: string) {
 
   return { email, prefs, name };
 }
+
+// src/index.ts
+export { referralOnMatchAccepted } from "./referralOnMatchAccepted";
+
+// NEW: when a match request is created, mark "hasNonReferrerRequest" and award if ready
+export const referralOnMatchRequestCreated = onDocumentCreated(
+  { region: "australia-southeast1", document: "match_requests/{matchId}" },
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+
+    const fromUserId = String(data.fromUserId || "");
+    const toUserId   = String(data.toUserId || "");
+    if (!fromUserId || !toUserId) return;
+
+    // Load sender user
+    const userRef = db.doc(`users/${fromUserId}`);
+    const userSnap = await userRef.get();
+    const user = userSnap.data() || {};
+
+    const referrerId = (user.referredBy || "").toString().trim();
+    if (!referrerId) return; // only care about referred users
+
+    // Ignore if they sent to the referrer
+    if (toUserId === referrerId) return;
+
+    // 1) Always stamp the flag (idempotent) so later profile/email updates can qualify them
+    await userRef.set({ hasNonReferrerRequest: true }, { merge: true });
+
+    // 2) If they already meet the other conditions, award now (idempotent)
+    //    - email verified (mirror or Auth)
+    let emailVerified = !!user.emailVerified;
+    if (!emailVerified) {
+      try {
+        const au = await admin.auth().getUser(fromUserId);
+        emailVerified = !!au.emailVerified;
+      } catch {}
+    }
+
+    //    - photo present (users or players)
+    let hasPhoto = !!(user.photoURL && String(user.photoURL).trim());
+    if (!hasPhoto) {
+      const pSnap = await db.doc(`players/${fromUserId}`).get();
+      hasPhoto = !!(pSnap.exists && pSnap.get("photoURL"));
+    }
+
+    if (!emailVerified || !hasPhoto) return; // not ready yet; the users/{uid} update will qualify later
+
+    // Award once using deterministic id + transaction
+    const qDocId  = `qualified_${referrerId}_${fromUserId}`;
+    const qRef    = db.doc(`referrals/${qDocId}`);
+    const statsRef = db.doc(`referral_stats/${referrerId}`);
+
+    await db.runTransaction(async (tx) => {
+      const [qSnap, freshUser] = await Promise.all([tx.get(qRef), tx.get(userRef)]);
+      if (qSnap.exists) return; // already awarded
+
+      if (freshUser.exists && freshUser.data()?._qualified) return; // already marked
+
+      tx.set(qRef, {
+        stage: "qualified",
+        referredUid: fromUserId,
+        referrerUid: referrerId,
+        ts: admin.firestore.FieldValue.serverTimestamp(),
+        reason: "non_referrer_request_created",
+      });
+
+      tx.set(userRef, {
+        _qualified: true,
+        _qualifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      tx.set(statsRef, {
+        qualifiedCount: admin.firestore.FieldValue.increment(1),
+        entries:        admin.firestore.FieldValue.increment(1),
+        lastUpdated:    admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
+  }
+);
+
 // =========================
 //  EMAIL: WELCOME + TOP 3 (Brevo)
 // =========================
@@ -417,13 +617,14 @@ export const referralUsersOnCreate = onDocumentCreated(
         if (referrer.id !== uid) {
           updates.referredBy = referrer.id;
 
-          await db.collection("referrals").add({
-            stage: "signup",
-            referredUid: uid,
-            referrerUid: referrer.id,
-            referrerCode: code,
-            ts: admin.firestore.FieldValue.serverTimestamp(),
-          });
+     await db.doc(`referrals/signup_${uid}`).set({
+  stage: "signup",
+  referredUid: uid,
+  referrerUid: referrer.id,
+  referrerCode: code,
+  ts: admin.firestore.FieldValue.serverTimestamp(),
+}, { merge: true });
+
         }
       }
     }
@@ -434,89 +635,6 @@ export const referralUsersOnCreate = onDocumentCreated(
   }
 );
 
-// =========================
-//  REFERRALS: react to user updates (late code add + qualification award)
-// =========================
-export const referralUsersOnUpdate = onDocumentUpdated(
-  "users/{uid}",
-  async (event) => {
-    const afterSnap = event.data?.after;
-    const beforeSnap = event.data?.before;
-    if (!afterSnap || !beforeSnap) return;
-
-    const uid = event.params.uid as string;
-    const before = beforeSnap.data() || {};
-    const after = afterSnap.data() || {};
-
-    const batch = db.batch();
-    let touched = false;
-
-    // a) late referredByCode -> resolve to referredBy once (server-stamped)
-    const hadReferrer = !!before.referredBy;
-    const hasReferrer = !!after.referredBy;
-    const codeBefore = (before.referredByCode || "").toString();
-    const codeAfter  = (after.referredByCode  || "").toString();
-
-    if (!hadReferrer && !hasReferrer && codeAfter && codeAfter !== codeBefore) {
-      const refSnap = await db.collection("users").where("referralCode", "==", codeAfter).limit(1).get();
-      if (!refSnap.empty) {
-        const referrer = refSnap.docs[0];
-        if (referrer.id !== uid) {
-          batch.update(afterSnap.ref, { referredBy: referrer.id });
-          batch.create(db.collection("referrals").doc(), {
-            stage: "signup",
-            referredUid: uid,
-            referrerUid: referrer.id,
-            referrerCode: codeAfter,
-            ts: admin.firestore.FieldValue.serverTimestamp(),
-          });
-          touched = true;
-        }
-      }
-    }
-
-    // b) Qualification: first time reaching the bar → +1 entry for the referrer
-    let nowQualified = referralQualifies(after);
-
-    // Safety: if you don't mirror emailVerified on user doc, fall back to Auth once
-    if (!nowQualified && after.referredBy) {
-      try {
-        const au = await admin.auth().getUser(uid);
-        if (au.emailVerified) nowQualified = referralQualifies({ ...after, emailVerified: true });
-      } catch {}
-    }
-
-    const wasQualified = !!before._qualified;
-    if (!wasQualified && nowQualified && after.referredBy) {
-      batch.update(afterSnap.ref, {
-        _qualified: true,
-        _qualifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      const statsRef = db.collection("referral_stats").doc(after.referredBy);
-      batch.set(
-        statsRef,
-        {
-          qualifiedCount: admin.firestore.FieldValue.increment(1),
-          entries: admin.firestore.FieldValue.increment(1), // 1 entry per qualified referral
-          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      batch.create(db.collection("referrals").doc(), {
-        stage: "qualified",
-        referredUid: uid,
-        referrerUid: after.referredBy,
-        ts: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      touched = true;
-    }
-
-    if (touched) await batch.commit();
-  }
-);
 
 // =========================
 //  CRON: deliver queued welcome emails after verification
@@ -1166,7 +1284,7 @@ const text = `Hi ${to.name}, ${from.name} sent you a match request on TennisMate
 console.log("✉️ emailOnMatchRequestCreated link:", url);
 await queueEmail([to.email], subject, html, text);
 
-    await matchRef.set({ emailFlags: { requestCreated: true } }, { merge: true });
+    await matchRef.set({ "emailFlags.requestCreated": true }, { merge: true });
   }
 );
 
@@ -1209,7 +1327,7 @@ const text = `Hi ${requester.name}, ${accepter.name} accepted your match request
 console.log("✉️ emailOnMatchAccepted link:", url);
 await queueEmail([requester.email], subject, html, text);
 
-    await matchRef.set({ emailFlags: { requestAccepted: true } }, { merge: true });
+    await matchRef.set({ "emailFlags.requestAccepted": true }, { merge: true });
   }
 );
 
