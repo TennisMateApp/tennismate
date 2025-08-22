@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { auth } from "@/lib/firebaseConfig";
+import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, sendEmailVerification, signOut } from "firebase/auth";
 import { Mail, ShieldCheck, Loader2 } from "lucide-react";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export default function VerifyEmailPage() {
   const router = useRouter();
@@ -37,6 +38,11 @@ useEffect(() => {
     // If they became verified, send them to Login with a clear banner,
     // email prefilled, and a continue target.
     if (u.emailVerified) {
+       await setDoc(
+         doc(db, "users", u.uid),
+         { emailVerified: true, emailVerifiedAt: serverTimestamp() },
+         { merge: true }
+         );
       router.replace(buildLoginRedirect(u.email || ""));
       return;
     }

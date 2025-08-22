@@ -33,6 +33,7 @@ import {
 import { GiTennisBall } from "react-icons/gi";
 
 // --- Helpers ---
+
 const formatRelativeTime = (d?: Date | null) => {
   // guard: missing OR invalid dates
   if (!d || Number.isNaN(d.getTime())) return "—";
@@ -171,11 +172,16 @@ const m: Match = {
       const { fromUserId, toUserId } = snap.data();
       if (currentUserId !== toUserId) return;
 
-      // Mark accepted
-      await updateDoc(matchRef, {
-        status: "accepted",
-        players: [fromUserId, toUserId],
-      });
+// Mark accepted
+await updateDoc(matchRef, {
+  status: "accepted",
+  players: [fromUserId, toUserId],
+});
+
+// Badges (leave as you have)
+await setDoc(doc(db, "players", toUserId), { badges: arrayUnion("firstMatch") }, { merge: true });
+await setDoc(doc(db, "players", fromUserId), { badges: arrayUnion("firstMatch") }, { merge: true });
+
 
       // Award first match badge
       await setDoc(
