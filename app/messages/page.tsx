@@ -58,7 +58,18 @@ function MessagesHome() {
 
   const filteredConversations = useMemo(() => {
     const q = queryText.trim().toLowerCase();
-    return conversations
+
+    // 1) Sort newest-first by the latest message timestamp
+    const sorted = [...conversations].sort((a, b) => {
+      const aT = a?.latestMessage?.timestamp?.toMillis?.() ?? 0;
+      const bT = b?.latestMessage?.timestamp?.toMillis?.() ?? 0;
+      // tie-breaker keeps order stable (optional)
+      if (bT !== aT) return bT - aT;
+      return (b?.otherUserName ?? "").localeCompare(a?.otherUserName ?? "");
+    });
+
+    // 2) Apply Unread tab filter and search
+    return sorted
       .filter((c) => (tab === "all" ? true : c.isUnread))
       .filter((c) => {
         if (!q) return true;
