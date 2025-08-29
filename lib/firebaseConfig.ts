@@ -16,7 +16,7 @@ export const firebaseConfig = {
   apiKey: "AIzaSyCeLsM5EKnH8_PgzZT1_dWJhFMD653fQOI",
   authDomain: "tennismate-d8acb.firebaseapp.com",
   projectId: "tennismate-d8acb",
-  storageBucket: "tennismate-d8acb.firebasestorage.app"
+  storageBucket: "tennismate-d8acb.firebasestorage.app",
   messagingSenderId: "16871894453",
   appId: "1:16871894453:web:32b39ae341acf34cdebdfc",
   measurementId: "G-SB2RF5Y238",
