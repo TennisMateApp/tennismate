@@ -65,7 +65,8 @@ async function sendEmail() {
   if (!auth.currentUser || cooldown > 0) return;
   setSending(true);
   try {
-    const loginUrl = `${window.location.origin}${buildLoginRedirect(auth.currentUser.email || "")}`;
+    const ACTION_BASE_URL = "https://tennismate-s7vk.vercel.app"; // or your custom prod domain
+    const loginUrl = `${ACTION_BASE_URL}${buildLoginRedirect(auth.currentUser.email || "")}`;
 
     await sendEmailVerification(auth.currentUser, {
       // Use Firebase's hosted verify page; after "Continue", user returns here:
@@ -78,8 +79,9 @@ async function sendEmail() {
     setCooldown(60);
     alert("Verification email sent. Check your inbox.");
   } catch (e) {
-    console.error(e);
-    alert("Could not send verification email. Please try again shortly.");
+    console.error("sendEmailVerification error:", e);
+    const msg = (e as any)?.code || (e as any)?.message || String(e);
+    alert(`Could not send verification email: ${msg}`);
   } finally {
     setSending(false);
   }
