@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  User, MessageCircle, Bell, Search, Settings, CalendarDays
+  User, MessageCircle, Bell, Search, Settings
 } from "lucide-react";
 import { GiTennisCourt, GiTennisBall } from "react-icons/gi";
 import {
@@ -328,83 +328,71 @@ async function clearAllAlerts() {
                   <Link href="/directory" title="Directory">
                     <Search className="w-6 h-6 text-green-600 hover:text-blue-800" />
                   </Link>
-                  <Link href="/messages" title="Messages" className="relative">
+<Link href="/messages" title="Messages" className="relative">
   <MessageCircle className="w-6 h-6 text-green-600 hover:text-blue-800" />
   {messageCount > 0 && (
     <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none animate-pulse">
       {messageCount > 9 ? "9+" : messageCount}
     </span>
   )}
-</Link>
-                  <Link href="/calendar" title="Calendar">
-  <CalendarDays className="w-6 h-6 text-green-600 hover:text-blue-800" />
-</Link>
-                  <div className="relative" ref={dropdownRef}>
-                   <button onClick={() => setDropdownOpen(!dropdownOpen)} className="relative focus:outline-none">
-  <Bell className="w-6 h-6 text-green-600" />
-  {alertCount > 0 && (
-    <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
-      {alertCount > 9 ? "9+" : alertCount}
-    </span>
-  )}
-</button>
+</Link>  {/* ← Close this before the bell dropdown */}
 
+<div className="relative" ref={dropdownRef}>
+  <button onClick={() => setDropdownOpen(!dropdownOpen)} className="relative focus:outline-none">
+    <Bell className="w-6 h-6 text-green-600" />
+    {alertCount > 0 && (
+      <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+        {alertCount > 9 ? "9+" : alertCount}
+      </span>
+    )}
+  </button>
 
-                    {dropdownOpen && (
-  <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 shadow-lg rounded-md z-50">
-    {/* Header row */}
-    <div className="flex items-center justify-between px-3 py-2 text-sm bg-gray-50 border-b border-gray-200">
-      <span className="font-semibold text-gray-700">Notifications</span>
-      {hasAnyAlerts ? (
-        <button
-          onClick={clearAllAlerts}
-          className="text-blue-600 hover:underline text-xs"
-        >
-          Clear all
-        </button>
-      ) : (
-        <span className="text-xs text-gray-400">No notifications</span>
+  {dropdownOpen && (
+    <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 shadow-lg rounded-md z-50">
+      <div className="flex items-center justify-between px-3 py-2 text-sm bg-gray-50 border-b border-gray-200">
+        <span className="font-semibold text-gray-700">Notifications</span>
+        {hasAnyAlerts ? (
+          <button onClick={clearAllAlerts} className="text-blue-600 hover:underline text-xs">
+            Clear all
+          </button>
+        ) : (
+          <span className="text-xs text-gray-400">No notifications</span>
+        )}
+      </div>
+
+      {hasAnyAlerts && (
+        <ul className="divide-y divide-gray-100 max-h-96 overflow-y-auto text-sm">
+          {notifications.map((notif) => (
+            <li
+              key={notif.id}
+              className="p-3 hover:bg-gray-100 cursor-pointer"
+              onClick={async () => {
+                setDropdownOpen(false);
+                await updateDoc(doc(db, "notifications", notif.id), { read: true });
+                router.push("/matches");
+              }}
+            >
+              {notif.message}
+            </li>
+          ))}
+
+          {unreadMatchRequests.map((req) => (
+            <li
+              key={req.id}
+              className="p-3 hover:bg-gray-100 cursor-pointer"
+              onClick={async () => {
+                setDropdownOpen(false);
+                await updateDoc(doc(db, "match_requests", req.id), { status: "read" });
+                router.push("/matches");
+              }}
+            >
+              Match request from {req.fromName || "a player"}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
-
-    {/* List */}
-    {hasAnyAlerts && (
-      <ul className="divide-y divide-gray-100 max-h-96 overflow-y-auto text-sm">
-        {/* System notifications */}
-        {notifications.map((notif) => (
-          <li
-            key={notif.id}
-            className="p-3 hover:bg-gray-100 cursor-pointer"
-            onClick={async () => {
-              setDropdownOpen(false);
-              await updateDoc(doc(db, "notifications", notif.id), { read: true });
-              router.push("/matches");
-            }}
-          >
-            {notif.message}
-          </li>
-        ))}
-
-        {/* Match requests */}
-        {unreadMatchRequests.map((req) => (
-          <li
-            key={req.id}
-            className="p-3 hover:bg-gray-100 cursor-pointer"
-            onClick={async () => {
-              setDropdownOpen(false);
-              // mark read when user visits via bell (optional)
-              await updateDoc(doc(db, "match_requests", req.id), { status: "read" });
-              router.push("/matches");
-            }}
-          >
-            Match request from {req.fromName || "a player"}
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-)}
-
+  )}
                   </div>
                   <div className="relative" ref={settingsRef}>
                     <button onClick={() => setShowSettings(!showSettings)} title="Settings">
@@ -454,10 +442,6 @@ async function clearAllAlerts() {
               <GiTennisCourt className="w-6 h-6 mb-1" />
               <span>Match Me</span>
             </Link>
-            <Link href="/calendar" className="flex flex-col items-center text-green-600 hover:text-green-800">
-  <CalendarDays className="w-6 h-6 mb-1" />
-  <span>Calendar</span>
-</Link>
             <Link href="/matches" className="flex flex-col items-center text-green-600 hover:text-green-800 relative">
               <GiTennisBall className="w-6 h-6 mb-1" />
               <span>Matches</span>
