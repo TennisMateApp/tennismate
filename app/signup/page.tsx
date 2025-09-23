@@ -202,6 +202,7 @@ const referredByCode = getReferralCodeFromClient();
 // base data written every time
 const baseUserData: any = {
   name: formData.name,
+  nameLower: (formData.name || "").toLowerCase(),
   email: formData.email,
   requireVerification: true,
   createdAt: serverTimestamp(),
@@ -219,17 +220,18 @@ if (referredByCode) clearReferralCookie();
 
     if (isVictorian) {
       // 4) Create players/{uid}
-      await setDoc(doc(db, "players", user.uid), {
-        name: formData.name,
-        email: formData.email,
-        postcode: formData.postcode,
-        skillLevel: formData.skillLevel,
-        availability: formData.availability,
-        bio: formData.bio,
-        photoURL,
-        profileComplete: true,
-        timestamp: serverTimestamp(),
-      });
+await setDoc(doc(db, "players", user.uid), {
+  name: formData.name,
+  nameLower: (formData.name || "").toLowerCase(),   // <<— add this line
+  email: formData.email,
+  postcode: formData.postcode,
+  skillLevel: formData.skillLevel,
+  availability: formData.availability,
+  bio: formData.bio,
+  photoURL,
+  profileComplete: true,
+  timestamp: serverTimestamp(),
+});
 
       // 5) Go to the dedicated verify page—the user will send the email there
       setStatus("");

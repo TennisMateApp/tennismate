@@ -20,29 +20,65 @@ import {
   updateDoc,
   writeBatch,
   deleteDoc,
-  deleteField, // 👈 NEW
+  deleteField,
+  where,
+  Timestamp,
 } from "firebase/firestore";
+
+// 🆕 Event UI
+import ProposeTimeButton from "@/components/events/ProposeTimeButton";
+import ProposalCard from "@/components/events/ProposalCard";
 
 function ChatPage() {
   const { conversationID } = useParams();
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
+
+  // Messages
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
+
+  // Opponent display
   const [otherUserName, setOtherUserName] = useState<string | null>(null);
   const [otherUserAvatar, setOtherUserAvatar] = useState<string | null>(null);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [otherUserTyping, setOtherUserTyping] = useState(false);
 
+  // 🆕 Conversation participants (source of truth for events)
+  const [participants, setParticipants] = useState<string[]>([]);
+
+  // Read/unread UI
+  const [lastReadAt, setLastReadAt] = useState<number | null>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+
+  // 🆕 Event proposals for this conversation
+  const [events, setEvents] = useState<any[]>([]);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const [lastReadAt, setLastReadAt] = useState<number | null>(null);
-  const [showScrollDown, setShowScrollDown] = useState(false);
+  function smartScrollToBottom() {
+  const el = listRef.current;
+  if (!el) return;
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+  if (nearBottom) {
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
+    });
+  }
+}
 
-  // helpers
-  const ts = (m: any) => (m?.timestamp?.toDate ? m.timestamp.toDate().getTime() : 0);
+  // helpers (timeline timestamps)
+ const tsMsg = (m: any) =>
+  m?.timestamp?.toDate ? m.timestamp.toDate().getTime() : 0;
+
+  // 🔁 use createdAt for event placement in chat timeline
+const tsEvent = (e: any) => {
+  const ca = e?.createdAt;
+  if (ca?.toDate) return ca.toDate().getTime();
+  return Date.now(); // show at the bottom immediately
+};
 
   const isSameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() &&
@@ -58,7 +94,8 @@ function ChatPage() {
     return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   };
 
-  const timeLabel = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const timeLabel = (d: Date) =>
+    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   useEffect(() => {
     let unsubscribeTyping: () => void = () => {};
@@ -89,23 +126,27 @@ function ChatPage() {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           typing: {},
-          lastReadAt: { [u.uid]: serverTimestamp() }, // 👈 NEW (kept alongside old lastRead)
-          lastRead:    { [u.uid]: serverTimestamp() },
+          lastReadAt: { [u.uid]: serverTimestamp() },
+          lastRead: { [u.uid]: serverTimestamp() },
         });
+        setParticipants([u.uid, otherUserId]);
       } else {
+        const data = convoSnap.data() || {};
+        if (Array.isArray(data.participants)) setParticipants(data.participants);
+
         // Mark as read on open
         await updateDoc(convoRef, {
-          [`lastReadAt.${u.uid}`]: serverTimestamp(), // 👈 NEW
-          [`lastRead.${u.uid}`]: serverTimestamp(),   // keep UI compatibility
+          [`lastReadAt.${u.uid}`]: serverTimestamp(),
+          [`lastRead.${u.uid}`]: serverTimestamp(),
         });
       }
 
       // Clear firstUnread + any pending reminder for this user/thread
       try {
-        await updateDoc(convoRef, { [`firstUnreadAt.${u.uid}`]: deleteField() }); // 👈 NEW
+        await updateDoc(convoRef, { [`firstUnreadAt.${u.uid}`]: deleteField() });
       } catch {}
       try {
-        await deleteDoc(doc(db, "email_reminders", `${u.uid}_${conversationID}`)); // 👈 NEW
+        await deleteDoc(doc(db, "email_reminders", `${u.uid}_${conversationID}`));
       } catch {}
 
       // Load other user display info
@@ -127,14 +168,14 @@ function ChatPage() {
       const meSnap = await getDoc(meRef);
       if (meSnap.exists()) setUserAvatar(meSnap.data().photoURL || null);
 
-      // Live typing + read watermark
+      // Live typing + read watermark + participants
       unsubscribeTyping = onSnapshot(convoRef, (snap) => {
         const data = snap.data() || {};
         const typingData = data.typing || {};
         const otherTypingId = data.participants?.find((id: string) => id !== u.uid);
         setOtherUserTyping(typingData[otherTypingId] === true);
+        if (Array.isArray(data.participants)) setParticipants(data.participants);
 
-        // Prefer lastReadAt; fall back to old lastRead if present
         const lr =
           (data.lastReadAt && data.lastReadAt[u.uid]) ||
           (data.lastRead && data.lastRead[u.uid]);
@@ -160,6 +201,7 @@ function ChatPage() {
     };
   }, [conversationID]);
 
+  // Messages stream
   useEffect(() => {
     if (!conversationID) return;
     const msgRef = collection(db, "conversations", conversationID as string, "messages");
@@ -192,9 +234,9 @@ function ChatPage() {
         const convoRef = doc(db, "conversations", conversationID as string);
         try {
           await updateDoc(convoRef, {
-            [`lastReadAt.${user.uid}`]: serverTimestamp(), // 👈 NEW
-            [`lastRead.${user.uid}`]: serverTimestamp(),   // keep UI divider working
-            [`firstUnreadAt.${user.uid}`]: deleteField(),  // 👈 NEW
+            [`lastReadAt.${user.uid}`]: serverTimestamp(),
+            [`lastRead.${user.uid}`]: serverTimestamp(),
+            [`firstUnreadAt.${user.uid}`]: deleteField(),
           });
         } catch {}
         try {
@@ -212,6 +254,36 @@ function ChatPage() {
 
     return () => unsub();
   }, [conversationID, user?.uid]);
+
+// 🆕 Event proposals stream (order by post time, not event time)
+useEffect(() => {
+  if (!conversationID) return;
+
+  const qEvents = query(
+    collection(db, "match_events"),
+    where("matchId", "==", conversationID as string),
+    orderBy("createdAt", "asc")
+  );
+
+  const unsub = onSnapshot(
+    qEvents,
+    (snap) => {
+      setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+      // ✅ scroll after events render too
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          bottomRef.current?.scrollIntoView({ behavior: "auto" });
+        });
+      });
+    },
+    (err) => console.error("match_events listener error", err)
+  );
+
+  return () => unsub();
+}, [conversationID]);
+
+
 
   const sendMessage = async () => {
     if (!input.trim() || !user) return;
@@ -234,11 +306,10 @@ function ChatPage() {
     // Keep conversation metadata up to date
     await updateDoc(doc(db, "conversations", conversationID as string), {
       latestMessage: newMessage,
-      lastMessageAt: serverTimestamp(),              // 👈 used by the worker
-      [`lastReadAt.${user.uid}`]: serverTimestamp(), // user is on this page
+      lastMessageAt: serverTimestamp(),
+      [`lastReadAt.${user.uid}`]: serverTimestamp(),
       [`lastRead.${user.uid}`]: serverTimestamp(),
       [`typing.${user.uid}`]: false,
-      // do NOT write firstUnreadAt here (that’s set by the worker for the recipient)
     });
   };
 
@@ -257,45 +328,71 @@ function ChatPage() {
     el.style.height = Math.min(el.scrollHeight, 160) + "px";
   }, [input]);
 
-  // rows for day/unread dividers + cluster tails
+  // 🆕 Merge messages + events chronologically with day & unread dividers
   const rows = useMemo(() => {
-    const out: Array<
+    type Row =
       | { type: "day"; key: string; label: string }
       | { type: "unread"; key: string }
       | { type: "msg"; key: string; msg: any; isOther: boolean; isTail: boolean }
-    > = [];
+      | { type: "event"; key: string; ev: any };
 
+    // Build a unified list with timeline timestamps
+    const items: Array<{ kind: "msg" | "event"; t: number; data: any }> = [];
+
+    for (const m of messages) items.push({ kind: "msg", t: tsMsg(m), data: m });
+    for (const e of events) items.push({ kind: "event", t: tsEvent(e), data: e });
+
+    // Sort by post time ascending
+    items.sort((a, b) => a.t - b.t);
+
+    const out: Row[] = [];
     let lastDayKey = "";
     let unreadInserted = false;
 
-    messages.forEach((m, i) => {
-      const curDate = m.timestamp?.toDate ? m.timestamp.toDate() : new Date(0);
-      const dayKey = curDate.toDateString();
+    items.forEach((it, i) => {
+      // Day divider should reflect timeline timestamp (message time or event createdAt)
+      const date = new Date(it.t);
 
+      const dayKey = date.toDateString();
       if (dayKey !== lastDayKey) {
-        out.push({ type: "day", key: `day-${dayKey}`, label: dayLabel(curDate) });
+        out.push({ type: "day", key: `day-${dayKey}`, label: dayLabel(date) });
         lastDayKey = dayKey;
       }
 
-      if (!unreadInserted && lastReadAt && ts(m) > lastReadAt && m.senderId !== user?.uid) {
-        out.push({ type: "unread", key: `unread-${ts(m)}` });
+      // Unread divider (only relevant to messages from other user)
+      if (
+        it.kind === "msg" &&
+        !unreadInserted &&
+        lastReadAt &&
+        it.t > lastReadAt &&
+        it.data.senderId !== user?.uid
+      ) {
+        out.push({ type: "unread", key: `unread-${it.t}` });
         unreadInserted = true;
       }
 
-      const next = messages[i + 1];
-      const isTail = !next || next.senderId !== m.senderId || ts(next) - ts(m) > 2 * 60 * 1000;
+      if (it.kind === "msg") {
+        const m = it.data;
+        const next = items[i + 1]?.kind === "msg" ? items[i + 1].data : null;
+        const isTail =
+          !next ||
+          next.senderId !== m.senderId ||
+          (items[i + 1]?.t ?? 0) - it.t > 2 * 60 * 1000;
 
-      out.push({
-        type: "msg",
-        key: m.id,
-        msg: m,
-        isOther: m.senderId !== user?.uid,
-        isTail,
-      });
+        out.push({
+          type: "msg",
+          key: m.id,
+          msg: m,
+          isOther: m.senderId !== user?.uid,
+          isTail,
+        });
+      } else {
+        out.push({ type: "event", key: `event-${it.data.id}`, ev: it.data });
+      }
     });
 
     return out;
-  }, [messages, lastReadAt, user?.uid]);
+  }, [messages, events, lastReadAt, user?.uid]);
 
   return (
     <div className="flex flex-col h-screen bg-white">
@@ -324,7 +421,7 @@ function ChatPage() {
         </div>
       </div>
 
-      {/* Messages */}
+      {/* Messages + Events */}
       <div
         ref={listRef}
         onScroll={() => {
@@ -352,6 +449,26 @@ function ChatPage() {
                 <div className="h-px flex-1 bg-red-200" />
                 <span className="text-[11px] font-medium text-red-600">New</span>
                 <div className="h-px flex-1 bg-red-200" />
+              </div>
+            );
+          }
+
+          if (row.type === "event") {
+            const ev = row.ev;
+            return (
+              <div key={row.key} className="mb-2 max-w-[90%]">
+                <ProposalCard
+                  eventId={ev.id}
+                  start={ev.start as Timestamp}
+                  end={ev.end as Timestamp}
+                  durationMins={ev.durationMins}
+                  courtName={ev.courtName}
+                  note={ev.note}
+                  state={ev.state}
+                  currentUserId={user?.uid}
+                  participants={ev.participants || []}
+                  proposerId={ev.proposerId}
+                />
               </div>
             );
           }
@@ -406,37 +523,54 @@ function ChatPage() {
         </button>
       )}
 
-      {/* Input */}
+      {/* Actions row + Composer (stacked, sticky) */}
       <div
-        className="sticky bottom-0 z-10 border-t bg-white px-3 py-2"
+        className="sticky bottom-0 z-10 border-t bg-white"
         style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }}
       >
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            rows={1}
-            className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
-            placeholder="Type a message…"
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              updateTypingStatus(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            onBlur={() => updateTypingStatus(false)}
-          />
-          <button
-            onClick={sendMessage}
-            disabled={!input.trim()}
-            className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 disabled:opacity-50"
-          >
-            Send
-          </button>
+        {/* Actions row */}
+        <div className="px-3 py-2">
+          {!!participants.length && (
+            <div className="flex">
+              <ProposeTimeButton
+                matchId={conversationID as string}
+                participants={participants}
+                currentUserId={user?.uid}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Composer row */}
+        <div className="px-3 pb-2">
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={inputRef}
+              rows={1}
+              className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
+              placeholder="Type a message…"
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                updateTypingStatus(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              onBlur={() => updateTypingStatus(false)}
+            />
+
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim()}
+              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 disabled:opacity-50"
+            >
+              Send
+            </button>
+          </div>
         </div>
       </div>
     </div>

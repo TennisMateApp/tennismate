@@ -22,3 +22,49 @@
 body {
   @apply bg-gray-50 text-gray-900;
 }
+
+/* === FullCalendar customizations === */
+
+/* Status color-coding */
+.fc .fc-event.proposed {
+  background-color: #fbbf24 !important; /* amber-400 */
+  border: none !important;
+  color: #1f2937 !important; /* gray-800 */
+}
+.fc .fc-event.accepted {
+  background-color: #34d399 !important; /* emerald-400 */
+  border: none !important;
+  color: #064e3b !important; /* emerald-900 */
+}
+.fc .fc-event.declined {
+  background-color: #d1d5db !important; /* gray-300 */
+  border: none !important;
+  color: #374151 !important; /* gray-700 */
+  text-decoration: line-through;
+}
+.fc .fc-event.cancelled {
+  background-color: #fecaca !important; /* red-200 */
+  border: none !important;
+  color: #7f1d1d !important; /* red-900 */
+  text-decoration: line-through;
+}
+
+/* Compact styling for mobile screens */
+@media (max-width: 767px) {
+  .fc .fc-toolbar.fc-header-toolbar {
+    margin-bottom: 0.25rem; /* tighter spacing */
+  }
+  .fc .fc-toolbar-title {
+    font-size: 1rem;
+    line-height: 1.25rem;
+  }
+  .fc .fc-timegrid-slot {
+    height: 1.75rem; /* shorter time slots */
+  }
+  .fc .fc-list {
+    font-size: 0.95rem;
+  }
+  .fc .fc-list-event-title {
+    white-space: normal; /* wrap long titles in list view */
+  }
+}

@@ -1,10 +1,11 @@
 import { setGlobalOptions } from "firebase-functions/v2";
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
-import { onRequest } from "firebase-functions/v2/https";
+import { onRequest, onCall } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import { TransactionalEmailsApi, SendSmtpEmail } from "@getbrevo/brevo";
+import { randomBytes } from "crypto";
 
 
 // ✅ Cloud Functions v2 supports australia-southeast1 (Sydney)
@@ -42,6 +43,8 @@ async function getUniqueReferralCode(): Promise<string> {
   }
   return `TM${Date.now()}`;
 }
+
+type CalendarAction = "PROPOSE" | "ACCEPT" | "DECLINE" | "CANCEL";
 
 // REPLACE computeQualification with this version
 async function computeQualification(uid: string, userData: FirebaseFirestore.DocumentData) {
@@ -299,6 +302,8 @@ export const referralOnMatchRequestCreated = onDocumentCreated(
   }
 );
 
+
+
 // =========================
 //  EMAIL: WELCOME + TOP 3 (Brevo)
 // =========================
@@ -416,7 +421,7 @@ if (origin) {
         uid: d.id,
         name: String(p.name || p.firstName || "Player"),
         skillLevel: String(p.skillLevel || p.skill || "Intermediate"),
-        distance_km: Math.round(distKm * 10) / 10, // 1 decimal place
+        distance_km: Math.round(distKm), // whole km (e.g. 43)
         avatar_url: String(p.avatar || p.photoURL || DEFAULT_AVATAR_URL),
         request_url: `${APP_BASE_URL}/match`, // all links -> match page
         _score: distKm,
@@ -608,6 +613,11 @@ export const referralUsersOnCreate = onDocumentCreated(
       updates.referralCode = await getUniqueReferralCode();
     }
 
+    // c) ensure a private calendarToken (for ICS feed)
+if (!data.calendarToken) {
+  updates.calendarToken = randomBytes(24).toString("hex"); // 48-char hex
+}
+
     // b) stamp referredBy if referredByCode present at create (block self-referrals)
     const code = (data.referredByCode || "").toString().trim();
     if (code) {
@@ -748,7 +758,7 @@ export const deliverQueuedWelcomeEmails = onSchedule(
               uid: d.id,
               name: String(p.name || p.firstName || "Player"),
               skillLevel: String(p.skillLevel || p.skill || "Intermediate"),
-              distance_km: Math.round(distKm * 10) / 10,
+              distance_km: Math.round(distKm),
               avatar_url: String(p.avatar || p.photoURL || DEFAULT_AVATAR_URL),
               request_url: `${APP_BASE_URL}/match`,
               _score: distKm,
@@ -844,6 +854,273 @@ function calculateDistance(a: { lat: number; lng: number }, b: { lat: number; ln
 
   return R * c;
 }
+
+/* =========================
+ *  CALENDAR: PROPOSE / UPDATE / EXPIRE
+ * ========================= */
+
+/**
+ * Propose a new event.
+ * Clients can also create directly to Firestore if your rules allow,
+ * but keeping a callable is handy for central validation or future logic.
+ */
+export const proposeEvent = onCall(async (req) => {
+  const uid = req.auth?.uid;
+  if (!uid) throw new Error("Unauthenticated");
+
+  const {
+    title, start, end, timeZone,
+    participants, conversationId, location, notes
+  } = (req.data || {}) as {
+    title: string;
+    start: string; // ISO 8601
+    end: string;   // ISO 8601
+    timeZone: string;
+    participants: string[];
+    conversationId?: string;
+    location?: string;
+    notes?: string;
+  };
+
+  if (!title || !start || !end || !timeZone) throw new Error("Missing fields");
+  if (!Array.isArray(participants) || participants.length < 1) throw new Error("participants required");
+  if (!participants.includes(uid)) throw new Error("You must be a participant");
+
+  const startDate = new Date(start);
+  const endDate   = new Date(end);
+  if (!(startDate instanceof Date) || isNaN(+startDate)) throw new Error("Invalid start");
+  if (!(endDate   instanceof Date) || isNaN(+endDate))   throw new Error("Invalid end");
+  if (startDate >= endDate) throw new Error("end must be after start");
+
+  const ref = db.collection("calendar_events").doc();
+  await ref.set({
+    title,
+    start: admin.firestore.Timestamp.fromDate(startDate),
+    end: admin.firestore.Timestamp.fromDate(endDate),
+    timeZone,
+    createdBy: uid,
+    participants,
+    status: "proposed",
+    conversationId: conversationId || null,
+    location: location || "",
+    notes: notes || "",
+    lastActionBy: uid,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { ok: true, id: ref.id };
+});
+
+/**
+ * Update an existing event's status (ACCEPT / DECLINE / CANCEL).
+ * Includes double-booking prevention on ACCEPT.
+ */
+export const updateEvent = onCall(async (req) => {
+  const uid = req.auth?.uid;
+  if (!uid) throw new Error("Unauthenticated");
+
+  const { eventId, action } = (req.data || {}) as { eventId: string; action: CalendarAction };
+  if (!eventId || !action) throw new Error("Missing eventId/action");
+
+  return await db.runTransaction(async (tx) => {
+    const ref = db.collection("calendar_events").doc(eventId);
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new Error("Event not found");
+    const ev = snap.data()!;
+
+    if (!Array.isArray(ev.participants) || !ev.participants.includes(uid)) {
+      throw new Error("Not a participant");
+    }
+
+    const current: string = ev.status;
+    const next =
+      action === "ACCEPT" ? "accepted" :
+      action === "DECLINE" ? "declined" :
+      action === "CANCEL"  ? "cancelled" :
+      "proposed";
+
+    // Allowed transitions:
+    // proposed -> accepted | declined | cancelled
+    // accepted -> cancelled
+    const valid =
+      (current === next) ||
+      (current === "proposed" && (next === "accepted" || next === "declined" || next === "cancelled")) ||
+      (current === "accepted" && next === "cancelled");
+
+    if (!valid) throw new Error("Invalid status transition");
+
+    // On ACCEPT: prevent double-booking for the actor
+    if (action === "ACCEPT") {
+      const q = db.collection("calendar_events")
+        .where("participants", "array-contains", uid)
+        .where("status", "==", "accepted");
+      const existing = await tx.get(q);
+      const startMs = ev.start.toMillis();
+      const endMs   = ev.end.toMillis();
+      const overlaps = existing.docs.some(d => {
+        const e = d.data();
+        const s = e.start.toMillis();
+        const n = e.end.toMillis();
+        return !(endMs <= s || startMs >= n);
+      });
+      if (overlaps) throw new Error("Time conflict");
+    }
+
+    tx.update(ref, {
+      status: next,
+      lastActionBy: uid,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return { ok: true, status: next };
+  });
+});
+
+export const rotateCalendarToken = onCall(async (req) => {
+  const uid = req.auth?.uid;
+  if (!uid) throw new Error("Unauthenticated");
+
+  const next = randomBytes(24).toString("hex");
+  await db.doc(`users/${uid}`).set({ calendarToken: next }, { merge: true });
+  return { ok: true, calendarToken: next };
+});
+
+export const serveCalendarIcs = onRequest(
+  { region: "australia-southeast1" },
+  async (req, res) => {
+    try {
+      // Expect URLs like: /serveCalendarIcs?uid=ABC&token=...  (default)
+      // You can also add a rewrite (see step 5) to support /cal/<uid>/<token>.ics
+      const uid = (req.query.uid as string) || "";
+      const token = (req.query.token as string) || "";
+
+      if (!uid || !token) {
+        res.status(400).send("Missing uid/token");
+        return;
+      }
+
+      // Verify token matches the user's stored token
+      const userSnap = await db.doc(`users/${uid}`).get();
+      if (!userSnap.exists) {
+        res.status(404).send("User not found");
+        return;
+      }
+      const userToken = userSnap.get("calendarToken");
+      if (!userToken || userToken !== token) {
+        res.status(401).send("Invalid token");
+        return;
+      }
+
+      // Pull accepted events that include this user
+      const eventsSnap = await db
+        .collection("calendar_events")
+        .where("participants", "array-contains", uid)
+        .where("status", "==", "accepted")
+        .orderBy("start", "asc")
+        .limit(500)
+        .get();
+
+      // Build ICS
+      const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+      const toIcsUtc = (ts: FirebaseFirestore.Timestamp) => {
+        const d = ts.toDate();
+        return (
+          d.getUTCFullYear().toString() +
+          pad(d.getUTCMonth() + 1) +
+          pad(d.getUTCDate()) +
+          "T" +
+          pad(d.getUTCHours()) +
+          pad(d.getUTCMinutes()) +
+          pad(d.getUTCSeconds()) +
+          "Z"
+        );
+      };
+
+      let ics = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//TennisMate//Calendar//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        `X-WR-CALNAME:TennisMate`,
+        `X-WR-TIMEZONE:Australia/Melbourne`,
+      ].join("\r\n") + "\r\n";
+
+      const now = new Date();
+      const dtstamp =
+        now.getUTCFullYear().toString() +
+        pad(now.getUTCMonth() + 1) +
+        pad(now.getUTCDate()) +
+        "T" +
+        pad(now.getUTCHours()) +
+        pad(now.getUTCMinutes()) +
+        pad(now.getUTCSeconds()) +
+        "Z";
+
+      eventsSnap.forEach((doc) => {
+        const ev = doc.data() as any;
+        const uidLine = `UID:${doc.id}@tennis-mate.com.au`;
+        const dtStart = `DTSTART:${toIcsUtc(ev.start)}`;
+        const dtEnd = `DTEND:${toIcsUtc(ev.end)}`;
+        const stamp = `DTSTAMP:${dtstamp}`;
+        const sum = `SUMMARY:${(ev.title || "Match").toString().replace(/\r?\n/g, " ")}`;
+        const loc = ev.location ? `LOCATION:${String(ev.location).replace(/\r?\n/g, " ")}` : "";
+        const desc = ev.notes ? `DESCRIPTION:${String(ev.notes).replace(/\r?\n/g, " ")}` : "";
+
+        ics +=
+          "BEGIN:VEVENT\r\n" +
+          `${uidLine}\r\n` +
+          `${stamp}\r\n` +
+          `${dtStart}\r\n` +
+          `${dtEnd}\r\n` +
+          `${sum}\r\n` +
+          (loc ? loc + "\r\n" : "") +
+          (desc ? desc + "\r\n" : "") +
+          "END:VEVENT\r\n";
+      });
+
+      ics += "END:VCALENDAR\r\n";
+
+      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+      res.setHeader("Content-Disposition", 'inline; filename="tennismate.ics"');
+      res.setHeader("Cache-Control", "public, max-age=300"); // 5 minutes
+      res.status(200).send(ics);
+    } catch (e) {
+      console.error("ICS error:", e);
+      res.status(500).send("Calendar feed error");
+    }
+  }
+);
+
+/**
+ * Auto-cancel stale proposals older than 72h to keep things tidy.
+ * Runs every 6h in Australia/Melbourne time.
+ */
+export const expireProposals = onSchedule(
+  {
+    schedule: "every 6 hours",
+    timeZone: "Australia/Melbourne",
+    region: "australia-southeast1",
+  },
+  async () => {
+    const cutoff = admin.firestore.Timestamp.fromDate(new Date(Date.now() - 72 * 60 * 60 * 1000));
+    const q = db.collection("calendar_events")
+      .where("status", "==", "proposed")
+      .where("createdAt", "<", cutoff);
+
+    const batch = db.batch();
+    const snaps = await q.get();
+    snaps.forEach(doc => {
+      batch.update(doc.ref, {
+        status: "cancelled",
+        lastActionBy: "system",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+    if (!snaps.empty) await batch.commit();
+  }
+);
 
 /* =========================
  *  COURT SUGGESTION (OK)
@@ -1036,6 +1313,56 @@ Default URL: ${DEFAULT_AVATAR_URL}`
     } catch (e) {
       console.error("Backfill error:", e);
       res.status(500).send("Backfill failed. See logs.");
+    }
+  }
+);
+
+// =========================
+//  ADMIN: Generate verify link manually
+// =========================
+export const makeVerifyLink = onRequest(
+  {
+    region: "australia-southeast1",
+    timeoutSeconds: 30,
+    secrets: [ADMIN_BACKFILL_KEY], // protect with your secret
+  },
+  async (req, res) => {
+    try {
+      // Check auth key
+      const key =
+        (req.query.key as string) ||
+        (req.headers["x-admin-key"] as string) ||
+        "";
+      if (key !== ADMIN_BACKFILL_KEY.value()) {
+        res.status(401).send("Unauthorized");
+        return;
+      }
+
+      // Email must be passed in body or query
+      const email =
+        (req.query.email as string) ||
+        (req.body?.email as string) ||
+        "";
+      if (!email) {
+        res.status(400).send("Missing email");
+        return;
+      }
+
+      // Ensure the user exists
+      await admin.auth().getUserByEmail(email);
+
+      // Generate the link (uses Firebase’s built-in flow/template)
+      const link = await admin.auth().generateEmailVerificationLink(email, {
+        url: `${APP_BASE_URL}/verify-email`,
+        handleCodeInApp: true,
+      });
+
+      // You can deliver via email here (Brevo) if you like,
+      // but simplest is to just return the link so you can copy+send.
+      res.status(200).json({ email, link });
+    } catch (err: any) {
+      console.error("❌ makeVerifyLink error:", err);
+      res.status(500).send(err.message || "Internal error");
     }
   }
 );

@@ -1,0 +1,1 @@
+﻿https://tennismate-d8acb.firebaseapp.com/__/auth/action?apiKey=AIzaSyCeLsM5EKnH8_PgzZT1_dWJhFMD653fQOI&mode=verifyEmail&oobCode=EVW-C0vztN9ID0cAzxBGxLK4uDw0-7JFkldaCUwu7vgAAAGZFH8emQ&continueUrl=https://tennismate-s7vk.vercel.app/verify-email&lang=en
