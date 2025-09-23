@@ -179,6 +179,7 @@ if (croppedImage) {
       // 4) Create players/{uid}
       await setDoc(doc(db, "players", user.uid), {
         name: formData.name,
+        nameLower: (formData.name || "").toLowerCase(),
         email: formData.email,
         postcode: formData.postcode,
         skillLevel: formData.skillLevel,

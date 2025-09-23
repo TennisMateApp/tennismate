@@ -178,7 +178,7 @@ if (!/^\d{4}$/.test(formData.postcode.trim())) {
       }
       await setDoc(
         doc(db, "players", user.uid),
-        { ...formData, photoURL, email: user.email, timestamp: serverTimestamp(), profileComplete: true },
+        { ...formData, photoURL,  nameLower: (formData.name || "").toLowerCase(), email: user.email, timestamp: serverTimestamp(), profileComplete: true },
         { merge: true }
       );
       setStatus("✅ Profile saved successfully!");
