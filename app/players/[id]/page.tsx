@@ -84,12 +84,6 @@ useEffect(() => {
     }
   });
 
-  // put this above `return ( ... )`, after `if (!player) return ...`
-const avatarSrc =
-  player?.photoURL && /^https?:\/\//.test(player.photoURL)
-    ? player.photoURL
-    : "/images/default-avatar.jpg"; // served from /public/images/default-avatar.jpg
-
   return () => unsubscribe();
 }, [id]);
 

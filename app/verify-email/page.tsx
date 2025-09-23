@@ -3,10 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { auth, db } from "@/lib/firebaseConfig";
+import { auth } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, sendEmailVerification, signOut } from "firebase/auth";
 import { Mail, ShieldCheck, Loader2 } from "lucide-react";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export default function VerifyEmailPage() {
   const router = useRouter();
@@ -38,11 +37,6 @@ useEffect(() => {
     // If they became verified, send them to Login with a clear banner,
     // email prefilled, and a continue target.
     if (u.emailVerified) {
-       await setDoc(
-         doc(db, "users", u.uid),
-         { emailVerified: true, emailVerifiedAt: serverTimestamp() },
-         { merge: true }
-         );
       router.replace(buildLoginRedirect(u.email || ""));
       return;
     }
@@ -65,8 +59,7 @@ async function sendEmail() {
   if (!auth.currentUser || cooldown > 0) return;
   setSending(true);
   try {
-    const ACTION_BASE_URL = "https://tennismate-s7vk.vercel.app"; // or your custom prod domain
-    const loginUrl = `${ACTION_BASE_URL}${buildLoginRedirect(auth.currentUser.email || "")}`;
+    const loginUrl = `${window.location.origin}${buildLoginRedirect(auth.currentUser.email || "")}`;
 
     await sendEmailVerification(auth.currentUser, {
       // Use Firebase's hosted verify page; after "Continue", user returns here:
@@ -79,9 +72,8 @@ async function sendEmail() {
     setCooldown(60);
     alert("Verification email sent. Check your inbox.");
   } catch (e) {
-    console.error("sendEmailVerification error:", e);
-    const msg = (e as any)?.code || (e as any)?.message || String(e);
-    alert(`Could not send verification email: ${msg}`);
+    console.error(e);
+    alert("Could not send verification email. Please try again shortly.");
   } finally {
     setSending(false);
   }

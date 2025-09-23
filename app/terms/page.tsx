@@ -7,24 +7,19 @@ export default function TermsPage() {
     {
       id: "about",
       title: "About TennisMate",
-body: (
-  <>
-    <p>
-      Welcome to TennisMate! By accessing or using our website or app, you agree to be
-      bound by these Terms and Conditions. If you do not agree, please do not use the
-      service.
-    </p>
-    <p>
-      TennisMate is a platform that connects tennis players based on skill level,
-      availability, and location to arrange matches and communicate.
-    </p>
-    <p>
-      TennisMate facilitates introductions between players only; it does not organise,
-      supervise, or control any in-person meetups.
-    </p>
-  </>
-),
-
+      body: (
+        <>
+          <p>
+            Welcome to TennisMate! By accessing or using our website or app, you agree to be
+            bound by these Terms and Conditions. If you do not agree, please do not use the
+            service.
+          </p>
+          <p>
+            TennisMate is a platform that connects tennis players based on skill level,
+            availability, and location to arrange matches and communicate.
+          </p>
+        </>
+      ),
     },
     {
       id: "eligibility",
@@ -78,37 +73,6 @@ body: (
       ),
     },
     {
-      id: "safety",
-      title: "Safety & In-Person Meetings",
- body: (
-  <>
-    <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm">
-      <strong>Notice:</strong> Meetings or matches you arrange using TennisMate are undertaken{" "}
-      <strong>at your own risk</strong>. Use your judgment and take reasonable precautions.
-    </div>
-    <ul className="mt-3 list-disc pl-5 space-y-1">
-      <li>
-        TennisMate is not a party to any arrangements made between users and is not an
-        event organiser.
-      </li>
-      <li>
-        You are solely responsible for your personal safety and belongings when meeting
-        other users (e.g., meet in public places, tell someone your plans).
-      </li>
-      <li>
-        We do not routinely screen, background-check, or verify users; any optional
-        verifications do not guarantee safety.
-      </li>
-      <li>
-        By meeting or playing with other users, you acknowledge and assume all risks,
-        including injury, illness, theft, or property damage.
-      </li>
-    </ul>
-  </>
-),
-
-    },
-    {
       id: "data",
       title: "Data",
       body: (
@@ -138,22 +102,8 @@ body: (
       body: (
         <p>
           TennisMate is an MVP and provided on an “as is” basis. We do not guarantee
-          uninterrupted access or error-free operation. To the maximum extent permitted by law,
-          TennisMate is not liable for any injuries, losses, or disputes arising from your use
-          of the app or from meetings or matches arranged through the service; users meet and
-          play <strong>at their own risk</strong>.
-        </p>
-      ),
-    },
-    {
-      id: "indemnity",
-      title: "Indemnity & Release",
-      body: (
-        <p>
-          You agree to indemnify and hold harmless TennisMate and its affiliates from any
-          claim, demand, or loss arising out of your use of the service or your interactions
-          with other users. By arranging or participating in a meetup, you release TennisMate
-          from claims arising from such interactions, to the extent permitted by law.
+          uninterrupted access or error-free operation. We are not liable for any injuries or
+          disputes arising from use of the app or matches arranged.
         </p>
       ),
     },
@@ -172,7 +122,7 @@ body: (
   return (
     <main className="mx-auto max-w-3xl p-4 sm:p-6 pb-28 text-gray-800">
       {/* Header */}
-      <header id="top" className="mb-4 sm:mb-6">
+      <header className="mb-4 sm:mb-6">
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
           Terms and Conditions
         </h1>

@@ -1,843 +1,21 @@
 import { setGlobalOptions } from "firebase-functions/v2";
-import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
-import { onRequest, onCall } from "firebase-functions/v2/https";
+import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
-import { onSchedule } from "firebase-functions/v2/scheduler";
-import { defineSecret } from "firebase-functions/params";
-import { TransactionalEmailsApi, SendSmtpEmail } from "@getbrevo/brevo";
-import { randomBytes } from "crypto";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 
 
-// ✅ Cloud Functions v2 supports australia-southeast1 (Sydney)
-setGlobalOptions({ maxInstances: 10, region: "australia-southeast1" });
+// ✅ Set correct region for Firestore: australia-southeast2
+setGlobalOptions({ maxInstances: 10, region: "australia-southeast2" });
 
 admin.initializeApp();
 const db = admin.firestore();
-
-const APP_BASE_URL = "https://tennismate-s7vk.vercel.app";
-
-const URLS = {
-  messages: `${APP_BASE_URL}/messages`,
-  matches:  `${APP_BASE_URL}/matches`,
-};
-
-const DEFAULT_AVATAR_URL = `${APP_BASE_URL}/images/default-avatar.jpg`;
-
-
-const ADMIN_BACKFILL_KEY = defineSecret("ADMIN_BACKFILL_KEY");
-
-// === Referral helpers ===
-function makeReferralCode(len = 7) {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
-  let s = "";
-  for (let i = 0; i < len; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return s;
-}
-
-async function getUniqueReferralCode(): Promise<string> {
-  // Try a few random codes, then fall back to timestamp (ultra-rare)
-  for (let i = 0; i < 10; i++) {
-    const code = makeReferralCode();
-    const snap = await db.collection("users").where("referralCode", "==", code).limit(1).get();
-    if (snap.empty) return code;
-  }
-  return `TM${Date.now()}`;
-}
-
-type CalendarAction = "PROPOSE" | "ACCEPT" | "DECLINE" | "CANCEL";
-
-// REPLACE computeQualification with this version
-async function computeQualification(uid: string, userData: FirebaseFirestore.DocumentData) {
-  // must have a referrer to qualify
-  const referrerId = (userData.referredBy || "").toString().trim();
-  if (!referrerId) return false;
-
-  // email verified (prefer mirror; fallback to Auth once)
-  let emailVerified = !!userData.emailVerified;
-  if (!emailVerified) {
-    try {
-      const au = await admin.auth().getUser(uid);
-      emailVerified = !!au.emailVerified;
-    } catch {}
-  }
-
-  // profile photo (users.photoURL OR players.photoURL)
-  let hasPhoto = !!(userData.photoURL && String(userData.photoURL).trim());
-  if (!hasPhoto) {
-    const pSnap = await db.doc(`players/${uid}`).get();
-    hasPhoto = !!(pSnap.exists && pSnap.get("photoURL"));
-  }
-
-  // sent at least one match request to someone OTHER than the referrer
-  // prefer the flag if we've already stamped it; otherwise do a light query
-  let hasNonReferrerRequest = !!userData.hasNonReferrerRequest;
-  if (!hasNonReferrerRequest) {
-    const sentSnap = await db
-      .collection("match_requests")
-      .where("fromUserId", "==", uid)
-      .limit(50)
-      .get();
-
-    for (const d of sentSnap.docs) {
-      const to = (d.get("toUserId") || "").toString();
-      const status = (d.get("status") || "").toString();
-      const withdrawn = status === "withdrawn" || status === "deleted";
-      if (to && to !== referrerId && !withdrawn) {
-        hasNonReferrerRequest = true;
-        break;
-      }
-    }
-  }
-
-  return emailVerified && hasPhoto && hasNonReferrerRequest;
-}
-
-
-
-export const referralUsersOnUpdate = onDocumentUpdated(
-  "users/{uid}",
-  async (event) => {
-    const afterSnap = event.data?.after;
-    const beforeSnap = event.data?.before;
-    if (!afterSnap || !beforeSnap) return;
-
-    const uid = event.params.uid as string;
-    const before = beforeSnap.data() || {};
-    const after  = afterSnap.data() || {};
-
-    // ---------- A) Late resolve referredBy from referredByCode ----------
-    if (!after.referredBy) {
-      const beforeCode = (before.referredByCode || "").toString().trim();
-      const afterCode  = (after.referredByCode  || "").toString().trim();
-
-      // Only resolve once and only if code newly present/changed
-      if (afterCode && afterCode !== beforeCode) {
-        const refQ = await db.collection("users")
-          .where("referralCode", "==", afterCode)
-          .limit(1)
-          .get();
-
-        if (!refQ.empty && refQ.docs[0].id !== uid) {
-          await afterSnap.ref.set({ referredBy: refQ.docs[0].id }, { merge: true });
-
-          // Optional: write a deterministic signup event (won’t be double-written)
-          const signupId = `signup_${uid}`;
-          await db.doc(`referrals/${signupId}`).set({
-            stage: "signup",
-            referredUid: uid,
-            referrerUid: refQ.docs[0].id,
-            referrerCode: afterCode,
-            ts: admin.firestore.FieldValue.serverTimestamp(),
-          }, { merge: true });
-        }
-      }
-    }
-
-    // ---------- B) Qualification gate (single source of truth) ----------
-    const hadQualified = !!before._qualified;
-    const hasReferrer  = !!after.referredBy;
-
-    if (!hadQualified && hasReferrer) {
-      const nowQualified = await computeQualification(uid, after);
-      if (!nowQualified) return;
-
-      const referrerId = String(after.referredBy);
-      const qDocId = `qualified_${referrerId}_${uid}`;
-      const qRef   = db.doc(`referrals/${qDocId}`);
-      const statsRef = db.doc(`referral_stats/${referrerId}`);
-
-      // One atomic transaction → idempotent + consistent counters
-      await db.runTransaction(async (tx) => {
-        const qSnap = await tx.get(qRef);
-        if (qSnap.exists) return; // already counted for this (referrer, referred) pair
-
-        tx.set(qRef, {
-          stage: "qualified",
-          referredUid: uid,
-          referrerUid: referrerId,
-          ts: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        tx.set(afterSnap.ref, {
-          _qualified: true,
-          _qualifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-
-        tx.set(statsRef, {
-          qualifiedCount: admin.firestore.FieldValue.increment(1),
-          entries:        admin.firestore.FieldValue.increment(1),
-          lastUpdated:    admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-      });
-    }
-  }
-);
-
-const BREVO_API_KEY = defineSecret("BREVO_API_KEY");
-// Send the welcome only after verification; how long to wait between checks
-const WELCOME_EMAIL_DELAY_MINUTES = Number(process.env.WELCOME_EMAIL_DELAY_MINUTES) || 15;
-
-
-async function getPostcodeCoords(pc: string): Promise<{lat:number; lng:number} | null> {
-  if (!pc) return null;
-  const snap = await db.collection("postcodes").doc(String(pc)).get();
-  const d = snap.data() as any;
-  return d && typeof d.lat === "number" && typeof d.lng === "number" ? { lat: d.lat, lng: d.lng } : null;
-}
-
-// Send ONE email if a message stays unread for this long (minutes)
-const UNREAD_EMAIL_DELAY_MINUTES =
-  Number(process.env.UNREAD_EMAIL_DELAY_MINUTES) || 30;
-
 
 interface Court {
   id: string;
   name: string;
   lat: number;
   lng: number;
-}
-
-type EmailPrefs = {
-  matchRequest?: boolean;
-  requestAccepted?: boolean;
-  messageReceived?: boolean;
-};
-
-
-
-async function getUserProfile(uid: string) {
-  const [userSnap, playerSnap] = await Promise.all([
-    db.doc(`users/${uid}`).get(),
-    db.doc(`players/${uid}`).get(),
-  ]);
-
-  const email = userSnap.get("email") as string | undefined;
-  const prefs = (userSnap.get("emailPrefs") || {}) as EmailPrefs;
-  const name =
-    playerSnap.get("name") ||
-    userSnap.get("name") ||
-    userSnap.get("username") ||
-    "a player";
-
-  return { email, prefs, name };
-}
-
-// src/index.ts
-export { referralOnMatchAccepted } from "./referralOnMatchAccepted";
-
-// NEW: when a match request is created, mark "hasNonReferrerRequest" and award if ready
-export const referralOnMatchRequestCreated = onDocumentCreated(
-  { region: "australia-southeast1", document: "match_requests/{matchId}" },
-  async (event) => {
-    const data = event.data?.data();
-    if (!data) return;
-
-    const fromUserId = String(data.fromUserId || "");
-    const toUserId   = String(data.toUserId || "");
-    if (!fromUserId || !toUserId) return;
-
-    // Load sender user
-    const userRef = db.doc(`users/${fromUserId}`);
-    const userSnap = await userRef.get();
-    const user = userSnap.data() || {};
-
-    const referrerId = (user.referredBy || "").toString().trim();
-    if (!referrerId) return; // only care about referred users
-
-    // Ignore if they sent to the referrer
-    if (toUserId === referrerId) return;
-
-    // 1) Always stamp the flag (idempotent) so later profile/email updates can qualify them
-    await userRef.set({ hasNonReferrerRequest: true }, { merge: true });
-
-    // 2) If they already meet the other conditions, award now (idempotent)
-    //    - email verified (mirror or Auth)
-    let emailVerified = !!user.emailVerified;
-    if (!emailVerified) {
-      try {
-        const au = await admin.auth().getUser(fromUserId);
-        emailVerified = !!au.emailVerified;
-      } catch {}
-    }
-
-    //    - photo present (users or players)
-    let hasPhoto = !!(user.photoURL && String(user.photoURL).trim());
-    if (!hasPhoto) {
-      const pSnap = await db.doc(`players/${fromUserId}`).get();
-      hasPhoto = !!(pSnap.exists && pSnap.get("photoURL"));
-    }
-
-    if (!emailVerified || !hasPhoto) return; // not ready yet; the users/{uid} update will qualify later
-
-    // Award once using deterministic id + transaction
-    const qDocId  = `qualified_${referrerId}_${fromUserId}`;
-    const qRef    = db.doc(`referrals/${qDocId}`);
-    const statsRef = db.doc(`referral_stats/${referrerId}`);
-
-    await db.runTransaction(async (tx) => {
-      const [qSnap, freshUser] = await Promise.all([tx.get(qRef), tx.get(userRef)]);
-      if (qSnap.exists) return; // already awarded
-
-      if (freshUser.exists && freshUser.data()?._qualified) return; // already marked
-
-      tx.set(qRef, {
-        stage: "qualified",
-        referredUid: fromUserId,
-        referrerUid: referrerId,
-        ts: admin.firestore.FieldValue.serverTimestamp(),
-        reason: "non_referrer_request_created",
-      });
-
-      tx.set(userRef, {
-        _qualified: true,
-        _qualifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-
-      tx.set(statsRef, {
-        qualifiedCount: admin.firestore.FieldValue.increment(1),
-        entries:        admin.firestore.FieldValue.increment(1),
-        lastUpdated:    admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-    });
-  }
-);
-
-
-
-// =========================
-//  EMAIL: WELCOME + TOP 3 (Brevo)
-// =========================
-export const sendWelcomeEmailOnPlayerCreate = onDocumentCreated(
-  {
-    document: "players/{uid}",
-    region: "australia-southeast1",
-    timeoutSeconds: 30,
-    memory: "256MiB",
-    secrets: [BREVO_API_KEY],
-  },
-  async (event) => {
-    console.log("🔥 players.create trigger fired", { uid: event.params.uid, exists: !!event.data });
-
-    const uid = event.params.uid as string;
-    const player = event.data?.data() || {};
-
-    // prevent duplicates
-    const markerRef = db.collection("users").doc(uid).collection("meta").doc("welcome");
-    if ((await markerRef.get()).exists) { console.log("🔁 already sent"); return; }
-
-    const userSkill = (player.skillLevel || player.skill || "").toString();
-    const userPostcode = (player.postcode || "").toString();
-    if (!userSkill || !userPostcode) { console.log("⛔ missing skill/postcode"); return; }
-
-    // email + first name
-    let email: string | undefined = player.email;
-    let firstName: string = player.firstName || player.name || "there";
-    if (!email) {
-      const u = await db.doc(`users/${uid}`).get();
-      email = (u.get("email") as string) || undefined;
-    }
-    if (!email) {
-      try {
-        const au = await admin.auth().getUser(uid);
-        email = au.email || undefined;
-        if (!firstName && au.displayName) firstName = au.displayName.split(" ")[0];
-      } catch {}
-    }
-    if (!email) { console.log("⛔ no email anywhere"); return; }
-
-const origin = await getPostcodeCoords(userPostcode);
-if (!origin) {
-  console.log("⚠️ no coords for postcode", userPostcode, "- sending welcome without matches");
-}
-
-// Wait until the user verifies their email before sending the welcome
-let isVerified = false;
-try {
-  const au = await admin.auth().getUser(uid);
-  isVerified = !!au.emailVerified;
-} catch {}
-
-if (!isVerified) {
-  const qref = db.collection("welcome_queue").doc(uid);
-  await qref.set({
-    uid,
-    scheduledAt: admin.firestore.Timestamp.fromDate(
-      new Date(Date.now() + WELCOME_EMAIL_DELAY_MINUTES * 60 * 1000)
-    ),
-    tries: 0,
-    sent: false,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
-
-  console.log(`⏳ Queued welcome until email is verified (uid=${uid})`);
-  return; // exit here; the scheduler below will send once verified
-}
-
-
-// candidates (distance-only, scans all players, keeps nearest 3)
-type Cand = {
-  uid: string;
-  name: string;
-  skillLevel: string;
-  distance_km: number;
-  avatar_url: string;
-  request_url: string;
-  _score: number; // distance in km
-};
-
-const pcCache = new Map<string, { lat: number; lng: number }>();
-async function coordsFor(pc: string) {
-  if (!pc) return null;
-  if (pcCache.has(pc)) return pcCache.get(pc)!;
-  const c = await getPostcodeCoords(pc);
-  if (c) pcCache.set(pc, c);
-  return c;
-}
-
-let top3: Cand[] = [];
-
-if (origin) {
-  let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-  const pageSize = 500;
-
-  while (true) {
-    let q = db.collection("players")
-      .orderBy(admin.firestore.FieldPath.documentId())
-      .limit(pageSize);
-    if (lastDoc) q = q.startAfter(lastDoc);
-
-    const page = await q.get();
-    if (page.empty) break;
-
-    for (const d of page.docs) {
-      if (d.id === uid) continue;
-      const p = d.data() || {};
-      const pc = String(p.postcode || "");
-      const coords = pc ? await coordsFor(pc) : null;
-      if (!coords) continue;
-
-      const distKm = calculateDistance(origin, coords);
-      const cand: Cand = {
-        uid: d.id,
-        name: String(p.name || p.firstName || "Player"),
-        skillLevel: String(p.skillLevel || p.skill || "Intermediate"),
-        distance_km: Math.round(distKm), // whole km (e.g. 43)
-        avatar_url: String(p.avatar || p.photoURL || DEFAULT_AVATAR_URL),
-        request_url: `${APP_BASE_URL}/match`, // all links -> match page
-        _score: distKm,
-      };
-
-      // keep only the 3 closest
-      if (top3.length < 3) {
-        top3.push(cand);
-        top3.sort((a, b) => a._score - b._score);
-      } else if (cand._score < top3[2]._score) {
-        top3[2] = cand;
-        top3.sort((a, b) => a._score - b._score);
-      }
-    }
-
-    lastDoc = page.docs[page.docs.length - 1];
-  }
-} else {
-  console.log("⚠️ no coords for postcode", userPostcode, "- sending welcome without matches");
-}
-
-console.log("🧮 email top3", top3.map(x => ({ name: x.name, km: x.distance_km })));
-
-
-
-    // send via Brevo
-    const api = new TransactionalEmailsApi();
-    (api as any).authentications.apiKey.apiKey = BREVO_API_KEY.value();
-
-    const msg: SendSmtpEmail = {
-      to: [{ email, name: firstName }],
-      sender: { email: "hello@tennis-mate.com.au", name: "TennisMate" },
-      templateId: 2,
-      params: {
-        first_name: firstName,
-        cta_url: `${APP_BASE_URL}/match-me?utm_source=welcome&utm_medium=email&utm_campaign=welcome_v1`,
-        explore_url: `${APP_BASE_URL}/directory?utm_source=welcome&utm_medium=email&utm_campaign=welcome_v1`,
-        matches: top3.map(m => ({
-          name: m.name,
-          skill_level: m.skillLevel,
-          distance_km: m.distance_km,
-          avatar_url: m.avatar_url,
-          request_url: m.request_url,
-        })),
-      },
-      tags: ["welcome","top3"],
-    };
-
-try {
-  await api.sendTransacEmail(msg);
-  await markerRef.set({ sentAt: admin.firestore.FieldValue.serverTimestamp() });
-  console.log(`✅ Welcome email sent to ${email} (uid=${uid})`);
-} catch (e) {
-  console.error("❌ Brevo send failed:", e);
-  return; // don't set the marker on failure
-}
-
-  }
-);
-
-export const backfillReferralCodes = onRequest(
-  {
-    region: "australia-southeast1",
-    timeoutSeconds: 540,
-    memory: "512MiB",
-    secrets: [ADMIN_BACKFILL_KEY],
-  },
-  async (req, res) => {
-    const key =
-      (req.query.key as string) ||
-      (req.headers["x-admin-key"] as string) ||
-      "";
-
-    if (key !== ADMIN_BACKFILL_KEY.value()) {
-      res.status(401).send("Unauthorized");
-      return;
-    }
-
-    const pageSize = Math.min(Number(req.query.pageSize) || 200, 450);
-
-    let scanned = 0;
-    let setCode = 0;
-    let setReferrer = 0;
-
-    let last: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-
-    while (true) {
-      let q = admin
-        .firestore()
-        .collection("users")
-        .orderBy(admin.firestore.FieldPath.documentId())
-        .limit(pageSize);
-      if (last) q = q.startAfter(last);
-
-      const snap = await q.get();
-      if (snap.empty) break;
-
-      let batch = admin.firestore().batch();
-      let writes = 0;
-
-      for (const d of snap.docs) {
-        scanned++;
-        const u = d.data() || {};
-
-        // a) ensure referralCode
-        if (!u.referralCode) {
-          const code = await getUniqueReferralCode();
-          batch.set(d.ref, { referralCode: code }, { merge: true });
-          setCode++;
-          writes++;
-        }
-
-        // b) late resolve referredBy from referredByCode (and create signup referral record)
-        const codeStr = (u.referredByCode || "").toString().trim();
-        if (codeStr && !u.referredBy) {
-          const ref = await admin
-            .firestore()
-            .collection("users")
-            .where("referralCode", "==", codeStr)
-            .limit(1)
-            .get();
-
-          if (!ref.empty && ref.docs[0].id !== d.id) {
-            const referrerId = ref.docs[0].id;
-
-            batch.set(d.ref, { referredBy: referrerId }, { merge: true });
-            writes++;
-
-            // deterministic id to avoid dupes; makes it idempotent
-            const signupRefId = `signup_${d.id}`;
-            batch.set(
-              admin.firestore().collection("referrals").doc(signupRefId),
-              {
-                stage: "signup",
-                referredUid: d.id,
-                referrerUid: referrerId,
-                referrerCode: codeStr,
-                ts: admin.firestore.FieldValue.serverTimestamp(),
-                _source: "backfill_v1",
-              },
-              { merge: true }
-            );
-            writes++;
-            setReferrer++;
-          }
-        }
-
-        // guard against 500-writes batch limit
-        if (writes >= 450) {
-          await batch.commit();
-          batch = admin.firestore().batch();
-          writes = 0;
-        }
-      }
-
-      if (writes > 0) await batch.commit();
-
-      last = snap.docs[snap.docs.length - 1];
-      // small yield to be nice to Firestore
-      await new Promise((r) => setTimeout(r, 40));
-    }
-
-    res
-      .status(200)
-      .send(
-        `✅ Backfill complete. scanned=${scanned}, setCode=${setCode}, setReferrer=${setReferrer}`
-      );
-  }
-);
-
-// =========================
-//  REFERRALS: assign code on user create; resolve referredBy
-// =========================
-// =========================
-//  REFERRALS: assign code on user create; resolve referredBy
-// =========================
-export const referralUsersOnCreate = onDocumentCreated(
-  "users/{uid}",
-  async (event) => {
-    const uid = event.params.uid as string;
-    const snap = event.data;
-    if (!snap) return;
-    const data = snap.data() || {};
-
-    const updates: Record<string, any> = {};
-
-    // a) ensure a unique referralCode
-    if (!data.referralCode) {
-      updates.referralCode = await getUniqueReferralCode();
-    }
-
-    // c) ensure a private calendarToken (for ICS feed)
-if (!data.calendarToken) {
-  updates.calendarToken = randomBytes(24).toString("hex"); // 48-char hex
-}
-
-    // b) stamp referredBy if referredByCode present at create (block self-referrals)
-    const code = (data.referredByCode || "").toString().trim();
-    if (code) {
-      const refSnap = await db.collection("users").where("referralCode", "==", code).limit(1).get();
-      if (!refSnap.empty) {
-        const referrer = refSnap.docs[0];
-        if (referrer.id !== uid) {
-          updates.referredBy = referrer.id;
-
-     await db.doc(`referrals/signup_${uid}`).set({
-  stage: "signup",
-  referredUid: uid,
-  referrerUid: referrer.id,
-  referrerCode: code,
-  ts: admin.firestore.FieldValue.serverTimestamp(),
-}, { merge: true });
-
-        }
-      }
-    }
-
-    if (Object.keys(updates).length) {
-      await snap.ref.set(updates, { merge: true });
-    }
-  }
-);
-
-
-// =========================
-//  CRON: deliver queued welcome emails after verification
-// =========================
-export const deliverQueuedWelcomeEmails = onSchedule(
-  {
-    schedule: "every 5 minutes",
-    timeZone: "Australia/Melbourne",
-    region: "australia-southeast1",
-    secrets: [BREVO_API_KEY], 
-  },
-  async () => {
-    const now = admin.firestore.Timestamp.now();
-    const due = await db.collection("welcome_queue")
-      .where("sent", "==", false)
-      .where("scheduledAt", "<=", now)
-      .limit(50)
-      .get();
-
-    if (due.empty) return;
-
-    for (const doc of due.docs) {
-      const { uid, tries = 0 } = doc.data() as { uid: string; tries?: number };
-
-      // Already sent elsewhere? (safety)
-      const markerRef = db.collection("users").doc(uid).collection("meta").doc("welcome");
-      if ((await markerRef.get()).exists) {
-        await doc.ref.update({ sent: true, sentAt: admin.firestore.FieldValue.serverTimestamp() });
-        continue;
-      }
-
-      // Only send after verification
-      let verified = false;
-      try {
-        const au = await admin.auth().getUser(uid);
-        verified = !!au.emailVerified;
-      } catch {}
-
-      if (!verified) {
-        // re-schedule, give up after ~24h (96 tries @ 15m)
-        const next = admin.firestore.Timestamp.fromDate(
-          new Date(Date.now() + WELCOME_EMAIL_DELAY_MINUTES * 60 * 1000)
-        );
-        if (tries >= 96) {
-          console.log(`🛑 Dropping welcome for uid=${uid} (not verified after ${tries} tries)`);
-          await doc.ref.update({ abandoned: true, sent: false, tries: tries + 1, scheduledAt: next });
-        } else {
-          await doc.ref.update({ tries: tries + 1, scheduledAt: next });
-        }
-        continue;
-      }
-
-      // Build email inputs (pull player + postcode)
-      const playerSnap = await db.doc(`players/${uid}`).get();
-      const player = playerSnap.data() || {};
-      const firstName: string = player.firstName || player.name || "there";
-
-      // Pick an email (players.email -> users.email -> Auth email)
-      let email: string | undefined = player.email;
-      if (!email) {
-        const u = await db.doc(`users/${uid}`).get();
-        email = (u.get("email") as string) || undefined;
-      }
-      if (!email) {
-        try {
-          const au = await admin.auth().getUser(uid);
-          email = au.email || undefined;
-        } catch {}
-      }
-      if (!email) {
-        console.log(`⚠️ No email found for uid=${uid}; rescheduling`);
-        await doc.ref.update({
-          tries: tries + 1,
-          scheduledAt: admin.firestore.Timestamp.fromDate(
-            new Date(Date.now() + WELCOME_EMAIL_DELAY_MINUTES * 60 * 1000)
-          ),
-        });
-        continue;
-      }
-
-      const userPostcode = String(player.postcode || "");
-      const origin = userPostcode ? await getPostcodeCoords(userPostcode) : null;
-      if (!origin) console.log("⚠️ No coords for postcode", userPostcode, "— sending without matches");
-
-      // Reuse your distance-only top3 (same code you added earlier)
-      type Cand = {
-        uid: string; name: string; skillLevel: string;
-        distance_km: number; avatar_url: string; request_url: string; _score: number;
-      };
-      let top3: Cand[] = [];
-      if (origin) {
-        let last: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-        const pageSize = 500;
-        while (true) {
-          let q = db.collection("players")
-            .orderBy(admin.firestore.FieldPath.documentId())
-            .limit(pageSize);
-          if (last) q = q.startAfter(last);
-          const page = await q.get();
-          if (page.empty) break;
-
-          for (const d of page.docs) {
-            if (d.id === uid) continue;
-            const p = d.data() || {};
-            const pc = String(p.postcode || "");
-            const coords = pc ? await getPostcodeCoords(pc) : null;
-            if (!coords) continue;
-
-            const distKm = calculateDistance(origin, coords);
-            const cand: Cand = {
-              uid: d.id,
-              name: String(p.name || p.firstName || "Player"),
-              skillLevel: String(p.skillLevel || p.skill || "Intermediate"),
-              distance_km: Math.round(distKm),
-              avatar_url: String(p.avatar || p.photoURL || DEFAULT_AVATAR_URL),
-              request_url: `${APP_BASE_URL}/match`,
-              _score: distKm,
-            };
-            if (top3.length < 3) {
-              top3.push(cand);
-              top3.sort((a, b) => a._score - b._score);
-            } else if (cand._score < top3[2]._score) {
-              top3[2] = cand;
-              top3.sort((a, b) => a._score - b._score);
-            }
-          }
-          last = page.docs[page.docs.length - 1];
-        }
-      }
-
-      // Send via Brevo
-      const api = new TransactionalEmailsApi();
-      (api as any).authentications.apiKey.apiKey = BREVO_API_KEY.value();
-      const msg: SendSmtpEmail = {
-        to: [{ email, name: firstName }],
-        sender: { email: "hello@tennis-mate.com.au", name: "TennisMate" },
-        templateId: 2,
-        params: {
-          first_name: firstName,
-          cta_url: `${APP_BASE_URL}/match`,
-          explore_url: `${APP_BASE_URL}/match`,
-          matches: top3.map(m => ({
-            name: m.name,
-            skill_level: m.skillLevel,
-            distance_km: m.distance_km,
-            avatar_url: m.avatar_url,
-            request_url: m.request_url,
-          })),
-        },
-        tags: ["welcome","verified"],
-      };
-
-      try {
-        await api.sendTransacEmail(msg);
-        await markerRef.set({ sentAt: admin.firestore.FieldValue.serverTimestamp() });
-        await doc.ref.update({ sent: true, sentAt: admin.firestore.FieldValue.serverTimestamp() });
-        console.log(`✅ Welcome (post-verify) sent to ${email} (uid=${uid})`);
-      } catch (e) {
-        console.error("❌ Brevo send (queue) failed:", e);
-        // reschedule on API failure
-        await doc.ref.update({
-          tries: tries + 1,
-          scheduledAt: admin.firestore.Timestamp.fromDate(
-            new Date(Date.now() + WELCOME_EMAIL_DELAY_MINUTES * 60 * 1000)
-          ),
-        });
-      }
-    }
-  }
-);
-
-
-export const queueTestEmail = onRequest({ region: "australia-southeast1" }, async (_req, res) => {
-  await db.collection("mail").add({
-    to: ["william.ray.bourke@gmail.com"], // change to your inbox for the test
-    message: {
-      subject: "TennisMate test (server)",
-      text: "Hello from TennisMate via Trigger Email"
-    }
-  });
-  res.send("Queued test email to /mail.");
-});
-
-async function queueEmail(to: string[], subject: string, html: string, text?: string) {
-  await db.collection("mail").add({
-    to,
-    message: {
-      subject,
-      html,
-      text: text || html.replace(/<[^>]+>/g, " "),
-    },
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
 }
 
 function calculateDistance(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -855,287 +33,32 @@ function calculateDistance(a: { lat: number; lng: number }, b: { lat: number; ln
   return R * c;
 }
 
-/* =========================
- *  CALENDAR: PROPOSE / UPDATE / EXPIRE
- * ========================= */
-
-/**
- * Propose a new event.
- * Clients can also create directly to Firestore if your rules allow,
- * but keeping a callable is handy for central validation or future logic.
- */
-export const proposeEvent = onCall(async (req) => {
-  const uid = req.auth?.uid;
-  if (!uid) throw new Error("Unauthenticated");
-
-  const {
-    title, start, end, timeZone,
-    participants, conversationId, location, notes
-  } = (req.data || {}) as {
-    title: string;
-    start: string; // ISO 8601
-    end: string;   // ISO 8601
-    timeZone: string;
-    participants: string[];
-    conversationId?: string;
-    location?: string;
-    notes?: string;
-  };
-
-  if (!title || !start || !end || !timeZone) throw new Error("Missing fields");
-  if (!Array.isArray(participants) || participants.length < 1) throw new Error("participants required");
-  if (!participants.includes(uid)) throw new Error("You must be a participant");
-
-  const startDate = new Date(start);
-  const endDate   = new Date(end);
-  if (!(startDate instanceof Date) || isNaN(+startDate)) throw new Error("Invalid start");
-  if (!(endDate   instanceof Date) || isNaN(+endDate))   throw new Error("Invalid end");
-  if (startDate >= endDate) throw new Error("end must be after start");
-
-  const ref = db.collection("calendar_events").doc();
-  await ref.set({
-    title,
-    start: admin.firestore.Timestamp.fromDate(startDate),
-    end: admin.firestore.Timestamp.fromDate(endDate),
-    timeZone,
-    createdBy: uid,
-    participants,
-    status: "proposed",
-    conversationId: conversationId || null,
-    location: location || "",
-    notes: notes || "",
-    lastActionBy: uid,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  return { ok: true, id: ref.id };
-});
-
-/**
- * Update an existing event's status (ACCEPT / DECLINE / CANCEL).
- * Includes double-booking prevention on ACCEPT.
- */
-export const updateEvent = onCall(async (req) => {
-  const uid = req.auth?.uid;
-  if (!uid) throw new Error("Unauthenticated");
-
-  const { eventId, action } = (req.data || {}) as { eventId: string; action: CalendarAction };
-  if (!eventId || !action) throw new Error("Missing eventId/action");
-
-  return await db.runTransaction(async (tx) => {
-    const ref = db.collection("calendar_events").doc(eventId);
-    const snap = await tx.get(ref);
-    if (!snap.exists) throw new Error("Event not found");
-    const ev = snap.data()!;
-
-    if (!Array.isArray(ev.participants) || !ev.participants.includes(uid)) {
-      throw new Error("Not a participant");
-    }
-
-    const current: string = ev.status;
-    const next =
-      action === "ACCEPT" ? "accepted" :
-      action === "DECLINE" ? "declined" :
-      action === "CANCEL"  ? "cancelled" :
-      "proposed";
-
-    // Allowed transitions:
-    // proposed -> accepted | declined | cancelled
-    // accepted -> cancelled
-    const valid =
-      (current === next) ||
-      (current === "proposed" && (next === "accepted" || next === "declined" || next === "cancelled")) ||
-      (current === "accepted" && next === "cancelled");
-
-    if (!valid) throw new Error("Invalid status transition");
-
-    // On ACCEPT: prevent double-booking for the actor
-    if (action === "ACCEPT") {
-      const q = db.collection("calendar_events")
-        .where("participants", "array-contains", uid)
-        .where("status", "==", "accepted");
-      const existing = await tx.get(q);
-      const startMs = ev.start.toMillis();
-      const endMs   = ev.end.toMillis();
-      const overlaps = existing.docs.some(d => {
-        const e = d.data();
-        const s = e.start.toMillis();
-        const n = e.end.toMillis();
-        return !(endMs <= s || startMs >= n);
-      });
-      if (overlaps) throw new Error("Time conflict");
-    }
-
-    tx.update(ref, {
-      status: next,
-      lastActionBy: uid,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    return { ok: true, status: next };
-  });
-});
-
-export const rotateCalendarToken = onCall(async (req) => {
-  const uid = req.auth?.uid;
-  if (!uid) throw new Error("Unauthenticated");
-
-  const next = randomBytes(24).toString("hex");
-  await db.doc(`users/${uid}`).set({ calendarToken: next }, { merge: true });
-  return { ok: true, calendarToken: next };
-});
-
-export const serveCalendarIcs = onRequest(
-  { region: "australia-southeast1" },
-  async (req, res) => {
-    try {
-      // Expect URLs like: /serveCalendarIcs?uid=ABC&token=...  (default)
-      // You can also add a rewrite (see step 5) to support /cal/<uid>/<token>.ics
-      const uid = (req.query.uid as string) || "";
-      const token = (req.query.token as string) || "";
-
-      if (!uid || !token) {
-        res.status(400).send("Missing uid/token");
-        return;
-      }
-
-      // Verify token matches the user's stored token
-      const userSnap = await db.doc(`users/${uid}`).get();
-      if (!userSnap.exists) {
-        res.status(404).send("User not found");
-        return;
-      }
-      const userToken = userSnap.get("calendarToken");
-      if (!userToken || userToken !== token) {
-        res.status(401).send("Invalid token");
-        return;
-      }
-
-      // Pull accepted events that include this user
-      const eventsSnap = await db
-        .collection("calendar_events")
-        .where("participants", "array-contains", uid)
-        .where("status", "==", "accepted")
-        .orderBy("start", "asc")
-        .limit(500)
-        .get();
-
-      // Build ICS
-      const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-      const toIcsUtc = (ts: FirebaseFirestore.Timestamp) => {
-        const d = ts.toDate();
-        return (
-          d.getUTCFullYear().toString() +
-          pad(d.getUTCMonth() + 1) +
-          pad(d.getUTCDate()) +
-          "T" +
-          pad(d.getUTCHours()) +
-          pad(d.getUTCMinutes()) +
-          pad(d.getUTCSeconds()) +
-          "Z"
-        );
-      };
-
-      let ics = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//TennisMate//Calendar//EN",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        `X-WR-CALNAME:TennisMate`,
-        `X-WR-TIMEZONE:Australia/Melbourne`,
-      ].join("\r\n") + "\r\n";
-
-      const now = new Date();
-      const dtstamp =
-        now.getUTCFullYear().toString() +
-        pad(now.getUTCMonth() + 1) +
-        pad(now.getUTCDate()) +
-        "T" +
-        pad(now.getUTCHours()) +
-        pad(now.getUTCMinutes()) +
-        pad(now.getUTCSeconds()) +
-        "Z";
-
-      eventsSnap.forEach((doc) => {
-        const ev = doc.data() as any;
-        const uidLine = `UID:${doc.id}@tennis-mate.com.au`;
-        const dtStart = `DTSTART:${toIcsUtc(ev.start)}`;
-        const dtEnd = `DTEND:${toIcsUtc(ev.end)}`;
-        const stamp = `DTSTAMP:${dtstamp}`;
-        const sum = `SUMMARY:${(ev.title || "Match").toString().replace(/\r?\n/g, " ")}`;
-        const loc = ev.location ? `LOCATION:${String(ev.location).replace(/\r?\n/g, " ")}` : "";
-        const desc = ev.notes ? `DESCRIPTION:${String(ev.notes).replace(/\r?\n/g, " ")}` : "";
-
-        ics +=
-          "BEGIN:VEVENT\r\n" +
-          `${uidLine}\r\n` +
-          `${stamp}\r\n` +
-          `${dtStart}\r\n` +
-          `${dtEnd}\r\n` +
-          `${sum}\r\n` +
-          (loc ? loc + "\r\n" : "") +
-          (desc ? desc + "\r\n" : "") +
-          "END:VEVENT\r\n";
-      });
-
-      ics += "END:VCALENDAR\r\n";
-
-      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
-      res.setHeader("Content-Disposition", 'inline; filename="tennismate.ics"');
-      res.setHeader("Cache-Control", "public, max-age=300"); // 5 minutes
-      res.status(200).send(ics);
-    } catch (e) {
-      console.error("ICS error:", e);
-      res.status(500).send("Calendar feed error");
-    }
-  }
-);
-
-/**
- * Auto-cancel stale proposals older than 72h to keep things tidy.
- * Runs every 6h in Australia/Melbourne time.
- */
-export const expireProposals = onSchedule(
-  {
-    schedule: "every 6 hours",
-    timeZone: "Australia/Melbourne",
-    region: "australia-southeast1",
-  },
-  async () => {
-    const cutoff = admin.firestore.Timestamp.fromDate(new Date(Date.now() - 72 * 60 * 60 * 1000));
-    const q = db.collection("calendar_events")
-      .where("status", "==", "proposed")
-      .where("createdAt", "<", cutoff);
-
-    const batch = db.batch();
-    const snaps = await q.get();
-    snaps.forEach(doc => {
-      batch.update(doc.ref, {
-        status: "cancelled",
-        lastActionBy: "system",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    });
-    if (!snaps.empty) await batch.commit();
-  }
-);
-
-/* =========================
- *  COURT SUGGESTION (OK)
- * ========================= */
-export const suggestCourtOnMatch = onDocumentUpdated("match_requests/{matchId}", async (event) => {
+export const suggestCourtOnMatch = onDocumentUpdated("match_requests/{matchId}", async (event: any) => {
   const before = event.data?.before?.data();
   const after = event.data?.after?.data();
   const context = event.params;
 
   console.log("📌 Trigger fired for match:", context.matchId);
 
-  if (!before || !after) return;
-  if (before.status === "accepted") return;
-  if (after.status !== "accepted") return;
-  if (after.suggestedCourtId) return;
+  if (!before || !after) {
+    console.log("❌ Missing before or after data.");
+    return;
+  }
+
+  if (before.status === "accepted") {
+    console.log("❌ Match was already accepted before.");
+    return;
+  }
+
+  if (after.status !== "accepted") {
+    console.log("❌ Status is not 'accepted'. Current:", after.status);
+    return;
+  }
+
+  if (after.suggestedCourtId) {
+    console.log("❌ Court already suggested:", after.suggestedCourtId);
+    return;
+  }
 
   console.log("✅ Valid update — finding suggested court...");
 
@@ -1144,7 +67,11 @@ export const suggestCourtOnMatch = onDocumentUpdated("match_requests/{matchId}",
     db.collection("players").doc(fromUserId).get(),
     db.collection("players").doc(toUserId).get(),
   ]);
-  if (!fromSnap.exists || !toSnap.exists) return;
+
+  if (!fromSnap.exists || !toSnap.exists) {
+    console.log("❌ One or both player documents not found.");
+    return;
+  }
 
   const fromPostcode = fromSnap.data()?.postcode;
   const toPostcode = toSnap.data()?.postcode;
@@ -1153,18 +80,29 @@ export const suggestCourtOnMatch = onDocumentUpdated("match_requests/{matchId}",
     db.collection("postcodes").doc(fromPostcode).get(),
     db.collection("postcodes").doc(toPostcode).get(),
   ]);
-  if (!fromCoordSnap.exists || !toCoordSnap.exists) return;
+
+  if (!fromCoordSnap.exists || !toCoordSnap.exists) {
+    console.log("❌ One or both postcode documents not found.");
+    return;
+  }
 
   const fromCoords = fromCoordSnap.data();
   const toCoords = toCoordSnap.data();
-  if (!fromCoords || !toCoords) return;
+
+  if (!fromCoords || !toCoords) {
+    console.log("❌ Missing lat/lng in postcode data.");
+    return;
+  }
 
   const midpoint = {
     lat: (fromCoords.lat + toCoords.lat) / 2,
     lng: (fromCoords.lng + toCoords.lng) / 2,
   };
 
+  console.log(`🧭 Midpoint: (${midpoint.lat}, ${midpoint.lng})`);
+
   const courtsSnap = await db.collection("courts").get();
+  console.log(`🔎 Starting court loop. Total courts: ${courtsSnap.size}`);
   let nearestCourt: Court | null = null;
   let minDistance = Infinity;
 
@@ -1175,23 +113,40 @@ export const suggestCourtOnMatch = onDocumentUpdated("match_requests/{matchId}",
     const courtLat = typeof rawLat === "string" ? parseFloat(rawLat) : rawLat;
     const courtLng = typeof rawLng === "string" ? parseFloat(rawLng) : rawLng;
 
+    console.log(`➡️ Evaluating court: ${court.name} (${doc.id})`);
+    console.log(`   Raw lat/lng: lat=${rawLat}, lng=${rawLng} → Parsed lat=${courtLat}, lng=${courtLng}`);
+
     if (
       typeof courtLat !== "number" ||
       typeof courtLng !== "number" ||
       isNaN(courtLat) ||
       isNaN(courtLng)
     ) {
+      console.log(`⚠️ Skipping court due to invalid coordinates`);
       continue;
     }
 
     const distance = calculateDistance(midpoint, { lat: courtLat, lng: courtLng });
+    console.log(`📍 ${court.name} is ${distance.toFixed(2)} km from midpoint`);
+
     if (distance < minDistance) {
+      console.log(`🎯 This is the new closest court so far`);
       minDistance = distance;
-      nearestCourt = { id: doc.id, name: court.name, lat: courtLat, lng: courtLng };
+      nearestCourt = {
+        id: doc.id,
+        name: court.name,
+        lat: courtLat,
+        lng: courtLng,
+      };
     }
   }
 
-  if (!nearestCourt) return;
+  if (!nearestCourt) {
+    console.log("❌ No courts found or all are too far.");
+    return;
+  }
+
+  console.log(`✅ Nearest court: ${nearestCourt.name} (${minDistance.toFixed(2)} km)`);
 
   await db.collection("match_requests").doc(context.matchId).update({
     suggestedCourtId: nearestCourt.id,
@@ -1200,13 +155,10 @@ export const suggestCourtOnMatch = onDocumentUpdated("match_requests/{matchId}",
     suggestedCourtLng: nearestCourt.lng,
   });
 
-  console.log(`🎯 Suggested court: ${nearestCourt.name} (${minDistance.toFixed(2)} km)`);
+  console.log(`🎯 Suggested court: ${nearestCourt.name}`);
 });
 
-/* =========================
- *  SIMPLE HTTP TEST (fix region)
- * ========================= */
-export const testFirestore = onRequest({ region: "australia-southeast1" }, async (_req, res) => {
+export const testFirestore = onRequest({ region: "australia-southeast2" }, async (req: any, res: any) => {
   try {
     const snap = await db.collection("players").limit(1).get();
     res.send(`✅ Accessed players. Count: ${snap.size}`);
@@ -1215,167 +167,14 @@ export const testFirestore = onRequest({ region: "australia-southeast1" }, async
     res.status(500).send("Firestore access failed");
   }
 });
-
-// Set default avatar when a new player doc is created (if missing)
-export const setDefaultAvatarOnPlayerCreate = onDocumentCreated(
-  "players/{uid}",
-  async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-    const data = snap.data() || {};
-    const photoURL = (data.photoURL ?? "").toString().trim();
-    if (!photoURL) {
-      await snap.ref.set({ photoURL: DEFAULT_AVATAR_URL }, { merge: true });
-      console.log(`🖼️ set default avatar on players/${event.params.uid}`);
-    }
-  }
-);
-
-// Set default avatar when a new user doc is created (if missing)
-export const setDefaultAvatarOnUserCreate = onDocumentCreated(
-  "users/{uid}",
-  async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-    const data = snap.data() || {};
-    const photoURL = (data.photoURL ?? "").toString().trim();
-    if (!photoURL) {
-      await snap.ref.set({ photoURL: DEFAULT_AVATAR_URL }, { merge: true });
-      console.log(`🖼️ set default avatar on users/${event.params.uid}`);
-    }
-  }
-);
-
-export const backfillDefaultAvatars = onRequest(
-  { region: "australia-southeast1", timeoutSeconds: 540 },
-  async (_req, res) => {
-    let updatedPlayers = 0;
-    let scannedPlayers = 0;
-    let updatedUsers = 0;
-    let scannedUsers = 0;
-
-    // helper to scan a collection in pages and set default where missing/blank
-    async function backfillCollection(colName: "players" | "users") {
-      let updated = 0;
-      let scanned = 0;
-      const pageSize = 400;
-
-      let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-
-      while (true) {
-        let q = db.collection(colName)
-          .orderBy(admin.firestore.FieldPath.documentId())
-          .limit(pageSize);
-        if (lastDoc) q = q.startAfter(lastDoc);
-
-        const snap = await q.get();
-        if (snap.empty) break;
-
-        const batch = db.batch();
-        let writes = 0;
-
-        for (const docSnap of snap.docs) {
-          scanned++;
-          const data = docSnap.data() || {};
-          const url = (data.photoURL ?? "").toString().trim();
-          if (!url) {
-            batch.set(docSnap.ref, { photoURL: DEFAULT_AVATAR_URL }, { merge: true });
-            updated++;
-            writes++;
-          }
-        }
-
-        if (writes > 0) await batch.commit();
-        lastDoc = snap.docs[snap.docs.length - 1];
-
-        // simple yield
-        await new Promise((r) => setTimeout(r, 50));
-      }
-
-      return { updated, scanned };
-    }
-
-    try {
-      const p = await backfillCollection("players");
-      updatedPlayers = p.updated;
-      scannedPlayers = p.scanned;
-
-      const u = await backfillCollection("users");
-      updatedUsers = u.updated;
-      scannedUsers = u.scanned;
-
-      res.status(200).send(
-        `✅ Backfill done.
-Players: scanned=${scannedPlayers}, updated=${updatedPlayers}
-Users:   scanned=${scannedUsers}, updated=${updatedUsers}
-Default URL: ${DEFAULT_AVATAR_URL}`
-      );
-    } catch (e) {
-      console.error("Backfill error:", e);
-      res.status(500).send("Backfill failed. See logs.");
-    }
-  }
-);
-
-// =========================
-//  ADMIN: Generate verify link manually
-// =========================
-export const makeVerifyLink = onRequest(
-  {
-    region: "australia-southeast1",
-    timeoutSeconds: 30,
-    secrets: [ADMIN_BACKFILL_KEY], // protect with your secret
-  },
-  async (req, res) => {
-    try {
-      // Check auth key
-      const key =
-        (req.query.key as string) ||
-        (req.headers["x-admin-key"] as string) ||
-        "";
-      if (key !== ADMIN_BACKFILL_KEY.value()) {
-        res.status(401).send("Unauthorized");
-        return;
-      }
-
-      // Email must be passed in body or query
-      const email =
-        (req.query.email as string) ||
-        (req.body?.email as string) ||
-        "";
-      if (!email) {
-        res.status(400).send("Missing email");
-        return;
-      }
-
-      // Ensure the user exists
-      await admin.auth().getUserByEmail(email);
-
-      // Generate the link (uses Firebase’s built-in flow/template)
-      const link = await admin.auth().generateEmailVerificationLink(email, {
-        url: `${APP_BASE_URL}/verify-email`,
-        handleCodeInApp: true,
-      });
-
-      // You can deliver via email here (Brevo) if you like,
-      // but simplest is to just return the link so you can copy+send.
-      res.status(200).json({ email, link });
-    } catch (err: any) {
-      console.error("❌ makeVerifyLink error:", err);
-      res.status(500).send(err.message || "Internal error");
-    }
-  }
-);
-
-
-/* =========================
- *  MATCH COMPLETED (OK)
- * ========================= */
 export const processCompletedMatch = onDocumentCreated(
   "completed_matches/{matchId}",
   async (event) => {
     const data = event.data?.data();
-    if (!data) return;
+    if (!data) {
+      console.log("❌ No match data found in event.");
+      return;
+    }
 
     const { winnerId, fromUserId, toUserId, matchId } = data;
     const loserId = winnerId === fromUserId ? toUserId : fromUserId;
@@ -1383,10 +182,15 @@ export const processCompletedMatch = onDocumentCreated(
     const winnerRef = db.collection("players").doc(winnerId);
     const loserRef = db.collection("players").doc(loserId);
 
-    const [winnerSnap, loserSnap] = await Promise.all([winnerRef.get(), loserRef.get()]);
+    const [winnerSnap, loserSnap] = await Promise.all([
+      winnerRef.get(),
+      loserRef.get(),
+    ]);
+
     const winnerData = winnerSnap.data() || {};
     const loserData = loserSnap.data() || {};
 
+    // Update stats
     await Promise.all([
       winnerRef.update({
         matchesPlayed: (winnerData.matchesPlayed || 0) + 1,
@@ -1397,27 +201,36 @@ export const processCompletedMatch = onDocumentCreated(
       }),
     ]);
 
-    const badgeUpdates = [fromUserId, toUserId].map((uid) =>
+    // Award badges
+    const badgeUpdates = [
+      fromUserId,
+      toUserId,
+    ].map((uid) =>
       db.collection("players").doc(uid).set(
-        { badges: admin.firestore.FieldValue.arrayUnion("firstMatchComplete") },
+        {
+          badges: admin.firestore.FieldValue.arrayUnion("firstMatchComplete"),
+        },
         { merge: true }
       )
     );
+
     badgeUpdates.push(
-      db.collection("players").doc(winnerId).set(
-        { badges: admin.firestore.FieldValue.arrayUnion("firstWin") },
-        { merge: true }
-      )
+      db
+        .collection("players")
+        .doc(winnerId)
+        .set(
+          {
+            badges: admin.firestore.FieldValue.arrayUnion("firstWin"),
+          },
+          { merge: true }
+        )
     );
 
     await Promise.all(badgeUpdates);
+
     console.log(`✅ Processed completed match: ${matchId}`);
   }
 );
-
-/* =========================
- *  PUSH: GENERAL NOTIFICATION
- * ========================= */
 export const sendPushNotification = onDocumentCreated(
   "notifications/{notifId}",
   async (event) => {
@@ -1427,62 +240,53 @@ export const sendPushNotification = onDocumentCreated(
       return;
     }
 
-    const recipientId = notifData.recipientId as string | undefined;
-    if (!recipientId) {
-      console.log("❌ Missing recipientId");
+    const recipientId = notifData.recipientId;
+    const tokenDoc = await db.collection("device_tokens").doc(recipientId).get();
+
+    if (!tokenDoc.exists) {
+      console.log(`❌ No device token found for user: ${recipientId}`);
       return;
     }
 
-    // Using query by uid to match other places
-    const tokenSnap = await db.collection("device_tokens")
-      .where("uid", "==", recipientId)
-      .limit(1)
-      .get();
-
-    const fcmToken = tokenSnap.empty ? null : tokenSnap.docs[0].get("token");
-    if (!fcmToken) {
-      console.log(`❌ No FCM token found for user: ${recipientId}`);
+    const token = tokenDoc.data()?.token;
+    if (!token) {
+      console.log(`❌ Token field missing for user: ${recipientId}`);
       return;
     }
 
-    const payload = {
-      token: fcmToken,
-      data: {
-        title: (notifData.message as string) || "🎾 TennisMate Notification",
-        body: "You have a new notification",
-        type: (notifData.type as string) || "general",
-        fromUserId: (notifData.fromUserId as string) || "",
-        url: (notifData.url as string) || "https://tennismate-s7vk.vercel.app/",
-      },
-    };
+const payload = {
+  data: {
+    title: notifData.message || "🎾 TennisMate Notification",
+    body: "You have a new notification",
+    type: notifData.type || "general",
+    fromUserId: notifData.fromUserId || "",
+    url: notifData.url || "https://tennis-match.com.au",
+  },
+};
 
     try {
-      console.log("📲 Sending push to token:", fcmToken);
-      await admin.messaging().send(payload);
+      console.log("📲 Sending push to token:", token);
+      await admin.messaging().send({ token, ...payload });
       console.log(`✅ Notification sent to ${recipientId}`);
     } catch (error: any) {
       console.error("❌ Failed to send push notification:", error);
+
       if (
         error.code === "messaging/invalid-registration-token" ||
         error.code === "messaging/registration-token-not-registered"
       ) {
-        // Clean up bad token docs (adjust to your schema)
-        const bad = tokenSnap.docs[0].ref;
-        await bad.delete();
+        await db.collection("device_tokens").doc(recipientId).delete();
         console.log(`🧹 Deleted invalid FCM token for ${recipientId}`);
       }
     }
   }
 );
-
-/* =========================
- *  PUSH: NEW MESSAGE
- * ========================= */
 export const notifyOnNewMessage = onDocumentCreated(
   "conversations/{conversationId}/messages/{messageId}",
   async (event) => {
     const message = event.data?.data();
     const { conversationId } = event.params;
+
     if (!message) return;
 
     const senderId = message.senderId as string;
@@ -1492,18 +296,25 @@ export const notifyOnNewMessage = onDocumentCreated(
 
     if (!recipientId || !text || read === true) return;
 
-    const tokenQuery = await db
-      .collection("device_tokens")
-      .where("uid", "==", recipientId)
-      .limit(1)
-      .get();
+    // ✅ Get token from device_tokens
+  const tokenQuery = await db
+  .collection("device_tokens")
+  .where("uid", "==", recipientId)
+  .limit(1)
+  .get();
 
-    const fcmToken = tokenQuery.empty ? null : tokenQuery.docs[0].get("token");
-    console.log(`📲 Retrieved token: ${fcmToken}`);
-    if (!fcmToken) return;
+  
+
+const fcmToken = tokenQuery.empty ? null : tokenQuery.docs[0].get("token");
+console.log(`📲 Retrieved token: ${fcmToken}`);
+    if (!fcmToken) {
+      console.log(`❌ No FCM token found for ${recipientId}`);
+      return;
+    }
 
     const userSnap = await db.collection("users").doc(recipientId).get();
     const activeConversationId = userSnap.get("activeConversationId");
+
     if (activeConversationId === conversationId) {
       console.log(`👀 User is viewing this conversation. No push sent.`);
       return;
@@ -1512,28 +323,28 @@ export const notifyOnNewMessage = onDocumentCreated(
     const senderDoc = await db.collection("players").doc(senderId).get();
     const senderName = senderDoc.get("name") || "A player";
 
-    try {
-      await admin.messaging().send({
-        token: fcmToken,
-        data: {
-          title: `New message from ${senderName}`,
-          body: text.length > 60 ? text.slice(0, 60) + "…" : text,
-          url: "https://tennismate-s7vk.vercel.app/messages",
-          type: "new_message",
-          conversationId,
-          fromUserId: senderId,
-        },
-      });
-      console.log(`✅ Push sent to ${recipientId}`);
-    } catch (error) {
-      console.error("❌ Failed to send push notification:", error);
-    }
+try {
+  await admin.messaging().send({
+    token: fcmToken,
+    data: {
+      title: `New message from ${senderName}`,
+      body: text.length > 60 ? text.slice(0, 60) + "…" : text,
+      url: "https://tennismate.vercel.app/messages",
+      type: "new_message",
+      conversationId,
+      fromUserId: senderId,
+    },
+  });
+
+  console.log(`✅ Push sent to ${recipientId}`);
+} catch (error) {
+  console.error("❌ Failed to send push notification:", error);
+}
+
   }
 );
 
-/* =========================
- *  PUSH: NEW MATCH REQUEST
- * ========================= */
+
 export const sendMatchRequestNotification = onDocumentCreated(
   "match_requests/{matchId}",
   async (event) => {
@@ -1542,6 +353,7 @@ export const sendMatchRequestNotification = onDocumentCreated(
 
     const { toUserId, fromUserId } = data;
 
+    // Get recipient's FCM token
     const tokenSnap = await db
       .collection("device_tokens")
       .where("uid", "==", toUserId)
@@ -1549,259 +361,72 @@ export const sendMatchRequestNotification = onDocumentCreated(
       .get();
 
     const fcmToken = tokenSnap.empty ? null : tokenSnap.docs[0].get("token");
+
     if (!fcmToken) {
       console.log(`❌ No FCM token found for user ${toUserId}`);
       return;
     }
 
+    // Get sender name
     const senderDoc = await db.collection("players").doc(fromUserId).get();
     const senderName = senderDoc.exists ? senderDoc.get("name") : "A player";
 
     try {
+      // Send push notification
       await admin.messaging().send({
         token: fcmToken,
         data: {
           title: "New match request!",
           body: `${senderName} has challenged you to a match.`,
-          url: "https://tennismate-s7vk.vercel.app/matches",
+          url: "https://tennismate.vercel.app/matches",
           type: "match_request",
           matchId: event.params.matchId,
           fromUserId,
         },
       });
+
       console.log(`✅ Match request notification sent to ${toUserId}`);
     } catch (error) {
       console.error("❌ Failed to send match request push notification:", error);
     }
   }
 );
-
-/* =========================
- *  EMAIL: NEW MATCH REQUEST
- * ========================= */
-export const emailOnMatchRequestCreated = onDocumentCreated(
-  "match_requests/{matchId}",
-  async (event) => {
-    const data = event.data?.data();
-    if (!data) return;
-
-    const { toUserId, fromUserId } = data;
-    if (!toUserId || !fromUserId) return;
-
-    const [to, from] = await Promise.all([
-      getUserProfile(toUserId),
-      getUserProfile(fromUserId),
-    ]);
-    if (!to.email || to.prefs.matchRequest === false) return;
-
-const matchRef = db.doc(`match_requests/${event.params.matchId}`);
-const matchSnap = await matchRef.get();
-if (matchSnap.get("emailFlags.requestCreated")) return; // <-- do
-
-const subject = `🎾 New match request from ${from.name}`;
-const url = URLS.matches;
-const html = `
-  <p>Hi ${to.name},</p>
-  <p><b>${from.name}</b> sent you a match request on TennisMate.</p>
-  <p><a href="${url}">Open matches</a></p>
-  <p>— TennisMate</p>
-`;
-const text = `Hi ${to.name}, ${from.name} sent you a match request on TennisMate. Open matches: ${url} — TennisMate`;
-
-console.log("✉️ emailOnMatchRequestCreated link:", url);
-await queueEmail([to.email], subject, html, text);
-
-    await matchRef.set({ "emailFlags.requestCreated": true }, { merge: true });
-  }
-);
-
-/* =========================
- *  EMAIL: MATCH ACCEPTED
- * ========================= */
-export const emailOnMatchAccepted = onDocumentUpdated(
+export const notifyMatchAccepted = onDocumentUpdated(
   "match_requests/{matchId}",
   async (event) => {
     const before = event.data?.before?.data();
     const after = event.data?.after?.data();
-    if (!before || !after) return;
 
+    if (!before || !after) return;
     if (before.status === "accepted" || after.status !== "accepted") return;
 
-    const requesterId = after.fromUserId;
-    const accepterId = after.toUserId;
-    if (!requesterId || !accepterId) return;
+    const { fromUserId } = after;
+    const matchId = event.params.matchId;
 
-    const [requester, accepter] = await Promise.all([
-      getUserProfile(requesterId),
-      getUserProfile(accepterId),
-    ]);
-    if (!requester.email || requester.prefs.requestAccepted === false) return;
+    // Get recipient name
+    const recipientSnap = await db.collection("players").doc(after.toUserId).get();
+    const recipientName = recipientSnap.exists ? recipientSnap.get("name") : "A player";
 
-const matchRef = db.doc(`match_requests/${event.params.matchId}`);
-const matchSnap = await matchRef.get();
-if (matchSnap.get("emailFlags.requestAccepted")) return; // <-- dot notation
+    // ✅ Create Firestore notification (let sendPushNotification handle the push)
+    await db.collection("notifications").add({
+      recipientId: fromUserId,
+      matchId,
+      message: `${recipientName} accepted your match request!`,
+      type: "match_accepted",
+      url: "https://tennismate.vercel.app/matches",
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      read: false,
+    });
 
-const subject = `✅ ${accepter.name} accepted your match request`;
-const url = URLS.matches;
-const html = `
-  <p>Hi ${requester.name},</p>
-  <p><b>${accepter.name}</b> accepted your match request. Time to organise the details!</p>
-  <p><a href="${url}">Open matches</a></p>
-  <p>— TennisMate</p>
-`;
-const text = `Hi ${requester.name}, ${accepter.name} accepted your match request. Open matches: ${url} — TennisMate`;
-
-console.log("✉️ emailOnMatchAccepted link:", url);
-await queueEmail([requester.email], subject, html, text);
-
-    await matchRef.set({ "emailFlags.requestAccepted": true }, { merge: true });
+    console.log(`✅ Match accepted notification created for ${fromUserId}`);
   }
 );
 
-/* =========================
- *  EMAIL: NEW MESSAGE (10-min throttle)
- * ========================= */
-/* =========================
- *  EMAIL: NEW MESSAGE (schedule single unread reminder)
- * ========================= */
-export const emailOnNewMessage = onDocumentCreated(
-  "conversations/{conversationId}/messages/{messageId}",
-  async (event) => {
-    const msg = event.data?.data();
-    if (!msg) return;
 
-    const { conversationId } = event.params;
-    const senderId = msg.senderId as string;
-    const text = (msg.text || "").toString();
 
-    const convRef = db.doc(`conversations/${conversationId}`);
-    const convSnap = await convRef.get();
-    const participants: string[] = convSnap.get("participants") || [];
 
-    const targets = participants.filter((u) => u !== senderId);
 
-    // Resolve sender name (for subject/snippet)
-    const senderName =
-      (await db.doc(`players/${senderId}`).get()).get("name") || "a player";
-    const preview = text.slice(0, 120);
 
-    // For each recipient, anchor ONE reminder at first unread
-    await Promise.all(
-      targets.map(async (uid) => {
-        // If user is actively viewing this conversation, skip & clear any pending reminder
-        const userSnap = await db.doc(`users/${uid}`).get();
-        const active = userSnap.get("activeConversationId");
-        if (active === conversationId) {
-          // best-effort cleanup + mark read
-          await db
-            .doc(`email_reminders/${uid}_${conversationId}`)
-            .delete()
-            .catch(() => {});
 
-          return;
-        }
-
-        // Record first unread time for this user if not set
-        if (!convSnap.exists || !convSnap.get(`firstUnreadAt.${uid}`)) {
-        }
-
-        // Create a reminder doc ONLY if not already scheduled
-        const reminderRef = db.doc(`email_reminders/${uid}_${conversationId}`);
-        await db.runTransaction(async (t) => {
-          const r = await t.get(reminderRef);
-          if (r.exists && r.get("sent") === false) return; // already scheduled
-
-          const scheduledAt = admin.firestore.Timestamp.fromDate(
-            new Date(Date.now() + UNREAD_EMAIL_DELAY_MINUTES * 60 * 1000)
-          );
-
-          t.set(reminderRef, {
-            uid,
-            conversationId,
-            scheduledAt,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            sent: false,
-            // helpful context for the email
-            lastMessageSnippet: preview,
-            senderName,
-          });
-        });
-      })
-    );
-  }
-);
-
-/* =========================
- *  CRON: deliver unread-message emails
- * ========================= */
-export const deliverUnreadMessageEmails = onSchedule(
-  {
-    schedule: "every 5 minutes",
-    timeZone: "Australia/Melbourne",
-    region: "australia-southeast1",
-  },
-  async () => {
-    const now = admin.firestore.Timestamp.now();
-
-    // Due, unsent reminders
-    const q = await db
-      .collection("email_reminders")
-      .where("sent", "==", false)
-      .where("scheduledAt", "<=", now)
-      .limit(50)
-      .get();
-
-    if (q.empty) return;
-
-    for (const r of q.docs) {
-      const { uid, conversationId, senderName, lastMessageSnippet } = r.data() as {
-        uid: string;
-        conversationId: string;
-        senderName?: string;
-        lastMessageSnippet?: string;
-      };
-
-      // Verify the conversation is still unread for this user
-      const conv = await db.doc(`conversations/${conversationId}`).get();
-      const lastMessageAt = conv.get("lastMessageAt");
-      const lastReadAt = conv.get(`lastRead.${uid}`);
-
-      const isRead =
-        lastReadAt && lastMessageAt &&
-        lastReadAt.toMillis() >= lastMessageAt.toMillis();
-
-      if (isRead) {
-        await r.ref.delete(); // cleanup: no email needed
-        continue;
-      }
-
-      // Load recipient profile & prefs
-      const { email, prefs, name } = await getUserProfile(uid);
-      if (!email || prefs.messageReceived === false) {
-        await r.ref.delete(); // don't retry forever if we can't/shouldn't email
-        continue;
-      }
-
-      // Build and queue email (uses your Trigger Email /mail collection)
-      const subject = `💬 New message from ${senderName || "a player"}`;
-      const url = URLS.messages; // or `${URLS.messages}/${conversationId}` if you want deep-link
-      const html = `
-        <p>Hi ${name},</p>
-        <p>You have an unread message.</p>
-        ${lastMessageSnippet ? `<blockquote>${lastMessageSnippet}</blockquote>` : ""}
-        <p><a href="${url}">Open messages</a></p>
-        <p>— TennisMate</p>
-      `;
-      const text = `Hi ${name}, you have an unread message. Open messages: ${url} — TennisMate`;
-
-      await queueEmail([email], subject, html, text);
-
-      await r.ref.update({
-        sent: true,
-        sentAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    }
-  }
-);
 
 

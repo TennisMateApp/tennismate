@@ -257,34 +257,7 @@ useEffect(() => {
     router.push("/login");
   };
 
-const messageCount = unreadMessages.length;
-const alertCount = unreadMatchRequests.length + notifications.length; // bell only
-const hasAnyAlerts = alertCount > 0;
-
-async function clearAllAlerts() {
-  try {
-    const batch = writeBatch(db);
-
-    // Mark in-app notifications as read
-    notifications.forEach((n) => {
-      batch.update(doc(db, "notifications", n.id), { read: true });
-    });
-
-    // Mark match requests as read
-    unreadMatchRequests.forEach((req) => {
-      batch.update(doc(db, "match_requests", req.id), { status: "read" });
-    });
-
-    await batch.commit();
-
-    // Local state tidy-up
-    setNotifications([]);
-    setUnreadMatchRequests([]);
-    setDropdownOpen(false);
-  } catch (e) {
-    console.error("Failed to clear alerts", e);
-  }
-}
+  const totalNotifications = unreadMessages.length + unreadMatchRequests.length + notifications.length;
 
     // Floating feedback button component
   function FloatingFeedbackButton() {
@@ -328,71 +301,89 @@ async function clearAllAlerts() {
                   <Link href="/directory" title="Directory">
                     <Search className="w-6 h-6 text-green-600 hover:text-blue-800" />
                   </Link>
-<Link href="/messages" title="Messages" className="relative">
-  <MessageCircle className="w-6 h-6 text-green-600 hover:text-blue-800" />
-  {messageCount > 0 && (
-    <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none animate-pulse">
-      {messageCount > 9 ? "9+" : messageCount}
-    </span>
-  )}
-</Link>  {/* ← Close this before the bell dropdown */}
+                  <Link href="/messages" title="Messages">
+                    <MessageCircle className="w-6 h-6 text-green-600 hover:text-blue-800" />
+                  </Link>
+                  <div className="relative" ref={dropdownRef}>
+                    <button onClick={() => setDropdownOpen(!dropdownOpen)} className="relative focus:outline-none">
+                      <Bell className="w-6 h-6 text-green-600" />
+                      {totalNotifications > 0 && (
+                        <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+                          {totalNotifications > 9 ? "9+" : totalNotifications}
+                        </span>
+                      )}
+                    </button>
 
-<div className="relative" ref={dropdownRef}>
-  <button onClick={() => setDropdownOpen(!dropdownOpen)} className="relative focus:outline-none">
-    <Bell className="w-6 h-6 text-green-600" />
-    {alertCount > 0 && (
-      <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
-        {alertCount > 9 ? "9+" : alertCount}
-      </span>
-    )}
-  </button>
+                    {dropdownOpen && (
+                      <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 shadow-lg rounded-md z-50">
+                        {unreadMatchRequests.length === 0 && unreadMessages.length === 0 && notifications.length === 0 ? (
+                          <div className="p-4 text-sm text-gray-500">No notifications</div>
+                        ) : (
+                          <ul className="divide-y divide-gray-100 max-h-96 overflow-y-auto text-sm">
+                            {notifications.length > 0 && (
+                              <>
+                                <li className="flex justify-between items-center px-3 py-2 text-sm text-gray-700 font-semibold bg-gray-50 border-b border-gray-200">
+                                  <span>Notifications</span>
+                                  <button
+                                    onClick={async () => {
+                                      const batch = writeBatch(db);
+                                      notifications.forEach((notif) => {
+                                        const ref = doc(db, "notifications", notif.id);
+                                        batch.update(ref, { read: true });
+                                      });
+                                      await batch.commit();
+                                      setNotifications([]);
+                                    }}
+                                    className="text-blue-600 hover:underline text-xs"
+                                  >
+                                    Clear All
+                                  </button>
+                                </li>
+                                {notifications.map((notif) => (
+                                  <li
+                                    key={notif.id}
+                                    className="p-3 hover:bg-gray-100 cursor-pointer"
+                                    onClick={async () => {
+                                      setDropdownOpen(false);
+                                      await updateDoc(doc(db, "notifications", notif.id), { read: true });
+                                      router.push("/matches");
+                                    }}
+                                  >
+                                    {notif.message}
+                                  </li>
+                                ))}
+                              </>
+                            )}
 
-  {dropdownOpen && (
-    <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 shadow-lg rounded-md z-50">
-      <div className="flex items-center justify-between px-3 py-2 text-sm bg-gray-50 border-b border-gray-200">
-        <span className="font-semibold text-gray-700">Notifications</span>
-        {hasAnyAlerts ? (
-          <button onClick={clearAllAlerts} className="text-blue-600 hover:underline text-xs">
-            Clear all
-          </button>
-        ) : (
-          <span className="text-xs text-gray-400">No notifications</span>
-        )}
-      </div>
+                            {unreadMatchRequests.map((req) => (
+                              <li
+                                key={req.id}
+                                className="p-3 hover:bg-gray-100 cursor-pointer"
+                                onClick={() => {
+                                  setDropdownOpen(false);
+                                  router.push("/matches");
+                                }}
+                              >
+                                Match request from {req.fromName || "a player"}
+                              </li>
+                            ))}
 
-      {hasAnyAlerts && (
-        <ul className="divide-y divide-gray-100 max-h-96 overflow-y-auto text-sm">
-          {notifications.map((notif) => (
-            <li
-              key={notif.id}
-              className="p-3 hover:bg-gray-100 cursor-pointer"
-              onClick={async () => {
-                setDropdownOpen(false);
-                await updateDoc(doc(db, "notifications", notif.id), { read: true });
-                router.push("/matches");
-              }}
-            >
-              {notif.message}
-            </li>
-          ))}
-
-          {unreadMatchRequests.map((req) => (
-            <li
-              key={req.id}
-              className="p-3 hover:bg-gray-100 cursor-pointer"
-              onClick={async () => {
-                setDropdownOpen(false);
-                await updateDoc(doc(db, "match_requests", req.id), { status: "read" });
-                router.push("/matches");
-              }}
-            >
-              Match request from {req.fromName || "a player"}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )}
+                            {unreadMessages.map((msg) => (
+                              <li
+                                key={msg.id}
+                                className="p-3 hover:bg-gray-100 cursor-pointer"
+                                onClick={() => {
+                                  setDropdownOpen(false);
+                                  router.push("/messages");
+                                }}
+                              >
+                                New message from {msg.name}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="relative" ref={settingsRef}>
                     <button onClick={() => setShowSettings(!showSettings)} title="Settings">

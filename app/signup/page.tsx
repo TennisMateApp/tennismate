@@ -5,43 +5,15 @@ import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseConfig";
 import SignupErrorModal from "@/components/SignupErrorModal";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import Cropper from "react-easy-crop";
 import getCroppedImg from "../utils/cropImage";
 import Link from "next/link";
 import Image from "next/image";
 import { Mail, Lock, User, MapPin } from "lucide-react";
-import type React from "react";
 
 const DEFAULT_AVATAR = "/images/default-avatar.jpg";
-
-// keep DEFAULT_AVATAR, imports, etc. unchanged
-
-// ✅ unified cookie/param reader, prefers URL code if valid else cookie
-function getReferralCodeFromClient(): string | null {
-  if (typeof window === "undefined") return null;
-
-  const params = new URLSearchParams(window.location.search);
-
-  // allow either ?rc=CODE or ?ref=CODE (if you ever link directly)
-  const urlCode = (params.get("rc") || params.get("ref") || "").toUpperCase().trim();
-
-  // our /r/[code] route sets this cookie
-  const cookieMatch = document.cookie.match(/(?:^|;\s*)referral_code=([^;]+)/);
-  const cookieCode = cookieMatch ? decodeURIComponent(cookieMatch[1]).toUpperCase() : "";
-
-  const candidate = urlCode || cookieCode;
-  return /^[A-Z0-9]{5,12}$/.test(candidate) ? candidate : null;
-}
-
-function clearReferralCookie() {
-  if (typeof document === "undefined") return;
-  // clear the cookie the route set
-  document.cookie = "referral_code=; Max-Age=0; path=/; sameSite=lax";
-}
-
-
 
 export default function SignupPage() {
   const [showEmailExistsModal, setShowEmailExistsModal] = useState(false);
@@ -192,46 +164,30 @@ if (croppedImage) {
 }
 
     // 3) Create users/{uid} first with verification flag
-// 3) Create users/{uid} — capture referral code ONLY on first write
-const userRef = doc(db, "users", user.uid);
-const existingUser = await getDoc(userRef);
-
-// read referral code from URL or cookie
-const referredByCode = getReferralCodeFromClient();
-
-// base data written every time
-const baseUserData: any = {
-  name: formData.name,
-  nameLower: (formData.name || "").toLowerCase(),
-  email: formData.email,
-  requireVerification: true,
-  createdAt: serverTimestamp(),
-  // helpful for qualification logic later:
-  photoUploaded: !!croppedImage,  // true if they uploaded/cropped something now
-};
-
-// if this is the first-ever write, include referredByCode once
-const initialUserData = existingUser.exists()
-  ? baseUserData
-  : { ...baseUserData, referredByCode: referredByCode ?? null };
-
-await setDoc(userRef, initialUserData, { merge: true });
-if (referredByCode) clearReferralCookie();
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        name: formData.name,
+        email: formData.email,
+        requireVerification: true,
+        createdAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
 
     if (isVictorian) {
       // 4) Create players/{uid}
-await setDoc(doc(db, "players", user.uid), {
-  name: formData.name,
-  nameLower: (formData.name || "").toLowerCase(),   // <<— add this line
-  email: formData.email,
-  postcode: formData.postcode,
-  skillLevel: formData.skillLevel,
-  availability: formData.availability,
-  bio: formData.bio,
-  photoURL,
-  profileComplete: true,
-  timestamp: serverTimestamp(),
-});
+      await setDoc(doc(db, "players", user.uid), {
+        name: formData.name,
+        email: formData.email,
+        postcode: formData.postcode,
+        skillLevel: formData.skillLevel,
+        availability: formData.availability,
+        bio: formData.bio,
+        photoURL,
+        profileComplete: true,
+        timestamp: serverTimestamp(),
+      });
 
       // 5) Go to the dedicated verify page—the user will send the email there
       setStatus("");

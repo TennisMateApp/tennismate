@@ -7,7 +7,6 @@ const db = admin.firestore();
 export const onEventCreated = onDocumentCreated("match_events/{eventId}", async (event) => {
   const data = event.data?.data();
   if (!data) return;
-  const recipientIds = (data.participants || []).filter((id: string) => id !== data.proposerId);
 
   await Promise.all(recipientIds.map((rid: string) =>
     db.collection("notifications").add({

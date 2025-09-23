@@ -28,20 +28,13 @@ import {
   ArrowRight,
   Clock,
   Loader2, 
-  User,
 } from "lucide-react";
 import { GiTennisBall } from "react-icons/gi";
 
 // --- Helpers ---
-
 const formatRelativeTime = (d?: Date | null) => {
-  // guard: missing OR invalid dates
-  if (!d || Number.isNaN(d.getTime())) return "—";
-
+  if (!d) return "—";
   const diff = d.getTime() - Date.now();
-  // if diff is NaN for any reason, bail
-  if (Number.isNaN(diff)) return "—";
-
   const abs = Math.abs(diff);
   const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 
@@ -50,20 +43,6 @@ const formatRelativeTime = (d?: Date | null) => {
   if (abs < DAY)  return rtf.format(Math.round(diff / HOUR), "hour");
   return rtf.format(Math.round(diff / DAY), "day");
 };
-
-const toDateSafe = (v: any): Date | null => {
-  // Firestore Timestamp
-  if (v && typeof v.toDate === "function") return v.toDate();
-  // millis (number)
-  if (typeof v === "number") return new Date(v);
-  // ISO string
-  if (typeof v === "string") {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-};
-
 
 type Match = {
   id: string;
@@ -78,9 +57,9 @@ type Match = {
   suggestedCourtName?: string;
   suggestedCourtLat?: number;
   suggestedCourtLng?: number;
-  createdAt: Date | null;   // <- not any
+  createdAt?: any;
   started?: boolean;
-  startedAt: Date | null;   // <- not any
+  startedAt?: any;
 };
 
 function MatchesPage() {
@@ -94,12 +73,12 @@ function MatchesPage() {
 
 
   // Track auth state
-useEffect(() => {
-  const unsub = onAuthStateChanged(auth, (user) => {
-    setCurrentUserId(user ? user.uid : null); // ← handle sign-out too
-  });
-  return () => unsub();
-}, []);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) setCurrentUserId(user.uid);
+    });
+    return () => unsub();
+  }, []);
 
   // Listen for match requests
   useEffect(() => {
@@ -128,24 +107,23 @@ useEffect(() => {
 
   snap.docs.forEach((d) => {
     const data = d.data();
-const m: Match = {
-  id: d.id,
-  playerId: data.fromUserId,
-  opponentId: data.toUserId,
-  court: data.court,
-  time: data.time,
-  status: data.status,
-  message: data.message,
-  fromName: data.fromName,
-  toName: data.toName,
-  suggestedCourtName: data.suggestedCourtName,
-  suggestedCourtLat: data.suggestedCourtLat,
-  suggestedCourtLng: data.suggestedCourtLng,
-  createdAt: toDateSafe(data.createdAt ?? data.timestamp),
-  started: data.started,
-  startedAt: toDateSafe(data.startedAt),
-};
-
+    const m: Match = {
+      id: d.id,
+      playerId: data.fromUserId,
+      opponentId: data.toUserId,
+      court: data.court,
+      time: data.time,
+      status: data.status,
+      message: data.message,
+      fromName: data.fromName,
+      toName: data.toName,
+      suggestedCourtName: data.suggestedCourtName,
+      suggestedCourtLat: data.suggestedCourtLat,
+      suggestedCourtLng: data.suggestedCourtLng,
+      createdAt: data.createdAt ?? data.timestamp,
+      started: data.started,
+      startedAt: data.startedAt,
+    };
 
     const prev = all[d.id];
     if (!prev || prev.status !== m.status || prev.started !== m.started) {
@@ -172,16 +150,11 @@ const m: Match = {
       const { fromUserId, toUserId } = snap.data();
       if (currentUserId !== toUserId) return;
 
-// Mark accepted
-await updateDoc(matchRef, {
-  status: "accepted",
-  players: [fromUserId, toUserId],
-});
-
-// Badges (leave as you have)
-await setDoc(doc(db, "players", toUserId), { badges: arrayUnion("firstMatch") }, { merge: true });
-await setDoc(doc(db, "players", fromUserId), { badges: arrayUnion("firstMatch") }, { merge: true });
-
+      // Mark accepted
+      await updateDoc(matchRef, {
+        status: "accepted",
+        players: [fromUserId, toUserId],
+      });
 
       // Award first match badge
       await setDoc(
@@ -225,12 +198,11 @@ const handleStartMatch = useCallback(async (match: Match) => {
     });
   } catch (e) {
     // Roll back optimistic change on error
-setMatches((prev) =>
-  prev.map((m) =>
-    m.id === match.id ? { ...m, started: false, startedAt: null } : m
-  )
-);
-
+    setMatches((prev) =>
+      prev.map((m) =>
+        m.id === match.id ? { ...m, started: false, startedAt: undefined } : m
+      )
+    );
     console.error("Start match failed:", e);
     alert("Could not start the game. Please try again.");
   } finally {
@@ -252,31 +224,43 @@ const deleteMatch = useCallback(async (id: string) => {
 
   // Chat logic omitted for brevity
 
-// 👇 REPLACE your entire renderMatch useCallback with this block
 const renderMatch = useCallback(
   (match: Match) => {
     const isMine = match.playerId === currentUserId;
+    const isRec  = match.opponentId === currentUserId && match.status !== "accepted";
     const other  = isMine ? match.opponentId : match.playerId;
     const initiator = isMine ? "You" : match.fromName;
     const recipient = isMine ? match.toName : "You";
     const inProgress = match.status === "accepted" && !!match.started;
 
-    const created   = match.createdAt;  // Date|null
-    const startedAt = match.startedAt;  // Date|null
+    const created =
+      match.createdAt?.toDate
+        ? match.createdAt.toDate()
+        : match.createdAt
+        ? new Date(match.createdAt)
+        : null;
+
+        // add this after `const created = ...`
+const startedAt =
+  match.startedAt?.toDate
+    ? match.startedAt.toDate()
+    : match.startedAt
+    ? new Date(match.startedAt)
+    : null;
+
 
     return (
-      <li
-        key={match.id}
-        className={
-          "relative overflow-hidden pr-12 rounded-2xl bg-white ring-1 p-4 shadow-sm hover:shadow-md transition " +
-          (match.status === "unread" ? "ring-green-200" : "ring-black/5")
-        }
-      >
-        {/* left accent for unread */}
-        {match.status === "unread" && (
-          <div className="absolute inset-y-0 left-0 w-1 bg-green-400/70" />
-        )}
-
+  <li
+  key={match.id}
+  className={
+    "relative overflow-hidden pr-12 rounded-2xl bg-white ring-1 p-4 shadow-sm hover:shadow-md transition " +
+    (match.status === "unread" ? "ring-green-200" : "ring-black/5")
+  }
+>
+  {/* left accent for unread */}
+  {match.status === "unread" && (
+    <div className="absolute inset-y-0 left-0 w-1 bg-green-400/70" />
+  )}
         {/* Top-right overlay: Unread + delete */}
         <div className="absolute top-2 right-2 flex items-center gap-2">
           {match.status === "unread" && (
@@ -303,19 +287,19 @@ const renderMatch = useCallback(
               <span className="font-medium text-gray-900 truncate">{recipient}</span>
 
               {/* Header status pill */}
-              {inProgress ? (
-                <span className="ml-auto text-[10px] px-2 py-[2px] rounded-full bg-purple-50 text-purple-700 ring-1 ring-purple-200">
-                  Game in progress
-                </span>
-              ) : match.status === "accepted" ? (
-                <span className="ml-auto text-[10px] px-2 py-[2px] rounded-full bg-green-50 text-green-700 ring-1 ring-green-200">
-                  Accepted
-                </span>
-              ) : match.status !== "unread" ? (
-                <span className="ml-auto text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                  {match.status}
-                </span>
-              ) : null}
+{inProgress ? (
+  <span className="ml-auto text-[10px] px-2 py-[2px] rounded-full bg-purple-50 text-purple-700 ring-1 ring-purple-200">
+    Game in progress
+  </span>
+) : match.status === "accepted" ? (
+  <span className="ml-auto text-[10px] px-2 py-[2px] rounded-full bg-green-50 text-green-700 ring-1 ring-green-200">
+    Accepted
+  </span>
+) : match.status !== "unread" ? (
+  <span className="ml-auto text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+    {match.status}
+  </span>
+) : null}
             </div>
 
             {/* Message */}
@@ -324,140 +308,116 @@ const renderMatch = useCallback(
             </p>
 
             {/* Meta */}
-            <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
-              <Clock className="h-3.5 w-3.5" />
-              {inProgress && startedAt ? (
-                <span title={startedAt.toLocaleString()}>
-                  Started {formatRelativeTime(startedAt)}
-                </span>
-              ) : (
-                <span title={created ? created.toLocaleString() : undefined}>
-                  {formatRelativeTime(created)}
-                </span>
-              )}
-              <span className="ml-auto italic text-gray-400">
-                🏟️ Court suggestion coming soon
-              </span>
-            </div>
+   <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
+  <Clock className="h-3.5 w-3.5" />
+  {inProgress && startedAt ? (
+    <span title={startedAt.toLocaleString()}>
+      Started {formatRelativeTime(startedAt)}
+    </span>
+  ) : (
+    <span title={created ? created.toLocaleString() : undefined}>
+      {formatRelativeTime(created)}
+    </span>
+  )}
+  <span className="ml-auto italic text-gray-400">
+    🏟️ Court suggestion coming soon
+  </span>
+</div>
 
-            {/* Actions (single wrapper, no duplicates) */}
-            <div className="mt-3 flex flex-col sm:flex-row gap-2">
-              {match.status === "accepted" ? (
-                inProgress ? (
-                  <>
-                    <button
-                      onClick={() => handleCompleteGame(match)}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-700"
-                    >
-                      <Check className="h-4 w-4" />
-                      Complete Game
-                    </button>
-                    <button
-                      onClick={() => {
-                        const sortedIDs = [currentUserId, other].sort().join("_");
-                        router.push(`/messages/${sortedIDs}`);
-                      }}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200"
-                    >
-                      <MessageCircle className="h-4 w-4" />
-                      Chat
-                    </button>
-                    <button
-                      onClick={() => router.push(`/players/${other}`)}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100"
-                    >
-                      <User className="h-4 w-4" />
-                      View Profile
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => handleStartMatch(match)}
-                      disabled={startingId === match.id}
-                      className={
-                        "w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white " +
-                        (startingId === match.id
-                          ? "bg-green-600 opacity-60 cursor-not-allowed"
-                          : "bg-green-600 hover:bg-green-700")
-                      }
-                    >
-                      {startingId === match.id ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Starting…
-                        </>
-                      ) : (
-                        <>
-                          <Check className="h-4 w-4" />
-                          Start Game
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => {
-                        const sortedIDs = [currentUserId, other].sort().join("_");
-                        router.push(`/messages/${sortedIDs}`);
-                      }}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200"
-                    >
-                      <MessageCircle className="h-4 w-4" />
-                      Chat
-                    </button>
-                    <button
-                      onClick={() => router.push(`/players/${other}`)}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100"
-                    >
-                      <User className="h-4 w-4" />
-                      View Profile
-                    </button>
-                  </>
-                )
-              ) : match.opponentId === currentUserId ? (
-                // Received (pending): accept/decline + view sender profile
-                <>
-                  <button
-                    onClick={() => currentUserId && acceptMatch(match.id, currentUserId)}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
-                  >
-                    <Check className="h-4 w-4" />
-                    Accept
-                  </button>
-                  <button
-                    onClick={() => deleteMatch(match.id)}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200"
-                  >
-                    <X className="h-4 w-4" />
-                    Decline
-                  </button>
-                  <button
-                    onClick={() => router.push(`/players/${match.playerId}`)}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100"
-                  >
-                    <User className="h-4 w-4" />
-                    View Profile
-                  </button>
-                </>
-              ) : (
-                // Sent (pending): withdraw + view recipient profile
-                <>
-                  <button
-                    onClick={() => deleteMatch(match.id)}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Withdraw
-                  </button>
-                  <button
-                    onClick={() => router.push(`/players/${match.opponentId}`)}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100"
-                  >
-                    <User className="h-4 w-4" />
-                    View Profile
-                  </button>
-                </>
-              )}
-            </div>
+            {/* Actions */}
+<div className="mt-3 flex flex-col sm:flex-row gap-2">
+  {match.status === "accepted" ? (
+    inProgress ? (
+      <>
+        <button
+          onClick={() => handleCompleteGame(match)}
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-700"
+        >
+          <Check className="h-4 w-4" />
+          Complete Game
+        </button>
+        <button
+          onClick={() => {
+            const other =
+              match.playerId === currentUserId ? match.opponentId : match.playerId;
+            const sortedIDs = [currentUserId, other].sort().join("_");
+            router.push(`/messages/${sortedIDs}`);
+          }}
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200"
+        >
+          <MessageCircle className="h-4 w-4" />
+          Chat
+        </button>
+      </>
+    ) : (
+      <>
+     <button
+  onClick={() => handleStartMatch(match)}
+  disabled={startingId === match.id}
+  className={
+    "w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white " +
+    (startingId === match.id ? "bg-green-600 opacity-60 cursor-not-allowed" : "bg-green-600 hover:bg-green-700")
+  }
+>
+  {startingId === match.id ? (
+    <>
+      <Loader2 className="h-4 w-4 animate-spin" />
+      Starting…
+    </>
+  ) : (
+    <>
+      <Check className="h-4 w-4" />
+      Start Game
+    </>
+  )}
+</button>
+
+        <button
+          onClick={() => {
+            const other =
+              match.playerId === currentUserId ? match.opponentId : match.playerId;
+            const sortedIDs = [currentUserId, other].sort().join("_");
+            router.push(`/messages/${sortedIDs}`);
+          }}
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200"
+        >
+          <MessageCircle className="h-4 w-4" />
+          Chat
+        </button>
+      </>
+    )
+  ) : (
+    <>
+      {/* Received → Accept/Decline; Sent → Withdraw (unchanged) */}
+      {match.opponentId === currentUserId && match.status !== "accepted" ? (
+        <>
+          <button
+            onClick={() => currentUserId && acceptMatch(match.id, currentUserId)}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
+          >
+            <Check className="h-4 w-4" />
+            Accept
+          </button>
+          <button
+            onClick={() => deleteMatch(match.id)}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200"
+          >
+            <X className="h-4 w-4" />
+            Decline
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={() => deleteMatch(match.id)}
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
+        >
+          <Trash2 className="h-4 w-4" />
+          Withdraw
+        </button>
+      )}
+    </>
+  )}
+</div>
           </div>
         </div>
       </li>
@@ -465,7 +425,6 @@ const renderMatch = useCallback(
   },
   [currentUserId, router, handleStartMatch, handleCompleteGame, deleteMatch]
 );
-
 
 const pendingCount = useMemo(
   () => matches.filter((m) => m.status !== "accepted").length,
@@ -500,15 +459,6 @@ const visibleMatches = useMemo(() => {
     return a.includes(q) || b.includes(q);
   });
 }, [matches, tab, direction, currentUserId, queryText]);
-
-// before the main return
-if (currentUserId === null) {
-  return (
-    <div className="max-w-2xl mx-auto p-4">
-      <p className="text-sm text-gray-600">Loading your match requests…</p>
-    </div>
-  );
-}
 
 
 return (

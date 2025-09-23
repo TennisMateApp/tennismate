@@ -4,14 +4,13 @@ import { useEffect, useState, useMemo } from "react";
 import { db, auth } from "@/lib/firebaseConfig";
 import {
   collection, getDocs, doc, getDoc, addDoc,
-  serverTimestamp, query, where, updateDoc, setDoc, runTransaction,
+  serverTimestamp, query, where, updateDoc,
 } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { onAuthStateChanged, applyActionCode } from "firebase/auth";
 import { CheckCircle2 } from "lucide-react";
 import { GiTennisBall } from "react-icons/gi";
-import ReferralPromo from "@/components/ReferralPromo";
 // import { getContinueUrl } from "@/lib/auth/getContinueUrl";
 
 
@@ -34,16 +33,6 @@ interface PostcodeCoords {
 }
 
 const A = <T,>(x: T[] | undefined | null): T[] => Array.isArray(x) ? x : [];
-
-const stampFirstMatchRequestOnce = async (uid: string) => {
-  const userRef = doc(db, "users", uid);
-  await runTransaction(db, async (tx) => {
-    const snap = await tx.get(userRef);
-    if (!snap.exists() || !snap.get("firstMatchRequestAt")) {
-      tx.set(userRef, { firstMatchRequestAt: serverTimestamp() }, { merge: true });
-    }
-  });
-};
 
 
 function getDistanceFromLatLonInKm(
@@ -394,8 +383,6 @@ const handleMatchRequest = async (match: Player) => {
       timestamp: serverTimestamp(),
     });
 
-    await stampFirstMatchRequestOnce(user.uid);
-
     // de-dupe notif for this match
     const notifQuery = query(
       collection(db, "notifications"),
@@ -532,7 +519,6 @@ if (loading) {
   <p className="text-sm text-gray-600">
     Players near {myProfile?.postcode ?? "you"} that match your skill & schedule
   </p>
-  <ReferralPromo />
 </div>
 
 

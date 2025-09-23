@@ -500,13 +500,6 @@ return (
   </div>
 </div>
 
-<style jsx global>{`
-  /* Hide the floating “Give Feedback” FAB on this page */
-  button.fixed.bottom-6.right-6 {
-    display: none !important;
-  }
-`}</style>
-
   </div>
 );
 
