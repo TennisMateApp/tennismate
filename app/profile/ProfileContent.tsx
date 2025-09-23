@@ -176,6 +176,8 @@ export default function ProfileContent() {
         doc(db, "players", user.uid),
         {
           ...formData,
+          name: formData.name,
+    nameLower: (formData.name || "").toLowerCase(),
           photoURL,
           email: user.email,
           timestamp: serverTimestamp(),
