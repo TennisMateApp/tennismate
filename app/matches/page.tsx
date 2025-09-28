@@ -66,7 +66,7 @@ type Match = {
 };
 
 type PCMap = Record<string, { lat: number; lng: number }>;
-type PlayerLite = { postcode?: string; lat?: number; lng?: number };
+type PlayerLite = { postcode?: string; lat?: number; lng?: number; skillLevel?: string };
 
 function getDistanceFromLatLonInKm(
   lat1: number, lon1: number, lat2: number, lon2: number
@@ -113,7 +113,7 @@ function MatchesPage() {
       const me = await getDoc(doc(db, "players", currentUserId));
       if (me.exists()) {
         const d = me.data() as any;
-        setMyPlayer({ postcode: d.postcode, lat: d.lat, lng: d.lng }); // lat/lng optional
+        setMyPlayer({ postcode: d.postcode, lat: d.lat, lng: d.lng, skillLevel: d.skillLevel }); // lat/lng optional
       } else {
         setMyPlayer(null);
       }
@@ -299,6 +299,8 @@ const startedAt =
     ? new Date(match.startedAt)
     : null;
 
+    const opp = oppCache[other];
+
     // ---- Distance (prefer exact court lat/lng; fallback to postcode→coords) ----
 let distanceKm: number | null = null;
 
@@ -335,9 +337,9 @@ try {
           const s = await getDoc(doc(db, "players", other));
           const d = s.exists() ? (s.data() as any) : null;
           setOppCache((prev) => ({
-            ...prev,
-            [other]: d ? { postcode: d.postcode, lat: d.lat, lng: d.lng } : null,
-          }));
+  ...prev,
+  [other]: d ? { postcode: d.postcode, lat: d.lat, lng: d.lng, skillLevel: d.skillLevel } : null,
+}));
         } catch {
           setOppCache((prev) => ({ ...prev, [other]: null }));
         }
@@ -408,7 +410,7 @@ try {
             </p>
 
             {/* Meta */}
-   <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
+  <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
   <Clock className="h-3.5 w-3.5" />
   {inProgress && startedAt ? (
     <span title={startedAt.toLocaleString()}>
@@ -419,15 +421,26 @@ try {
       {formatRelativeTime(created)}
     </span>
   )}
+
+  {/* Opponent skill chip */}
+  {opp?.skillLevel && (
+    <span className="text-[10px] sm:text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+      Skill: {opp.skillLevel}
+    </span>
+  )}
+
+  {/* Distance chip */}
   {typeof distanceKm === "number" && (
     <span className="text-[10px] sm:text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
       ~{distanceKm} km
     </span>
   )}
+
   <span className="ml-auto italic text-gray-400">
     🏟️ Court suggestion coming soon
   </span>
 </div>
+
 
             {/* Actions */}
 <div className="mt-3 flex flex-col sm:flex-row gap-2">

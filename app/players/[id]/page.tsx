@@ -20,6 +20,15 @@ type Player = {
   photoURL?: string;
 };
 
+const DEFAULT_AVATAR = "/images/default-avatar.jpg";
+function normalizePhoto(url?: string | null) {
+  if (!url) return DEFAULT_AVATAR;
+  if (url.startsWith("https://tennismate-s7vk.vercel.app/images/default-avatar")) {
+    return DEFAULT_AVATAR;
+  }
+  return url;
+}
+
 function PublicProfilePage() {
   const { id } = useParams();
   const [player, setPlayer] = useState<Player | null>(null);
@@ -105,6 +114,8 @@ useEffect(() => {
     );
   }
 
+  const photo = normalizePhoto(player?.photoURL);
+
   return (
   <div className="mx-auto max-w-3xl p-4 sm:p-6 pb-28 text-gray-800 space-y-6">
     {/* HERO HEADER */}
@@ -116,19 +127,13 @@ useEffect(() => {
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
   {/* Avatar (keep it round) */}
   <div className="relative h-24 w-24 shrink-0 rounded-full overflow-hidden ring-4 ring-white bg-gray-100 aspect-square">
-    {player.photoURL ? (
-      <Image
-        src={player.photoURL}
-        alt={`${player.name} avatar`}
-        fill
-        className="object-cover"
-        sizes="96px"
-      />
-    ) : (
-      <div className="flex h-full w-full items-center justify-center text-xl text-gray-500">
-        {player.name.slice(0, 2).toUpperCase()}
-      </div>
-    )}
+<Image
+  src={photo}
+  alt={`${player.name} avatar`}
+  fill
+  className="object-cover"
+  sizes="96px"
+/>
   </div>
 
   {/* Name + meta */}

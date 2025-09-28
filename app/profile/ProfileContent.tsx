@@ -50,24 +50,39 @@ export default function ProfilePage() {
   });
   const [matchStats, setMatchStats] = useState({ matches: 0, completed: 0, wins: 0 });
 
+  const DEFAULT_AVATAR = "/images/default-avatar.jpg";
+
+function normalizePhoto(url?: string | null) {
+  if (!url) return DEFAULT_AVATAR;
+  // Map old preview-domain default to local default
+  if (url.startsWith("https://tennismate-s7vk.vercel.app/images/default-avatar"))
+    return DEFAULT_AVATAR;
+  return url;
+}
+
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) return;
       setUser(currentUser);
       const playerRef = doc(db, "players", currentUser.uid);
       const snap = await getDoc(playerRef);
-      const data = snap.data() || {};
-      setFormData({
-        name: data.name || "",
-        postcode: data.postcode || "",
-        skillLevel: data.skillLevel || "",
-        availability: data.availability || [],
-        bio: data.bio || "",
-        photoURL: data.photoURL || "",
-        badges: data.badges || [],
-        timestamp: data.timestamp || null,
-      });
-      if (data.photoURL) setPreviewURL(data.photoURL);
+const data = snap.data() || {};
+const normalized = normalizePhoto(data.photoURL);
+
+setFormData({
+  name: data.name || "",
+  postcode: data.postcode || "",
+  skillLevel: data.skillLevel || "",
+  availability: data.availability || [],
+  bio: data.bio || "",
+  photoURL: normalized,           // ← use normalized
+  badges: data.badges || [],
+  timestamp: data.timestamp || null,
+});
+
+setPreviewURL(normalized);        // ← always use normalized for preview
+
       const q = query(
         collection(db, "match_history"),
         where("players", "array-contains", currentUser.uid)
@@ -217,10 +232,10 @@ return (
           <span className="pointer-events-none absolute -bottom-8 -left-8 h-24 w-24 rounded-full bg-emerald-100/60 blur-2xl" />
 
           <img
-            src={previewURL || "/default-avatar.png"}
-            alt={`${formData.name || "User"} avatar`}
-            className="h-24 w-24 rounded-full object-cover ring-4 ring-white"
-          />
+  src={previewURL || DEFAULT_AVATAR}
+  alt={`${formData.name || "User"} avatar`}
+  className="h-24 w-24 rounded-full object-cover ring-4 ring-white"
+/>
 
           <h1 className="mt-3 text-2xl sm:text-3xl font-bold break-words">
             {formData.name || "Your Name"}
@@ -455,15 +470,11 @@ return (
 
             {/* Photo */}
             <div className="flex items-center gap-4">
-              {previewURL ? (
-                <img
-                  src={previewURL}
-                  className="h-20 w-20 rounded-full object-cover ring-2 ring-gray-200"
-                  alt="Preview"
-                />
-              ) : (
-                <div className="h-20 w-20 rounded-full bg-gray-100 ring-2 ring-gray-200" />
-              )}
+             <img
+  src={previewURL || DEFAULT_AVATAR}
+  className="h-20 w-20 rounded-full object-cover ring-2 ring-gray-200"
+  alt="Preview"
+/>
 
               <div className="flex flex-wrap gap-2">
                 <label
