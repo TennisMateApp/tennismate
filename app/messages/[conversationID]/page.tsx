@@ -46,23 +46,32 @@ function ChatPage() {
     }
   };
 
-  const scrollToBottomHard = (smooth = false) => {
+const scrollToBottomHard = (smooth = false) => {
   const el = listRef.current;
   if (!el) return;
+
+  // 1) Make sure the sentinel is visible in the scrollport
+  bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+
+  // 2) Force the scroll container to the absolute bottom
   const behavior: ScrollBehavior = smooth ? "smooth" : "auto";
-
-  // Bring the sentinel into view…
-  bottomRef.current?.scrollIntoView({ behavior, block: "end" });
-
-  // …then force the container all the way down after layout settles
   requestAnimationFrame(() => {
-    el.scrollTop = el.scrollHeight;
+    // use scrollTo for stronger browser support than assigning scrollTop
+    el.scrollTo({ top: el.scrollHeight, behavior });
   });
 };
+
 
   const [lastReadAt, setLastReadAt] = useState<number | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [vvBottomInset, setVvBottomInset] = useState(0);
+
+  // REFS
+const inputBarRef = useRef<HTMLDivElement>(null);
+
+// STATE
+const [inputBarH, setInputBarH] = useState(56); // default guess; we measure it below
+
 
   // helpers
   const ts = (m: any) => (m?.timestamp?.toDate ? m.timestamp.toDate().getTime() : 0);
@@ -165,6 +174,26 @@ function ChatPage() {
     };
   }, [conversationID]);
 
+  useEffect(() => {
+  const el = inputBarRef.current;
+  if (!el) return;
+
+  const setH = () => setInputBarH(el.clientHeight || 56);
+  setH();
+
+  let ro: ResizeObserver | null = null;
+  if ("ResizeObserver" in window) {
+    ro = new ResizeObserver(setH);
+    ro.observe(el);
+  }
+  window.addEventListener("resize", setH);
+  return () => {
+    ro?.disconnect();
+    window.removeEventListener("resize", setH);
+  };
+}, []);
+
+
 // When the mobile keyboard changes the visual viewport, lift the input and keep bottom visible
 useEffect(() => {
   const vv = (window as any).visualViewport;
@@ -175,8 +204,10 @@ useEffect(() => {
     const bottomInset = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
     setVvBottomInset(bottomInset);
 
-    // after layout shifts, keep near-bottom pinned
-    setTimeout(() => keepBottomPinned(), 50);
+// after layout shifts, force to absolute bottom (prevents partial clipping)
+setTimeout(() => scrollToBottomHard(false), 250);
+setTimeout(() => scrollToBottomHard(false), 600);
+
   };
 
   computeInset(); // run once
@@ -187,6 +218,16 @@ useEffect(() => {
     vv.removeEventListener("scroll", computeInset);
   };
 }, []);
+
+
+
+// Fallback: if we somehow didn’t autoscroll after first paint and we have messages, force it
+useEffect(() => {
+  if (!didInitialAutoscroll.current && messages.length > 0) {
+    setTimeout(() => scrollToBottomHard(false), 0);
+  }
+}, [messages.length]);
+
 
 
   useEffect(() => {
@@ -212,8 +253,8 @@ useEffect(() => {
 
 markAsRead();
 
-if (!didInitialAutoscroll.current) {
-  // First render of this thread: go to the absolute bottom
+if (!didInitialAutoscroll.current && msgs.length > 0) {
+  // First render with real messages: go to the absolute bottom
   requestAnimationFrame(() => {
     scrollToBottomHard(false);
     // one more pass for tall last bubbles / late layout
@@ -357,13 +398,14 @@ if (!didInitialAutoscroll.current) {
   onScroll={() => {
     const el = listRef.current;
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 350;
     setShowScrollDown(!nearBottom);
   }}
   className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
 style={{
-  // leave room for input + keyboard so last bubble is fully visible
-  scrollPaddingBottom: `${136 + vvBottomInset}px`, // +16px extra
+  // leave room for the actual input bar height + keyboard inset (+16px extra breathing room)
+  scrollPaddingBottom: `${inputBarH + vvBottomInset + 16}px`,
+  paddingBottom: `${inputBarH + vvBottomInset + 16}px`,
   overflowAnchor: "none",
 }}
 
@@ -427,7 +469,15 @@ style={{
           );
         })}
 
-        <div ref={bottomRef} />
+        <div
+  ref={bottomRef}
+  style={{
+    height: 1,
+    // make scrollIntoView align so the last bubble clears the fixed input bar + keyboard inset
+    scrollMarginBottom: inputBarH + vvBottomInset + 16,
+  }}
+/>
+
       </div>
 
       {/* Scroll-to-bottom FAB */}
@@ -441,14 +491,16 @@ style={{
       )}
 
       {/* Input */}
-      <div
-        className="sticky bottom-0 z-10 border-t bg-white px-3 py-2"
-          style={{
-    // safe area + small gap + dynamic keyboard inset
-    paddingBottom: `calc(env(safe-area-inset-bottom) + ${8 + vvBottomInset}px)`,
+<div
+  ref={inputBarRef}
+  className="fixed left-0 right-0 z-10 border-t bg-white px-3 py-2"
+  style={{
+    // lift the bar by the keyboard height; keep a small safe-area padding
+    bottom: vvBottomInset,
+    paddingBottom: `calc(env(safe-area-inset-bottom) + 8px)`,
   }}
+>
 
-      >
         <div className="flex items-end gap-2">
 <textarea
   ref={inputRef}
@@ -457,8 +509,9 @@ style={{
   placeholder="Type a message…"
   value={input}
 onFocus={() => {
-  // let keyboard animate then force to absolute bottom
-  setTimeout(() => scrollToBottomHard(true), 50);
+  // let keyboard animate, then force to absolute bottom (twice to catch late layout)
+  setTimeout(() => scrollToBottomHard(true), 250);
+  setTimeout(() => scrollToBottomHard(true), 600);
 }}
 
   onChange={(e) => {
