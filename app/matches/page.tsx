@@ -20,7 +20,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Trash2,
   MessageCircle,
@@ -47,6 +47,41 @@ const formatRelativeTime = (d?: Date | null) => {
   return rtf.format(Math.round(diff / DAY), "day");
 };
 
+// --- UI helpers ---
+type ChipTone = "neutral" | "success" | "brand" | "warning";
+const Chip = ({
+  tone = "neutral",
+  className = "",
+  children,
+}: React.PropsWithChildren<{ tone?: ChipTone; className?: string }>) => {
+  const toneCls =
+    tone === "success"
+      ? "bg-green-50 text-green-700 ring-green-200"
+      : tone === "brand"
+      ? "bg-blue-50 text-blue-700 ring-blue-200"
+      : tone === "warning"
+      ? "bg-yellow-50 text-yellow-700 ring-yellow-200"
+      : "bg-gray-100 text-gray-700 ring-gray-200";
+  return (
+    <span className={`inline-flex items-center rounded-full text-[10px] px-2 py-[2px] ring-1 ${toneCls} ${className}`}>
+      {children}
+    </span>
+  );
+};
+
+// --- Button helpers ---
+const btnBase =
+  "inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-1";
+
+const BTN = {
+  primary: `${btnBase} text-white bg-green-600 hover:bg-green-700 focus:ring-green-500`,
+  brand:   `${btnBase} text-white bg-purple-600 hover:bg-purple-700 focus:ring-purple-500`,
+  secondary: `${btnBase} bg-white ring-1 ring-gray-200 hover:bg-gray-50 focus:ring-gray-300`,
+  tertiary:  `${btnBase} bg-gray-100 hover:bg-gray-200 focus:ring-gray-300`,
+  danger:    `${btnBase} text-red-700 bg-red-50 hover:bg-red-100 focus:ring-red-300`,
+};
+
+
 type Match = {
   id: string;
   playerId: string;
@@ -66,7 +101,7 @@ type Match = {
 };
 
 type PCMap = Record<string, { lat: number; lng: number }>;
-type PlayerLite = { postcode?: string; lat?: number; lng?: number };
+type PlayerLite = { postcode?: string; lat?: number; lng?: number; photoURL?: string; name?: string };
 
 function getDistanceFromLatLonInKm(
   lat1: number, lon1: number, lat2: number, lon2: number
@@ -85,16 +120,51 @@ function getDistanceFromLatLonInKm(
 
 
 function MatchesPage() {
-  const [direction, setDirection] = useState<"all" | "received" | "sent">("all");
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [tab, setTab] = useState<"pending" | "accepted">("pending");
   const router = useRouter();
-  const [queryText, setQueryText] = useState("");
-  const [startingId, setStartingId] = useState<string | null>(null);
-  const [myPlayer, setMyPlayer] = useState<PlayerLite | null>(null);
+const searchParams = useSearchParams();
+
+const initialTab = searchParams.get("tab") === "accepted" ? "accepted" : "pending";
+const initialDir = ((): "all" | "received" | "sent" => {
+  const v = searchParams.get("dir");
+  return v === "received" || v === "sent" || v === "all" ? v : "all";
+})();
+
+const [tab, setTab] = useState<"pending" | "accepted">(initialTab);
+const [direction, setDirection] = useState<"all" | "received" | "sent">(initialDir);
+
+const [matches, setMatches] = useState<Match[]>([]);
+const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+const [queryText, setQueryText] = useState(searchParams.get("q") || "");
+const [startingId, setStartingId] = useState<string | null>(null);
+const [myPlayer, setMyPlayer] = useState<PlayerLite | null>(null);
   const [postcodeCoords, setPostcodeCoords] = useState<PCMap>({});
   const [oppCache, setOppCache] = useState<Record<string, PlayerLite | null>>({});
+  const [loading, setLoading] = useState(true);
+const [acceptingId, setAcceptingId] = useState<string | null>(null);
+const [decliningId, setDecliningId] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"recent" | "oldest" | "distance">("recent");
+const [unreadOnly, setUnreadOnly] = useState(false);
+
+
+// Sync toolbar state to URL without adding history entries
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+
+  // set if not default; otherwise remove for clean URLs
+  if (tab === "accepted") params.set("tab", "accepted");
+  else params.delete("tab");
+
+  if (direction !== "all") params.set("dir", direction);
+  else params.delete("dir");
+
+  const q = queryText.trim();
+  if (q) params.set("q", q);
+  else params.delete("q");
+
+  const qs = params.toString();
+  router.replace(qs ? `?${qs}` : "?", { scroll: false });
+}, [tab, direction, queryText, router]);
 
 
   // Track auth state
@@ -153,6 +223,9 @@ function MatchesPage() {
       delete all[chg.doc.id];
       updated = true;
     }
+    if (updated) setMatches(Object.values(all));
+    setLoading(false);
+
   });
 
   snap.docs.forEach((d) => {
@@ -191,36 +264,48 @@ function MatchesPage() {
   }, [currentUserId]);
 
   // Accept a match and award badge
-  const acceptMatch = async (matchId: string, currentUserId: string) => {
-    try {
-      const matchRef = doc(db, "match_requests", matchId);
-      const snap = await getDoc(matchRef);
-      if (!snap.exists()) return;
+const acceptMatch = async (matchId: string, currentUserId: string) => {
+  // Snapshot of previous status (for revert)
+  const prevStatus = matches.find((m) => m.id === matchId)?.status;
 
-      const { fromUserId, toUserId } = snap.data();
-      if (currentUserId !== toUserId) return;
+  try {
+    setAcceptingId(matchId);
 
-      // Mark accepted
-      await updateDoc(matchRef, {
-        status: "accepted",
-        players: [fromUserId, toUserId],
-      });
+    // Optimistic UI
+    setMatches((prev) =>
+      prev.map((m) => (m.id === matchId ? { ...m, status: "accepted" } : m))
+    );
 
-      // Award first match badge
-      await setDoc(
-        doc(db, "players", toUserId),
-        { badges: arrayUnion("firstMatch") },
-        { merge: true }
-      );
-      await setDoc(
-  doc(db, "players", fromUserId),
-  { badges: arrayUnion("firstMatch") },
-  { merge: true }
-);
-    } catch (err) {
-      console.error("❌ Error accepting match:", err);
-    }
-  };
+    const matchRef = doc(db, "match_requests", matchId);
+    const snap = await getDoc(matchRef);
+    if (!snap.exists()) throw new Error("Match no longer exists");
+
+    const { fromUserId, toUserId } = snap.data();
+    if (currentUserId !== toUserId) throw new Error("Not the recipient");
+
+    await updateDoc(matchRef, {
+      status: "accepted",
+      players: [fromUserId, toUserId],
+    });
+
+    await Promise.all([
+      setDoc(doc(db, "players", toUserId), { badges: arrayUnion("firstMatch") }, { merge: true }),
+      setDoc(doc(db, "players", fromUserId), { badges: arrayUnion("firstMatch") }, { merge: true }),
+    ]);
+  } catch (err) {
+    console.error("❌ Error accepting match:", err);
+    // Revert optimistic flip
+    setMatches((prev) =>
+      prev.map((m) =>
+        m.id === matchId ? { ...m, status: prevStatus ?? "pending" } : m
+      )
+    );
+    alert("Could not accept the request. Please try again.");
+  } finally {
+    setAcceptingId(null);
+  }
+};
+
 
   // Start match logic
 const handleStartMatch = useCallback(async (match: Match) => {
@@ -276,13 +361,14 @@ const deleteMatch = useCallback(async (id: string) => {
 
 const renderMatch = useCallback(
   (match: Match) => {
-    const isMine = match.playerId === currentUserId;
-    const isRec  = match.opponentId === currentUserId && match.status !== "accepted";
-    const other  = isMine ? match.opponentId : match.playerId;
-    const profileHref = `/players/${other}`;
-    const initiator = isMine ? "You" : match.fromName;
-    const recipient = isMine ? match.toName : "You";
-    const inProgress = match.status === "accepted" && !!match.started;
+const isMine = match.playerId === currentUserId;
+const other  = isMine ? match.opponentId : match.playerId;
+const profileHref = `/players/${other}`;
+const otherName = isMine ? (match.toName || "Opponent") : (match.fromName || "Opponent");
+const avatarUrl = oppCache[other]?.photoURL || "";
+const initials = (otherName || "?").trim().charAt(0).toUpperCase();
+const inProgress = match.status === "accepted" && !!match.started;
+
 
     const created =
       match.createdAt?.toDate
@@ -332,12 +418,14 @@ try {
       // first encounter of this opponent: fetch once and cache
       (async () => {
         try {
-          const s = await getDoc(doc(db, "players", other));
-          const d = s.exists() ? (s.data() as any) : null;
-          setOppCache((prev) => ({
-            ...prev,
-            [other]: d ? { postcode: d.postcode, lat: d.lat, lng: d.lng } : null,
-          }));
+const s = await getDoc(doc(db, "players", other));
+const d = s.exists() ? (s.data() as any) : null;
+setOppCache((prev) => ({
+  ...prev,
+  [other]: d
+    ? { postcode: d.postcode, lat: d.lat, lng: d.lng, photoURL: d.photoURL, name: d.name }
+    : null,
+}));
         } catch {
           setOppCache((prev) => ({ ...prev, [other]: null }));
         }
@@ -350,127 +438,141 @@ try {
 
 
     return (
-  <li
+<li
   key={match.id}
   className={
-    "relative overflow-hidden pr-12 rounded-2xl bg-white ring-1 p-4 shadow-sm hover:shadow-md transition " +
+    "relative overflow-hidden pr-24 sm:pr-12 rounded-2xl bg-white ring-1 p-4 shadow-sm hover:shadow transition " +
     (match.status === "unread" ? "ring-green-200" : "ring-black/5")
   }
 >
+
   {/* left accent for unread */}
   {match.status === "unread" && (
     <div className="absolute inset-y-0 left-0 w-1 bg-green-400/70" />
   )}
         {/* Top-right overlay: Unread + delete */}
-        <div className="absolute top-2 right-2 flex items-center gap-2">
-          {match.status === "unread" && (
-            <span className="text-[10px] px-2 py-[2px] rounded-full bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200">
-              Unread
-            </span>
-          )}
-          <button
-            onClick={() => deleteMatch(match.id)}
-            title="Delete request"
-            aria-label="Delete request"
-            className="p-1 rounded-md text-red-500 hover:text-red-700 hover:bg-red-50"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-2">
+{match.status === "unread" && <Chip tone="warning">Unread</Chip>}
+<button
+  onClick={() => deleteMatch(match.id)}
+  title="Delete request"
+  aria-label="Delete request"
+  className="p-1 rounded-md text-red-500/80 hover:text-red-600 hover:bg-red-50"
+>
+  <Trash2 className="h-4 w-4" />
+</button>
+
         </div>
 
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
-            {/* Header */}
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-gray-900 truncate">{initiator}</span>
-              <ArrowRight className="h-4 w-4 text-gray-400" />
-              <span className="font-medium text-gray-900 truncate">{recipient}</span>
+{/* Header (opponent-first) */}
+<div className="flex items-start gap-3">
+  {/* Avatar */}
+  <div className="h-9 w-9 rounded-full overflow-hidden bg-gray-100 ring-1 ring-black/5 shrink-0">
+    {avatarUrl ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={avatarUrl} alt={otherName} className="h-full w-full object-cover" />
+    ) : (
+      <div className="h-full w-full grid place-items-center text-sm text-gray-600">
+        {initials}
+      </div>
+    )}
+  </div>
 
-              {/* Header status pill */}
-{inProgress ? (
-  <span className="ml-auto text-[10px] px-2 py-[2px] rounded-full bg-purple-50 text-purple-700 ring-1 ring-purple-200">
-    Game in progress
-  </span>
-) : match.status === "accepted" ? (
-  <span className="ml-auto text-[10px] px-2 py-[2px] rounded-full bg-green-50 text-green-700 ring-1 ring-green-200">
-    Accepted
-  </span>
-) : match.status !== "unread" ? (
-  <span className="ml-auto text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-    {match.status}
-  </span>
-) : null}
-            </div>
+  {/* ⬇️ restored wrapper so truncation/status layout works */}
+  <div className="min-w-0 flex-1">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-16 sm:pr-0">
+      <span className="font-semibold text-gray-900 truncate">{otherName}</span>
+     <span className="shrink-0 text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700 ring-1 ring-gray-200">
+  {isMine ? "Outgoing" : "Incoming"}
+</span>
 
-            {/* Message */}
-            <p className="mt-1 text-sm text-gray-700">
-              {match.message || "No message"}
-            </p>
 
-            {/* Meta */}
-   <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
-  <Clock className="h-3.5 w-3.5" />
-  {inProgress && startedAt ? (
-    <span title={startedAt.toLocaleString()}>
-      Started {formatRelativeTime(startedAt)}
-    </span>
-  ) : (
-    <span title={created ? created.toLocaleString() : undefined}>
-      {formatRelativeTime(created)}
-    </span>
-  )}
-  {typeof distanceKm === "number" && (
-    <span className="text-[10px] sm:text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-      ~{distanceKm} km
-    </span>
-  )}
-  <span className="ml-auto italic text-gray-400">
-    🏟️ Court suggestion coming soon
-  </span>
+      {/* Status pill */}
+      <div className="ml-auto">
+        {inProgress ? (
+          <Chip tone="brand">Game in progress</Chip>
+        ) : match.status === "accepted" ? (
+          <Chip tone="success">Accepted</Chip>
+        ) : match.status !== "unread" ? (
+          <Chip>{match.status}</Chip>
+        ) : null}
+      </div>
+    </div>
+
+    {/* Direction sublabel */}
+    <div className="mt-0.5 text-xs text-gray-500 truncate">
+      {isMine ? (
+        <>You <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> {otherName}</>
+      ) : (
+        <>{otherName} <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> You</>
+      )}
+    </div>
+  </div>
 </div>
 
-            {/* Actions */}
-<div className="mt-3 flex flex-col sm:flex-row gap-2">
+            {/* Message */}
+<p className="mt-2 text-sm text-gray-700 line-clamp-2">
+  {match.message || "No message"}
+</p>
+
+            {/* Meta */}
+<div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+  <Clock className="h-3.5 w-3.5 opacity-60" />
+  {inProgress && startedAt ? (
+    <span title={startedAt.toLocaleString()}>Started {formatRelativeTime(startedAt)}</span>
+  ) : (
+    <span title={created ? created.toLocaleString() : undefined}>{formatRelativeTime(created)}</span>
+  )}
+
+  {typeof distanceKm === "number" && <Chip className="ml-1">~{distanceKm} km</Chip>}
+
+  <span className="ml-auto text-gray-400/90 italic">🏟️ Court suggestion coming soon</span>
+</div>
+
+
+{/* Actions */}
+<div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap gap-2">
   {match.status === "accepted" ? (
     inProgress ? (
       <>
         <button
           onClick={() => handleCompleteGame(match)}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-700"
+          aria-label="Complete game"
+          className={`w-full sm:w-auto min-w-[140px] ${BTN.brand}`}
         >
           <Check className="h-4 w-4" />
           Complete Game
         </button>
-
-        <Link
-          href={profileHref}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-gray-200 hover:bg-gray-50"
-        >
-          View profile
-        </Link>
 
         <button
           onClick={() => {
             const sortedIDs = [currentUserId!, other].sort().join("_");
             router.push(`/messages/${sortedIDs}`);
           }}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200"
+          aria-label="Open chat"
+          className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
         >
           <MessageCircle className="h-4 w-4" />
           Chat
         </button>
+
+        <Link
+          href={profileHref}
+          aria-label="View profile"
+          className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+        >
+          View profile
+        </Link>
       </>
     ) : (
       <>
         <button
           onClick={() => handleStartMatch(match)}
           disabled={startingId === match.id}
-          className={
-            "w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white " +
-            (startingId === match.id
-              ? "bg-green-600 opacity-60 cursor-not-allowed"
-              : "bg-green-600 hover:bg-green-700")
-          }
+          aria-label="Start game"
+          className={`w-full sm:w-auto min-w-[130px] ${BTN.primary} ${startingId === match.id ? "opacity-60 cursor-not-allowed" : ""}`}
         >
           {startingId === match.id ? (
             <>
@@ -485,73 +587,99 @@ try {
           )}
         </button>
 
-        <Link
-          href={profileHref}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-gray-200 hover:bg-gray-50"
-        >
-          View profile
-        </Link>
-
         <button
           onClick={() => {
             const sortedIDs = [currentUserId!, other].sort().join("_");
             router.push(`/messages/${sortedIDs}`);
           }}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200"
+          aria-label="Open chat"
+          className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
         >
           <MessageCircle className="h-4 w-4" />
           Chat
         </button>
+
+        <Link
+          href={profileHref}
+          aria-label="View profile"
+          className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+        >
+          View profile
+        </Link>
       </>
     )
   ) : (
     <>
       {match.opponentId === currentUserId ? (
+        // You RECEIVED this request → Accept / Decline
         <>
           <button
             onClick={() => currentUserId && acceptMatch(match.id, currentUserId)}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
+            aria-label="Accept request"
+            className={`w-full sm:w-auto min-w-[120px] ${BTN.primary}`}
           >
             <Check className="h-4 w-4" />
             Accept
           </button>
 
           <button
+            onClick={() => {
+              const sortedIDs = [currentUserId!, other].sort().join("_");
+              router.push(`/messages/${sortedIDs}`);
+            }}
+            aria-label="Open chat"
+            className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+          >
+            <MessageCircle className="h-4 w-4" />
+            Chat
+          </button>
+
+          <Link
+            href={profileHref}
+            aria-label="View profile"
+            className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+          >
+            View profile
+          </Link>
+
+          <button
             onClick={() => deleteMatch(match.id)}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200"
+            aria-label="Decline request"
+            className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
           >
             <X className="h-4 w-4" />
             Decline
           </button>
-
-          <Link
-            href={profileHref}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-gray-200 hover:bg-gray-50"
-          >
-            View profile
-          </Link>
         </>
       ) : (
-        <>
-          <button
-            onClick={() => deleteMatch(match.id)}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
-          >
-            <Trash2 className="h-4 w-4" />
-            Withdraw
-          </button>
+       // You SENT this request → no Withdraw button (use top-right trash)
+<>
+  <button
+    onClick={() => {
+      const sortedIDs = [currentUserId!, other].sort().join("_");
+      router.push(`/messages/${sortedIDs}`);
+    }}
+    aria-label="Open chat"
+    className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+  >
+    <MessageCircle className="h-4 w-4" />
+    Chat
+  </button>
 
-          <Link
-            href={profileHref}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-gray-200 hover:bg-gray-50"
-          >
-            View profile
-          </Link>
-        </>
+  <Link
+    href={profileHref}
+    aria-label="View profile"
+    className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+  >
+    View profile
+  </Link>
+</>
+
       )}
     </>
   )}
 </div>
+
 
           </div>
         </div>
@@ -577,31 +705,120 @@ const acceptedCount = useMemo(
   [matches]
 );
 
+const incomingPendingCount = useMemo(
+  () =>
+    matches.filter(
+      (m) => m.status !== "accepted" && m.opponentId === currentUserId
+    ).length,
+  [matches, currentUserId]
+);
+
+const outgoingPendingCount = useMemo(
+  () =>
+    matches.filter(
+      (m) => m.status !== "accepted" && m.playerId === currentUserId
+    ).length,
+  [matches, currentUserId]
+);
+
+useEffect(() => {
+  if (tab === "pending" && direction === "all" && incomingPendingCount > 0) {
+    setDirection("received");
+  }
+}, [tab, direction, incomingPendingCount]);
+
+const distanceFor = useCallback(
+  (m: Match): number | null => {
+    try {
+      // Prefer exact court coords if available
+      if (
+        typeof m.suggestedCourtLat === "number" &&
+        typeof m.suggestedCourtLng === "number" &&
+        myPlayer &&
+        typeof myPlayer.lat === "number" &&
+        typeof myPlayer.lng === "number"
+      ) {
+        return getDistanceFromLatLonInKm(
+          myPlayer.lat,
+          myPlayer.lng,
+          m.suggestedCourtLat,
+          m.suggestedCourtLng
+        );
+      }
+
+      // Fallback: my postcode vs opponent postcode
+      if (myPlayer) {
+        const otherId = m.playerId === currentUserId ? m.opponentId : m.playerId;
+        const mine = myPlayer.postcode ? postcodeCoords[myPlayer.postcode] : undefined;
+        const theirsPC = oppCache[otherId]?.postcode;
+        const theirs = theirsPC ? postcodeCoords[theirsPC] : undefined;
+        if (mine && theirs) {
+          return getDistanceFromLatLonInKm(mine.lat, mine.lng, theirs.lat, theirs.lng);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  },
+  [myPlayer, postcodeCoords, oppCache, currentUserId]
+);
+
+
 const visibleMatches = useMemo(() => {
   const base =
     tab === "accepted"
       ? matches.filter((m) => m.status === "accepted")
       : matches.filter((m) => m.status !== "accepted");
 
+  // Direction filter
   const byDirection = base.filter((m) => {
     if (direction === "sent" && m.playerId !== currentUserId) return false;
     if (direction === "received" && m.opponentId !== currentUserId) return false;
     return true;
   });
 
-  const q = queryText.trim().toLowerCase();
-  if (!q) return byDirection;
+  // Unread-only filter
+  const byUnread = unreadOnly ? byDirection.filter((m) => m.status === "unread") : byDirection;
 
-  return byDirection.filter((m) => {
-    const a = (m.fromName || "").toLowerCase();
-    const b = (m.toName || "").toLowerCase();
-    return a.includes(q) || b.includes(q);
+  // Search
+  const q = queryText.trim().toLowerCase();
+  const searched = !q
+    ? byUnread
+    : byUnread.filter((m) => {
+        const a = (m.fromName || "").toLowerCase();
+        const b = (m.toName || "").toLowerCase();
+        return a.includes(q) || b.includes(q);
+      });
+
+  // Enrich for sorting
+  const enriched = searched.map((m) => {
+    const createdMs =
+      m.createdAt?.toDate ? m.createdAt.toDate().getTime() :
+      m.createdAt ? new Date(m.createdAt).getTime() : 0;
+    const dist = distanceFor(m);
+    return { m, createdMs, dist };
   });
-}, [matches, tab, direction, currentUserId, queryText]);
+
+  // Sort
+  enriched.sort((A, B) => {
+    if (sortBy === "distance") {
+      const a = A.dist ?? Number.POSITIVE_INFINITY;
+      const b = B.dist ?? Number.POSITIVE_INFINITY;
+      return a - b; // closest first
+    }
+    if (sortBy === "oldest") return A.createdMs - B.createdMs;
+    // "recent"
+    return B.createdMs - A.createdMs;
+  });
+
+  return enriched.map((e) => e.m);
+}, [matches, tab, direction, currentUserId, queryText, unreadOnly, sortBy, distanceFor]);
+
 
 
 return (
-  <div className="max-w-2xl mx-auto p-4 pb-28 sm:p-6">
+  <div className="mx-auto w-full max-w-6xl px-4 pt-4 pb-28 sm:px-6 sm:pt-6">
     {/* Page title */}
     <div className="mb-3">
       {/* icon + title on one row */}
@@ -618,7 +835,7 @@ return (
     </div>
 
     {/* Sticky toolbar */}
-    <div className="sticky top-[56px] z-10 mb-3 rounded-xl bg-white/90 backdrop-blur ring-1 ring-black/5 p-3">
+    <div className="sticky top-[64px] z-30 -mx-4 px-4 py-2 mb-3 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
       <div className="flex flex-wrap items-center gap-3">
         {/* Tabs */}
         <div className="inline-flex rounded-lg p-0.5 bg-gray-100">
@@ -646,41 +863,93 @@ return (
           {(tab === "pending" ? pendingCount : acceptedCount) === 1 ? "" : "s"}
         </span>
 
+        <span className="text-xs text-gray-500">
+  Incoming: {incomingPendingCount} • Outgoing: {outgoingPendingCount}
+</span>
+
         {/* Filters */}
-        <div className="w-full sm:w-auto sm:ml-auto flex items-center gap-3">
+<div className="w-full sm:w-auto sm:ml-auto flex items-center gap-3">
+  {/* Direction */}
   <select
     value={direction}
-    onChange={(e) =>
-      setDirection(e.target.value as "all" | "received" | "sent")
-    }
+    onChange={(e) => setDirection(e.target.value as "all" | "received" | "sent")}
     className="text-sm border rounded-lg px-2 py-1 w-[120px] sm:w-auto"
     title="Filter direction"
   >
     <option value="all">All</option>
     <option value="received">Received</option>
     <option value="sent">Sent</option>
-          </select>
-          <input
-  type="text"
-  value={queryText}
-  onChange={(e) => setQueryText(e.target.value)}
-  placeholder="Search names…"
-  className="text-sm border rounded-lg px-2 py-1 w-[160px]"
-  aria-label="Search requests by name"
-/>
-        </div>
+  </select>
+
+  {/* Sort */}
+  <select
+    value={sortBy}
+    onChange={(e) => setSortBy(e.target.value as "recent" | "oldest" | "distance")}
+    className="text-sm border rounded-lg px-2 py-1 w-[130px]"
+    title="Sort"
+  >
+    <option value="recent">Newest</option>
+    <option value="oldest">Oldest</option>
+    <option value="distance">Closest</option>
+  </select>
+
+  {/* Unread only */}
+  <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+    <input
+      type="checkbox"
+      className="h-4 w-4 accent-green-600"
+      checked={unreadOnly}
+      onChange={(e) => setUnreadOnly(e.target.checked)}
+    />
+    Unread only
+  </label>
+
+  {/* Search */}
+  <input
+    type="text"
+    value={queryText}
+    onChange={(e) => setQueryText(e.target.value)}
+    placeholder="Search names…"
+    className="text-sm border rounded-lg px-2 py-1 w-[160px]"
+    aria-label="Search requests by name"
+  />
+</div>
+
       </div>
     </div>
 
-    {/* List / Empty state */}
-    {visibleMatches.length === 0 ? (
-      <div className="mt-6 rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
-        <p className="text-gray-800 font-medium">No matches in this view yet</p>
-        <p className="text-gray-600 text-sm mt-1">Try switching tabs or filters.</p>
-      </div>
-    ) : (
-     <ul className="space-y-3">{visibleMatches.map(renderMatch)}</ul>
-    )}
+{/* List / Loading / Empty */}
+{loading ? (
+  // Skeleton grid
+  <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5">
+    {Array.from({ length: 4 }).map((_, i) => (
+      <li key={i} className="rounded-2xl bg-white ring-1 ring-black/5 p-4 shadow-sm animate-pulse">
+        <div className="flex items-start gap-3">
+          <div className="h-9 w-9 rounded-full bg-gray-200" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 w-1/3 bg-gray-200 rounded" />
+            <div className="h-3 w-2/3 bg-gray-200 rounded" />
+            <div className="h-3 w-5/6 bg-gray-200 rounded" />
+            <div className="mt-3 flex gap-2">
+              <div className="h-8 w-28 bg-gray-200 rounded" />
+              <div className="h-8 w-24 bg-gray-200 rounded" />
+            </div>
+          </div>
+        </div>
+      </li>
+    ))}
+  </ul>
+) : visibleMatches.length === 0 ? (
+  <div className="mt-6 rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
+    <p className="text-gray-800 font-medium">No matches in this view yet</p>
+    <p className="text-gray-600 text-sm mt-1">Try switching tabs or filters.</p>
+  </div>
+) : (
+  <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5">
+    {visibleMatches.map(renderMatch)}
+  </ul>
+)}
+
   </div>
 );
 
