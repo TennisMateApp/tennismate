@@ -36,6 +36,17 @@ function ChatPage() {
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  const didInitialAutoscroll = useRef(false);
+
+    const keepBottomPinned = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 250;
+    if (nearBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    }
+  };
+
   const [lastReadAt, setLastReadAt] = useState<number | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
 
@@ -59,6 +70,7 @@ function ChatPage() {
   const timeLabel = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   useEffect(() => {
+      didInitialAutoscroll.current = false;
     let unsubscribeTyping: () => void = () => {};
     let currentUserId: string | null = null;
 
@@ -139,6 +151,24 @@ function ChatPage() {
     };
   }, [conversationID]);
 
+        // When the mobile keyboard changes the visual viewport, keep the bottom in view
+  useEffect(() => {
+    const vv = (window as any).visualViewport;
+    if (!vv) return;
+
+    const onVVChange = () => {
+      // delay slightly so layout settles
+      setTimeout(() => keepBottomPinned(), 50);
+    };
+
+    vv.addEventListener("resize", onVVChange);
+    vv.addEventListener("scroll", onVVChange); // some browsers fire scroll while keyboard animates
+    return () => {
+      vv.removeEventListener("resize", onVVChange);
+      vv.removeEventListener("scroll", onVVChange);
+    };
+  }, []);
+
   useEffect(() => {
     if (!conversationID) return;
     const msgRef = collection(db, "conversations", conversationID as string, "messages");
@@ -162,11 +192,17 @@ function ChatPage() {
 
       markAsRead();
 
-      requestAnimationFrame(() => {
+      if (!didInitialAutoscroll.current) {
+        // First render of this thread: force jump to bottom
         requestAnimationFrame(() => {
-          bottomRef.current?.scrollIntoView({ behavior: "auto" });
+          bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+          didInitialAutoscroll.current = true;
         });
-      });
+      } else {
+        // Subsequent updates: only pin if user is near bottom
+        keepBottomPinned();
+      }
+
     });
 
     return () => unsub();
@@ -197,6 +233,8 @@ function ChatPage() {
     });
   };
 
+  keepBottomPinned();
+
   const updateTypingStatus = debounce(async (isTyping: boolean) => {
     if (!user) return;
     await updateDoc(doc(db, "conversations", conversationID as string), {
@@ -208,9 +246,21 @@ function ChatPage() {
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
+
+    // Auto-grow now
     el.style.height = "0px";
     el.style.height = Math.min(el.scrollHeight, 160) + "px";
+    keepBottomPinned();
+
+    // Also react to future growth (e.g., long messages/paste)
+    let ro: ResizeObserver | null = null;
+    if ("ResizeObserver" in window) {
+      ro = new ResizeObserver(() => keepBottomPinned());
+      ro.observe(el);
+    }
+    return () => ro?.disconnect();
   }, [input]);
+
 
   // rows for day/unread dividers + cluster tails
   const rows = useMemo(() => {
@@ -280,16 +330,22 @@ function ChatPage() {
       </div>
 
       {/* Messages */}
-      <div
-        ref={listRef}
-        onScroll={() => {
-          const el = listRef.current;
-          if (!el) return;
-          const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
-          setShowScrollDown(!nearBottom);
-        }}
-        className="flex-1 overflow-y-auto px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
-      >
+<div
+  ref={listRef}
+  onScroll={() => {
+    const el = listRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+    setShowScrollDown(!nearBottom);
+  }}
+  className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
+  style={{
+    // ensure there's breathing room so the last message isn't hidden by the input
+    scrollPaddingBottom: "120px",
+    overflowAnchor: "none",
+  }}
+>
+
         {rows.map((row) => {
           if (row.type === "day") {
             return (
@@ -367,24 +423,31 @@ function ChatPage() {
         style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }}
       >
         <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            rows={1}
-            className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
-            placeholder="Type a message…"
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              updateTypingStatus(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            onBlur={() => updateTypingStatus(false)}
-          />
+<textarea
+  ref={inputRef}
+  rows={1}
+  className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
+  placeholder="Type a message…"
+  value={input}
+  onFocus={() => {
+    // allow keyboard animation to start then pin bottom
+    setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 50);
+  }}
+  onChange={(e) => {
+    setInput(e.target.value);
+    updateTypingStatus(true);
+  }}
+  onKeyDown={(e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }}
+  onBlur={() => updateTypingStatus(false)}
+/>
+
           <button
             onClick={sendMessage}
             disabled={!input.trim()}
@@ -398,4 +461,4 @@ function ChatPage() {
   );
 }
 
-export default withAuth(ChatPage);
+export default ChatPage;

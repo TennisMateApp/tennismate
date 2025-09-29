@@ -58,7 +58,9 @@ function MessagesHome() {
 
   const filteredConversations = useMemo(() => {
     const q = queryText.trim().toLowerCase();
-    return conversations
+
+    // 1) filter by tab and search (unchanged)
+    const filtered = conversations
       .filter((c) => (tab === "all" ? true : c.isUnread))
       .filter((c) => {
         if (!q) return true;
@@ -66,7 +68,15 @@ function MessagesHome() {
         const text = c.latestMessage?.text?.toLowerCase?.() || "";
         return name.includes(q) || text.includes(q);
       });
+
+    // 2) **sort newest first** by latest message timestamp
+    return [...filtered].sort((a, b) => {
+      const ta = a?.latestMessage?.timestamp?.toMillis?.() ?? 0;
+      const tb = b?.latestMessage?.timestamp?.toMillis?.() ?? 0;
+      return tb - ta; // descending (newest on top)
+    });
   }, [conversations, tab, queryText]);
+
 
   useEffect(() => {
     let convoUnsub: (() => void) | null = null;
