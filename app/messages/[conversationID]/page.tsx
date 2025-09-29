@@ -46,20 +46,57 @@ function ChatPage() {
     }
   };
 
+  // Focus the textarea but stop the browser from auto-scrolling the list
+const focusWithoutScroll = () => {
+  const el = inputRef.current;
+  if (!el) return;
+  try {
+    // supported on modern mobile browsers
+    el.focus({ preventScroll: true });
+  } catch {
+    // fallback – still fine on older browsers
+    el.focus();
+  }
+};
+
+// Ensure the very bottom clears the fixed input bar (esp. on Android/iOS)
+const ensureBottomClear = () => {
+  const listEl = listRef.current;
+  const sentinel = bottomRef.current;
+  const barEl = inputBarRef.current;
+  if (!listEl || !sentinel) return;
+
+  const sRect = sentinel.getBoundingClientRect();
+  const barH = barEl?.getBoundingClientRect().height ?? inputBarH;
+  const clearance = 8;
+
+  // Use visualViewport so we account for the keyboard-reduced viewport
+  const vv = (window as any).visualViewport;
+  const viewportBottom = (vv ? vv.height + vv.offsetTop : window.innerHeight);
+  const visibleBottom = viewportBottom - barH - clearance;
+
+  const overlap = sRect.bottom - visibleBottom;
+  if (overlap > 0) {
+    listEl.scrollBy({ top: overlap, behavior: "auto" });
+  }
+};
+
+
 const scrollToBottomHard = (smooth = false) => {
   const el = listRef.current;
   if (!el) return;
 
-  // 1) Make sure the sentinel is visible in the scrollport
+  // 1) Snap the sentinel into the scrollport
   bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
 
-  // 2) Force the scroll container to the absolute bottom
+  // 2) Force absolute bottom, then verify clearance vs the input bar
   const behavior: ScrollBehavior = smooth ? "smooth" : "auto";
   requestAnimationFrame(() => {
-    // use scrollTo for stronger browser support than assigning scrollTop
     el.scrollTo({ top: el.scrollHeight, behavior });
+    requestAnimationFrame(() => ensureBottomClear());
   });
 };
+
 
 
   const [lastReadAt, setLastReadAt] = useState<number | null>(null);
@@ -71,7 +108,6 @@ const inputBarRef = useRef<HTMLDivElement>(null);
 
 // STATE
 const [inputBarH, setInputBarH] = useState(56); // default guess; we measure it below
-
 
   // helpers
   const ts = (m: any) => (m?.timestamp?.toDate ? m.timestamp.toDate().getTime() : 0);
@@ -205,8 +241,8 @@ useEffect(() => {
     setVvBottomInset(bottomInset);
 
 // after layout shifts, force to absolute bottom (prevents partial clipping)
-setTimeout(() => scrollToBottomHard(false), 250);
-setTimeout(() => scrollToBottomHard(false), 600);
+setTimeout(() => { scrollToBottomHard(false); ensureBottomClear(); }, 250);
+setTimeout(() => { scrollToBottomHard(false); ensureBottomClear(); }, 600);
 
   };
 
@@ -404,8 +440,8 @@ if (!didInitialAutoscroll.current && msgs.length > 0) {
   className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
 style={{
   // leave room for the actual input bar height + keyboard inset (+16px extra breathing room)
-  scrollPaddingBottom: `${inputBarH + vvBottomInset + 16}px`,
-  paddingBottom: `${inputBarH + vvBottomInset + 16}px`,
+scrollPaddingBottom: `${inputBarH + vvBottomInset + 24}px`,
+paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
   overflowAnchor: "none",
 }}
 
@@ -474,7 +510,7 @@ style={{
   style={{
     height: 1,
     // make scrollIntoView align so the last bubble clears the fixed input bar + keyboard inset
-    scrollMarginBottom: inputBarH + vvBottomInset + 16,
+    scrollMarginBottom: inputBarH + vvBottomInset + 24,
   }}
 />
 
@@ -508,11 +544,24 @@ style={{
   className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
   placeholder="Type a message…"
   value={input}
-onFocus={() => {
-  // let keyboard animate, then force to absolute bottom (twice to catch late layout)
-  setTimeout(() => scrollToBottomHard(true), 250);
-  setTimeout(() => scrollToBottomHard(true), 600);
-}}
+
+  // NEW: take control of focus so the browser doesn't auto-scroll the list
+  onTouchStart={(e) => {
+    // iOS/Android treat this as a user gesture, so keyboard still opens
+    e.preventDefault(); 
+    focusWithoutScroll();
+  }}
+  onMouseDown={(e) => {
+    // for desktop testing
+    e.preventDefault(); 
+    focusWithoutScroll();
+  }}
+
+  onFocus={() => {
+    // after keyboard animation starts, force a true bottom snap
+    setTimeout(() => scrollToBottomHard(true), 50);
+    setTimeout(() => scrollToBottomHard(true), 300);
+  }}
 
   onChange={(e) => {
     setInput(e.target.value);
@@ -526,6 +575,7 @@ onFocus={() => {
   }}
   onBlur={() => updateTypingStatus(false)}
 />
+
 
           <button
             onClick={sendMessage}
