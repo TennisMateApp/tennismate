@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import debounce from "lodash.debounce";
 import { ArrowLeft } from "lucide-react";
-import withAuth from "@/components/withAuth";
 
 import { db, auth } from "@/lib/firebaseConfig";
 import {
@@ -46,6 +45,20 @@ function ChatPage() {
       bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     }
   };
+
+  const scrollToBottomHard = (smooth = false) => {
+  const el = listRef.current;
+  if (!el) return;
+  const behavior: ScrollBehavior = smooth ? "smooth" : "auto";
+
+  // Bring the sentinel into view…
+  bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+
+  // …then force the container all the way down after layout settles
+  requestAnimationFrame(() => {
+    el.scrollTop = el.scrollHeight;
+  });
+};
 
   const [lastReadAt, setLastReadAt] = useState<number | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -197,18 +210,21 @@ useEffect(() => {
         await batch.commit();
       };
 
-      markAsRead();
+markAsRead();
 
-      if (!didInitialAutoscroll.current) {
-        // First render of this thread: force jump to bottom
-        requestAnimationFrame(() => {
-          bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-          didInitialAutoscroll.current = true;
-        });
-      } else {
-        // Subsequent updates: only pin if user is near bottom
-        keepBottomPinned();
-      }
+if (!didInitialAutoscroll.current) {
+  // First render of this thread: go to the absolute bottom
+  requestAnimationFrame(() => {
+    scrollToBottomHard(false);
+    // one more pass for tall last bubbles / late layout
+    requestAnimationFrame(() => scrollToBottomHard(false));
+    didInitialAutoscroll.current = true;
+  });
+} else {
+  // Subsequent updates: only pin if user is near bottom
+  keepBottomPinned();
+}
+
 
     });
 
@@ -238,9 +254,8 @@ useEffect(() => {
       [`typing.${user.uid}`]: false,
       latestMessage: newMessage,
     });
+    scrollToBottomHard(true);
   };
-
-  keepBottomPinned();
 
   const updateTypingStatus = debounce(async (isTyping: boolean) => {
     if (!user) return;
@@ -347,8 +362,8 @@ useEffect(() => {
   }}
   className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
 style={{
-  // leave room for input + keyboard so last bubble is tappable/visible
-  scrollPaddingBottom: `${120 + vvBottomInset}px`,
+  // leave room for input + keyboard so last bubble is fully visible
+  scrollPaddingBottom: `${136 + vvBottomInset}px`, // +16px extra
   overflowAnchor: "none",
 }}
 
@@ -441,12 +456,11 @@ style={{
   className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
   placeholder="Type a message…"
   value={input}
-  onFocus={() => {
-    // allow keyboard animation to start then pin bottom
-    setTimeout(() => {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }, 50);
-  }}
+onFocus={() => {
+  // let keyboard animate then force to absolute bottom
+  setTimeout(() => scrollToBottomHard(true), 50);
+}}
+
   onChange={(e) => {
     setInput(e.target.value);
     updateTypingStatus(true);
