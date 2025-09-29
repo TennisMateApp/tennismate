@@ -49,6 +49,7 @@ function ChatPage() {
 
   const [lastReadAt, setLastReadAt] = useState<number | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [vvBottomInset, setVvBottomInset] = useState(0);
 
   // helpers
   const ts = (m: any) => (m?.timestamp?.toDate ? m.timestamp.toDate().getTime() : 0);
@@ -151,23 +152,29 @@ function ChatPage() {
     };
   }, [conversationID]);
 
-        // When the mobile keyboard changes the visual viewport, keep the bottom in view
-  useEffect(() => {
-    const vv = (window as any).visualViewport;
-    if (!vv) return;
+// When the mobile keyboard changes the visual viewport, lift the input and keep bottom visible
+useEffect(() => {
+  const vv = (window as any).visualViewport;
+  if (!vv) return;
 
-    const onVVChange = () => {
-      // delay slightly so layout settles
-      setTimeout(() => keepBottomPinned(), 50);
-    };
+  const computeInset = () => {
+    // How much of the window bottom is covered by the keyboard overlay
+    const bottomInset = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+    setVvBottomInset(bottomInset);
 
-    vv.addEventListener("resize", onVVChange);
-    vv.addEventListener("scroll", onVVChange); // some browsers fire scroll while keyboard animates
-    return () => {
-      vv.removeEventListener("resize", onVVChange);
-      vv.removeEventListener("scroll", onVVChange);
-    };
-  }, []);
+    // after layout shifts, keep near-bottom pinned
+    setTimeout(() => keepBottomPinned(), 50);
+  };
+
+  computeInset(); // run once
+  vv.addEventListener("resize", computeInset);
+  vv.addEventListener("scroll", computeInset);
+  return () => {
+    vv.removeEventListener("resize", computeInset);
+    vv.removeEventListener("scroll", computeInset);
+  };
+}, []);
+
 
   useEffect(() => {
     if (!conversationID) return;
@@ -303,7 +310,7 @@ function ChatPage() {
   }, [messages, lastReadAt, user?.uid]);
 
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div className="flex flex-col min-h-[100dvh] bg-white">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b shadow-sm px-4 py-2">
         <div className="flex items-center gap-3">
@@ -339,11 +346,12 @@ function ChatPage() {
     setShowScrollDown(!nearBottom);
   }}
   className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
-  style={{
-    // ensure there's breathing room so the last message isn't hidden by the input
-    scrollPaddingBottom: "120px",
-    overflowAnchor: "none",
-  }}
+style={{
+  // leave room for input + keyboard so last bubble is tappable/visible
+  scrollPaddingBottom: `${120 + vvBottomInset}px`,
+  overflowAnchor: "none",
+}}
+
 >
 
         {rows.map((row) => {
@@ -420,7 +428,11 @@ function ChatPage() {
       {/* Input */}
       <div
         className="sticky bottom-0 z-10 border-t bg-white px-3 py-2"
-        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }}
+          style={{
+    // safe area + small gap + dynamic keyboard inset
+    paddingBottom: `calc(env(safe-area-inset-bottom) + ${8 + vvBottomInset}px)`,
+  }}
+
       >
         <div className="flex items-end gap-2">
 <textarea
