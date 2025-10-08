@@ -23,113 +23,53 @@ import {
 function ChatPage() {
   const { conversationID } = useParams();
   const router = useRouter();
+
+  // ===== STATE (keep all useState together) =====
   const [user, setUser] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
-  const [otherUserName, setOtherUserName] = useState<string | null>(null);
-  const [otherUserAvatar, setOtherUserAvatar] = useState<string | null>(null);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
-  const [otherUserTyping, setOtherUserTyping] = useState(false);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  const didInitialAutoscroll = useRef(false);
-
-    const keepBottomPinned = () => {
-    const el = listRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 250;
-    if (nearBottom) {
-      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    }
-  };
-
-  // Focus the textarea but stop the browser from auto-scrolling the list
-const focusWithoutScroll = () => {
-  const el = inputRef.current;
-  if (!el) return;
-  try {
-    // supported on modern mobile browsers
-    el.focus({ preventScroll: true });
-  } catch {
-    // fallback – still fine on older browsers
-    el.focus();
-  }
-};
-
-// Ensure the very bottom clears the fixed input bar (esp. on Android/iOS)
-const ensureBottomClear = () => {
-  const listEl = listRef.current;
-  const sentinel = bottomRef.current;
-  const barEl = inputBarRef.current;
-  if (!listEl || !sentinel) return;
-
-  const sRect = sentinel.getBoundingClientRect();
-  const barH = barEl?.getBoundingClientRect().height ?? inputBarH;
-  const clearance = 8;
-
-  // Use visualViewport so we account for the keyboard-reduced viewport
-  const vv = (window as any).visualViewport;
-  const viewportBottom = (vv ? vv.height + vv.offsetTop : window.innerHeight);
-  const visibleBottom = viewportBottom - barH - clearance;
-
-  const overlap = sRect.bottom - visibleBottom;
-  if (overlap > 0) {
-    listEl.scrollBy({ top: overlap, behavior: "auto" });
-  }
-};
-
-
-const scrollToBottomHard = (smooth = false) => {
-  const el = listRef.current;
-  if (!el) return;
-
-  // 1) Snap the sentinel into the scrollport
-  bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-
-  // 2) Force absolute bottom, then verify clearance vs the input bar
-  const behavior: ScrollBehavior = smooth ? "smooth" : "auto";
-  requestAnimationFrame(() => {
-    el.scrollTo({ top: el.scrollHeight, behavior });
-    requestAnimationFrame(() => ensureBottomClear());
-  });
-};
-
-
+  const [participants, setParticipants] = useState<string[]>([]);
+  const [profiles, setProfiles] = useState<Record<string, { name?: string; photoURL?: string }>>({});
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [isEventChat, setIsEventChat] = useState(false);
+  const [eventTitle, setEventTitle] = useState<string | null>(null);
 
   const [lastReadAt, setLastReadAt] = useState<number | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [vvBottomInset, setVvBottomInset] = useState(0);
+  const [inputBarH, setInputBarH] = useState(56); // measured later
 
-  // REFS
-const inputBarRef = useRef<HTMLDivElement>(null);
+  // ===== REFS =====
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputBarRef = useRef<HTMLDivElement>(null);
 
-// STATE
-const [inputBarH, setInputBarH] = useState(56); // default guess; we measure it below
+  // ===== HELPERS =====
 
-  // helpers
+  const focusWithoutScroll = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    try { el.focus({ preventScroll: true }); } catch { el.focus(); }
+  };
+
+
   const ts = (m: any) => (m?.timestamp?.toDate ? m.timestamp.toDate().getTime() : 0);
-
   const isSameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   const dayLabel = (d: Date) => {
     const today = new Date();
-    const yest = new Date();
-    yest.setDate(today.getDate() - 1);
+    const yest = new Date(); yest.setDate(today.getDate() - 1);
     if (isSameDay(d, today)) return "Today";
     if (isSameDay(d, yest)) return "Yesterday";
     return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   };
-
   const timeLabel = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+  // ===== AUTH / CONVO SNAPSHOT =====
   useEffect(() => {
-      didInitialAutoscroll.current = false;
     let unsubscribeTyping: () => void = () => {};
     let currentUserId: string | null = null;
 
@@ -138,20 +78,21 @@ const [inputBarH, setInputBarH] = useState(56); // default guess; we measure it 
       setUser(u);
       currentUserId = u.uid;
 
-      // Set activeConversationId
       try {
         await updateDoc(doc(db, "users", u.uid), { activeConversationId: conversationID });
       } catch (err) {
         console.error("Failed to set activeConversationId:", err);
       }
 
-      const convoRef = doc(db, "conversations", conversationID as string);
+      const convoRef = doc(db, "conversations", String(conversationID));
       let convoSnap = await getDoc(convoRef);
 
-      const allIds = (conversationID as string).split("_");
-      const otherUserId = allIds.find((id) => id !== u.uid);
+      // Only auto-create 1:1 conversations (IDs that look like "<uid>_<uid>")
+      const parts = String(conversationID || "").split("_");
+      const looksLikeOneToOne = parts.length === 2 && parts.every(Boolean);
+      const otherUserId = looksLikeOneToOne ? parts.find((id) => id !== u.uid) : null;
 
-      if (!convoSnap.exists() && otherUserId) {
+      if (!convoSnap.exists() && looksLikeOneToOne && otherUserId) {
         await setDoc(convoRef, {
           participants: [u.uid, otherUserId],
           createdAt: serverTimestamp(),
@@ -159,37 +100,36 @@ const [inputBarH, setInputBarH] = useState(56); // default guess; we measure it 
           typing: {},
           lastRead: { [u.uid]: serverTimestamp() },
         });
-      } else {
+      } else if (convoSnap.exists()) {
         await updateDoc(convoRef, { [`lastRead.${u.uid}`]: serverTimestamp() });
       }
 
+      // refresh after potential creation/update
       convoSnap = await getDoc(convoRef);
 
-      if (otherUserId) {
-        try {
-          const otherUserRef = doc(db, "players", otherUserId);
-          const otherSnap = await getDoc(otherUserRef);
-          if (otherSnap.exists()) {
-            const otherData = otherSnap.data();
-            setOtherUserName(otherData.name || "TennisMate");
-            setOtherUserAvatar(otherData.photoURL || null);
-          }
-        } catch (err) {
-          console.error("Error loading other user profile:", err);
-        }
-      }
-
+      // load my avatar
       const meRef = doc(db, "players", u.uid);
       const meSnap = await getDoc(meRef);
       if (meSnap.exists()) setUserAvatar(meSnap.data().photoURL || null);
 
+      // conversation snapshot (context/participants/typing/lastRead)
       unsubscribeTyping = onSnapshot(convoRef, (snap) => {
         const data = snap.data() || {};
-        const typingData = data.typing || {};
-        const otherTypingId = data.participants?.find((id: string) => id !== u.uid);
-        setOtherUserTyping(typingData[otherTypingId] === true);
 
-        const lr = data.lastRead?.[u.uid];
+        const ctx = data.context || {};
+        const isEvent = ctx.type === "event";
+        setIsEventChat(!!isEvent);
+        setEventTitle(isEvent ? (ctx.title || "Event Chat") : null);
+
+        const ps: string[] = Array.isArray(data.participants) ? data.participants : [];
+        setParticipants(ps);
+
+        const typingMap = data.typing || {};
+        const me = auth.currentUser?.uid;
+        const othersTyping = ps.filter((id: string) => id !== me && typingMap[id] === true);
+        setTypingUsers(othersTyping);
+
+        const lr = data.lastRead?.[me || ""];
         setLastReadAt(lr?.toMillis ? lr.toMillis() : null);
       });
     });
@@ -198,170 +138,171 @@ const [inputBarH, setInputBarH] = useState(56); // default guess; we measure it 
       unsubscribeAuth();
       unsubscribeTyping();
       if (currentUserId) {
-        const clearActive = async () => {
+        (async () => {
           try {
             await updateDoc(doc(db, "users", currentUserId!), { activeConversationId: null });
           } catch (err) {
             console.error("Failed to clear activeConversationId:", err);
           }
-        };
-        clearActive();
+        })();
       }
     };
   }, [conversationID]);
 
+  // ===== INPUT BAR MEASUREMENT =====
+  
   useEffect(() => {
-  const el = inputBarRef.current;
-  if (!el) return;
+    const el = inputBarRef.current;
+    if (!el) return;
 
-  const setH = () => setInputBarH(el.clientHeight || 56);
-  setH();
+    const setH = () => setInputBarH(el.clientHeight || 56);
+    setH();
 
-  let ro: ResizeObserver | null = null;
-  if ("ResizeObserver" in window) {
-    ro = new ResizeObserver(setH);
-    ro.observe(el);
-  }
-  window.addEventListener("resize", setH);
-  return () => {
-    ro?.disconnect();
-    window.removeEventListener("resize", setH);
-  };
-}, []);
+    let ro: ResizeObserver | null = null;
+    if ("ResizeObserver" in window) {
+      ro = new ResizeObserver(setH);
+      ro.observe(el);
+    }
+    window.addEventListener("resize", setH);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", setH);
+    };
+  }, []);
 
+  // ===== VISUAL VIEWPORT (mobile keyboards) =====
+  useEffect(() => {
+    const vv = (window as any).visualViewport;
+    if (!vv) return;
 
-// When the mobile keyboard changes the visual viewport, lift the input and keep bottom visible
-useEffect(() => {
-  const vv = (window as any).visualViewport;
-  if (!vv) return;
+    const computeInset = () => {
+      const bottomInset = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+      setVvBottomInset(bottomInset);
+    };
 
-  const computeInset = () => {
-    // How much of the window bottom is covered by the keyboard overlay
-    const bottomInset = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
-    setVvBottomInset(bottomInset);
+    computeInset();
+    vv.addEventListener("resize", computeInset);
+    vv.addEventListener("scroll", computeInset);
+    return () => {
+      vv.removeEventListener("resize", computeInset);
+      vv.removeEventListener("scroll", computeInset);
+    };
+  }, []);
 
-// after layout shifts, force to absolute bottom (prevents partial clipping)
-setTimeout(() => { scrollToBottomHard(false); ensureBottomClear(); }, 250);
-setTimeout(() => { scrollToBottomHard(false); ensureBottomClear(); }, 600);
+  // ===== LOAD PARTICIPANT PROFILES (TOP-LEVEL EFFECT) =====
+  useEffect(() => {
+    if (!participants.length) return;
 
-  };
+    let cancelled = false;
+    (async () => {
+      const out: Record<string, { name?: string; photoURL?: string }> = {};
+      for (const uid of participants) {
+        try {
+          const pSnap = await getDoc(doc(db, "players", uid));
+          if (pSnap.exists()) {
+            const d = pSnap.data() as any;
+            out[uid] = { name: d.name, photoURL: d.photoURL };
+          } else {
+            out[uid] = {};
+          }
+        } catch {
+          out[uid] = {};
+        }
+      }
+      if (!cancelled) setProfiles(out);
+    })();
 
-  computeInset(); // run once
-  vv.addEventListener("resize", computeInset);
-  vv.addEventListener("scroll", computeInset);
-  return () => {
-    vv.removeEventListener("resize", computeInset);
-    vv.removeEventListener("scroll", computeInset);
-  };
-}, []);
+    return () => { cancelled = true; };
+  }, [participants]);
 
-
-
-// Fallback: if we somehow didn’t autoscroll after first paint and we have messages, force it
-useEffect(() => {
-  if (!didInitialAutoscroll.current && messages.length > 0) {
-    setTimeout(() => scrollToBottomHard(false), 0);
-  }
-}, [messages.length]);
-
-
-
+  // ===== MESSAGES SUBSCRIPTION =====
   useEffect(() => {
     if (!conversationID) return;
-    const msgRef = collection(db, "conversations", conversationID as string, "messages");
+    const msgRef = collection(db, "conversations", String(conversationID), "messages");
     const q = query(msgRef, orderBy("timestamp"));
 
-    const unsub = onSnapshot(q, (snap) => {
+    const unsub = onSnapshot(q, async (snap) => {
       const msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setMessages(msgs);
 
-      // mark unread incoming as read
-      const markAsRead = async () => {
+      if (!user) return;
+
+      // Per-message read flags for 1:1 only
+      if (!isEventChat) {
         const batch = writeBatch(db);
+        let needsCommit = false;
         snap.docs.forEach((d) => {
           const msg = d.data();
-          if (msg.recipientId === user?.uid && msg.read === false) {
+          if (msg.recipientId === user.uid && msg.read === false) {
             batch.update(d.ref, { read: true });
+            needsCommit = true;
           }
         });
-        await batch.commit();
-      };
+        if (needsCommit) await batch.commit();
+      }
 
-markAsRead();
-
-if (!didInitialAutoscroll.current && msgs.length > 0) {
-  // First render with real messages: go to the absolute bottom
-  requestAnimationFrame(() => {
-    scrollToBottomHard(false);
-    // one more pass for tall last bubbles / late layout
-    requestAnimationFrame(() => scrollToBottomHard(false));
-    didInitialAutoscroll.current = true;
-  });
-} else {
-  // Subsequent updates: only pin if user is near bottom
-  keepBottomPinned();
-}
-
-
+      // Always bump my lastRead
+      await updateDoc(doc(db, "conversations", String(conversationID)), {
+        [`lastRead.${user.uid}`]: serverTimestamp(),
+      });
     });
 
     return () => unsub();
-  }, [conversationID, user?.uid]);
+  }, [conversationID, user?.uid, isEventChat]);
 
+  // ===== SEND =====
   const sendMessage = async () => {
     if (!input.trim() || !user) return;
 
-    const allIds = (conversationID as string).split("_");
-    const recipientId = allIds.find((id) => id !== user.uid);
-    if (!recipientId) return;
+    let recipientId: string | null = null;
+    if (!isEventChat) {
+      const allIds = String(conversationID || "").split("_");
+      recipientId = allIds.find((id) => id !== user.uid) ?? null;
+      if (!recipientId) return; // ensure valid 1:1
+    }
 
-    const newMessage = {
+    const newMessage: any = {
       senderId: user.uid,
-      recipientId,
+      recipientId, // null for event chats
       text: input,
       timestamp: serverTimestamp(),
-      read: false,
     };
+    if (!isEventChat) newMessage.read = false;
 
-    await addDoc(collection(db, "conversations", conversationID as string, "messages"), newMessage);
+    await addDoc(collection(db, "conversations", String(conversationID), "messages"), newMessage);
     setInput("");
 
-    await updateDoc(doc(db, "conversations", conversationID as string), {
+    await updateDoc(doc(db, "conversations", String(conversationID)), {
       [`lastRead.${user.uid}`]: serverTimestamp(),
       [`typing.${user.uid}`]: false,
-      latestMessage: newMessage,
+      latestMessage: { text: newMessage.text, senderId: user.uid, timestamp: serverTimestamp() },
+      updatedAt: serverTimestamp(),
     });
-    scrollToBottomHard(true);
+
   };
 
+  // ===== TYPING =====
   const updateTypingStatus = debounce(async (isTyping: boolean) => {
     if (!user) return;
-    await updateDoc(doc(db, "conversations", conversationID as string), {
+    await updateDoc(doc(db, "conversations", String(conversationID)), {
       [`typing.${user.uid}`]: isTyping,
     });
   }, 300);
 
-  // auto-grow textarea
   useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
+  return () => updateTypingStatus.cancel();
+}, [updateTypingStatus]);
 
-    // Auto-grow now
-    el.style.height = "0px";
-    el.style.height = Math.min(el.scrollHeight, 160) + "px";
-    keepBottomPinned();
-
-    // Also react to future growth (e.g., long messages/paste)
-    let ro: ResizeObserver | null = null;
-    if ("ResizeObserver" in window) {
-      ro = new ResizeObserver(() => keepBottomPinned());
-      ro.observe(el);
-    }
-    return () => ro?.disconnect();
-  }, [input]);
+  // ===== TEXTAREA AUTOGROW =====
+useEffect(() => {
+  const el = inputRef.current;
+  if (!el) return;
+  el.style.height = "0px";
+  el.style.height = Math.min(el.scrollHeight, 160) + "px";
+}, [input]);
 
 
-  // rows for day/unread dividers + cluster tails
+  // ===== ROWS =====
   const rows = useMemo(() => {
     const out: Array<
       | { type: "day"; key: string; label: string }
@@ -401,6 +342,7 @@ if (!didInitialAutoscroll.current && msgs.length > 0) {
     return out;
   }, [messages, lastReadAt, user?.uid]);
 
+  // ===== RENDER =====
   return (
     <div className="flex flex-col min-h-[100dvh] bg-white">
       {/* Header */}
@@ -410,43 +352,60 @@ if (!didInitialAutoscroll.current && msgs.length > 0) {
             <ArrowLeft className="w-5 h-5 text-gray-700" />
           </button>
 
-          {otherUserAvatar ? (
-            <img
-              src={otherUserAvatar}
-              alt="avatar"
-              className="w-8 h-8 rounded-full object-cover opacity-0 transition-opacity duration-300"
-              onLoad={(e) => e.currentTarget.classList.add("opacity-100")}
-            />
+          {/* Avatar: calendar badge for event chats; otherwise first "other" participant */}
+          {isEventChat ? (
+            <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-semibold">📅</div>
           ) : (
-            <div className="w-8 h-8 rounded-full bg-gray-200" />
+            (() => {
+              const others = participants.filter(p => p !== user?.uid);
+              const first = others[0];
+              const photo = first ? profiles[first]?.photoURL : null;
+              return photo
+                ? <img src={photo} alt="avatar" className="w-8 h-8 rounded-full object-cover" />
+                : <div className="w-8 h-8 rounded-full bg-gray-200" />;
+            })()
           )}
 
           <div className="flex-1 min-w-0">
-            <div className="truncate font-medium text-sm text-gray-900">{otherUserName || "Chat"}</div>
-            {otherUserTyping && <div className="text-[11px] text-gray-500">typing…</div>}
+            <div className="truncate font-medium text-sm text-gray-900">
+              {isEventChat
+                ? (eventTitle || "Event Chat")
+                : (() => {
+                    const names = participants
+                      .filter(p => p !== user?.uid)
+                      .map(uid => profiles[uid]?.name || "Player");
+                    return names.length <= 1 ? (names[0] || "Chat") : `${names[0]} + ${names.length - 1}`;
+                  })()
+              }
+            </div>
+
+            {/* Typing indicator (multi-user) */}
+            {typingUsers.length > 0 && (
+              <div className="text-[11px] text-gray-500">
+                {typingUsers.length === 1
+                  ? `${profiles[typingUsers[0]]?.name || "Someone"} is typing…`
+                  : `${profiles[typingUsers[0]]?.name || "Someone"} and ${typingUsers.length - 1} other${typingUsers.length > 2 ? "s" : ""} are typing…`}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Messages */}
-<div
-  ref={listRef}
-  onScroll={() => {
-    const el = listRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 350;
-    setShowScrollDown(!nearBottom);
-  }}
-  className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
-style={{
-  // leave room for the actual input bar height + keyboard inset (+16px extra breathing room)
-scrollPaddingBottom: `${inputBarH + vvBottomInset + 24}px`,
-paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
-  overflowAnchor: "none",
-}}
-
->
-
+      <div
+        ref={listRef}
+        onScroll={() => {
+          const el = listRef.current;
+          if (!el) return;
+          const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 350;
+          setShowScrollDown(!nearBottom);
+        }}
+        className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
+        style={{
+          scrollPaddingBottom: `${inputBarH + vvBottomInset + 24}px`,
+          paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
+        }}
+      >
         {rows.map((row) => {
           if (row.type === "day") {
             return (
@@ -468,15 +427,16 @@ paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
             );
           }
 
-          const { msg, isOther, isTail } = row;
-          const avatarURL = isOther ? otherUserAvatar : userAvatar;
+          const { msg, isOther, isTail } = row as any;
+          const senderProfile = profiles[msg.senderId] || {};
+          const avatarURL = isOther ? (senderProfile.photoURL || "/default-avatar.png") : (userAvatar || "/default-avatar.png");
           const d = msg.timestamp?.toDate ? msg.timestamp.toDate() : new Date();
 
           return (
             <div key={row.key} className={`mb-1.5 flex ${isOther ? "justify-start" : "justify-end"}`}>
               {/* Avatar only on cluster tail */}
               {isOther && isTail ? (
-                <img src={avatarURL || "/default-avatar.png"} alt="avatar" className="mr-2 h-6 w-6 rounded-full object-cover" />
+                <img src={avatarURL} alt="avatar" className="mr-2 h-6 w-6 rounded-full object-cover" />
               ) : isOther ? (
                 <div className="mr-8" />
               ) : null}
@@ -492,12 +452,17 @@ paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
                 </div>
 
                 {isTail && (
-                  <div className={`mt-1 text-[11px] text-gray-400 ${isOther ? "text-left" : "text-right"}`}>{timeLabel(d)}</div>
+                  <>
+                    <div className={`mt-1 text-[11px] text-gray-400 ${isOther ? "text-left" : "text-right"}`}>{timeLabel(d)}</div>
+                    {isOther && isEventChat && (
+                      <div className="mt-0.5 text-[11px] text-gray-500">{senderProfile.name || "Player"}</div>
+                    )}
+                  </>
                 )}
               </div>
 
               {!isOther && isTail ? (
-                <img src={avatarURL || "/default-avatar.png"} alt="me" className="ml-2 h-6 w-6 rounded-full object-cover" />
+                <img src={avatarURL} alt="me" className="ml-2 h-6 w-6 rounded-full object-cover" />
               ) : !isOther ? (
                 <div className="ml-8" />
               ) : null}
@@ -506,14 +471,12 @@ paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
         })}
 
         <div
-  ref={bottomRef}
-  style={{
-    height: 1,
-    // make scrollIntoView align so the last bubble clears the fixed input bar + keyboard inset
-    scrollMarginBottom: inputBarH + vvBottomInset + 24,
-  }}
-/>
-
+          ref={bottomRef}
+          style={{
+            height: 1,
+            scrollMarginBottom: inputBarH + vvBottomInset + 24,
+          }}
+        />
       </div>
 
       {/* Scroll-to-bottom FAB */}
@@ -527,55 +490,38 @@ paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
       )}
 
       {/* Input */}
-<div
-  ref={inputBarRef}
-  className="fixed left-0 right-0 z-10 border-t bg-white px-3 py-2"
-  style={{
-    // lift the bar by the keyboard height; keep a small safe-area padding
-    bottom: vvBottomInset,
-    paddingBottom: `calc(env(safe-area-inset-bottom) + 8px)`,
-  }}
->
-
+      <div
+        ref={inputBarRef}
+        className="fixed left-0 right-0 z-10 border-t bg-white px-3 py-2"
+        style={{
+          bottom: vvBottomInset,
+          paddingBottom: `calc(env(safe-area-inset-bottom) + 8px)`,
+        }}
+      >
         <div className="flex items-end gap-2">
-<textarea
-  ref={inputRef}
-  rows={1}
-  className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
-  placeholder="Type a message…"
-  value={input}
-
-  // NEW: take control of focus so the browser doesn't auto-scroll the list
-  onTouchStart={(e) => {
-    // iOS/Android treat this as a user gesture, so keyboard still opens
-    e.preventDefault(); 
-    focusWithoutScroll();
-  }}
-  onMouseDown={(e) => {
-    // for desktop testing
-    e.preventDefault(); 
-    focusWithoutScroll();
-  }}
-
-  onFocus={() => {
-    // after keyboard animation starts, force a true bottom snap
-    setTimeout(() => scrollToBottomHard(true), 50);
-    setTimeout(() => scrollToBottomHard(true), 300);
-  }}
-
-  onChange={(e) => {
-    setInput(e.target.value);
-    updateTypingStatus(true);
-  }}
-  onKeyDown={(e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  }}
-  onBlur={() => updateTypingStatus(false)}
-/>
-
+          <textarea
+            ref={inputRef}
+            rows={1}
+            className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
+            placeholder="Type a message…"
+            value={input}
+            onTouchStart={(e) => { e.preventDefault(); focusWithoutScroll(); }}
+            onMouseDown={(e) => { e.preventDefault(); focusWithoutScroll(); }}
+          
+              
+           
+            onChange={(e) => {
+              setInput(e.target.value);
+              updateTypingStatus(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            onBlur={() => updateTypingStatus(false)}
+          />
 
           <button
             onClick={sendMessage}
