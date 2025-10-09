@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  User, MessageCircle, Bell, Search, Settings
+  User, MessageCircle, Bell, Search, Settings, Home, CalendarDays, UsersRound
 } from "lucide-react";
-import { GiTennisCourt, GiTennisBall } from "react-icons/gi";
+import { GiTennisCourt, GiTennisBall, GiTennisRacket } from "react-icons/gi";
 import {
-  collection, query, where, onSnapshot, getDoc, doc, updateDoc, writeBatch
+  collection, query, where, onSnapshot, getDoc, doc, updateDoc, writeBatch, serverTimestamp
 } from "firebase/firestore";
 // ✅ Import the function instead
 import { auth, db } from "@/lib/firebaseConfig";
@@ -16,6 +16,13 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import InstallPwaAndroidPrompt from "@/components/InstallPwaAndroidPrompt";
 import InstallPwaIosPrompt from "@/components/InstallPwaIosPrompt";
 import dynamic from "next/dynamic";
+const OnboardingTour = dynamic(
+  () => import("@/components/OnboardingTour").then((m) => m.default),
+  { ssr: false }
+);
+import { ONBOARDING_VERSION } from "@/app/constants/onboarding";
+console.log("OnboardingTour:", OnboardingTour);
+
 
 const PushClientOnly = dynamic(() => import("./PushClientOnly"), { ssr: false });
 
@@ -68,6 +75,9 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const [showVerify, setShowVerify] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const [userOnboardingSeen, setUserOnboardingSeen] = useState<number | null>(null);
+const [showTour, setShowTour] = useState(false);
+
 
 useEffect(() => {
   function onKey(e: KeyboardEvent) {
@@ -84,8 +94,27 @@ useEffect(() => {
 
 const router = useRouter();
 const pathname = usePathname() || "";
+const isActive = (href: string) =>
+pathname === href || pathname.startsWith(href + "/");  
 const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
 const [gateReady, setGateReady] = useState(false);
+
+// Show "Matches" instead of "Events" when the user is in the match flow
+const inMatchFlow =
+  pathname.startsWith("/match") ||
+  pathname.startsWith("/matches") ||
+  pathname.startsWith("/messages");
+
+  const inEventsFlow =
+  pathname.startsWith("/events") ||
+  pathname.startsWith("/calendar");
+
+const footerTabs = inEventsFlow
+  ? ["home", "calendar", "events"]
+  : inMatchFlow
+  ? ["home", "match", "matches"]
+  : ["home", "match", "events"];
+
 
 // Existing hides
 const hideNavMessages = pathname.startsWith("/messages/");
@@ -131,64 +160,70 @@ useEffect(() => {
     let unsubNotifications = () => {};
     let unsubPlayer = () => {};
 
-    unsubAuth = onAuthStateChanged(auth, async (u) => {
-      if (u) {
-        await u.reload();
-        setUser(auth.currentUser);
+   unsubAuth = onAuthStateChanged(auth, async (u) => {
+  if (u) {
+    await u.reload();
+    setUser(auth.currentUser);
 
-          const userDocSnap = await getDoc(doc(db, "users", u.uid));
+    const userDocSnap = await getDoc(doc(db, "users", u.uid));
     const requireVerification =
       userDocSnap.exists() && userDocSnap.data()?.requireVerification === true;
     setShowVerify(requireVerification && !u.emailVerified);
 
-        const playerRef = doc(db, "players", u.uid);
-        unsubPlayer = onSnapshot(playerRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            setPhotoURL(data.photoURL || null);
-          }
-        });
+    // ✅ Onboarding tour logic (now correctly scoped)
+    const seen = userDocSnap.exists()
+      ? userDocSnap.data()?.onboardingVersionSeen ?? 0
+      : 0;
+    setUserOnboardingSeen(seen);
+    setShowTour((seen ?? 0) < ONBOARDING_VERSION);
 
-        // ...rest of your useEffect code
-
-        unsubInbox = onSnapshot(
-          query(collection(db, "match_requests"), where("toUserId", "==", u.uid), where("status", "==", "unread")),
-          (snap) => setUnreadMatchRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })))
-        );
-
-        unsubMessages = onSnapshot(
-          query(collection(db, "conversations"), where("participants", "array-contains", u.uid)),
-          async (snap) => {
-            const unreadList: any[] = [];
-            for (const docSnap of snap.docs) {
-              const data = docSnap.data();
-              const lastSeen = data.lastRead?.[u.uid];
-              const latest = data.latestMessage?.timestamp;
-
-              if (latest?.toMillis && (!lastSeen || latest.toMillis() > lastSeen.toMillis())) {
-                const otherUserId = data.participants.find((id: string) => id !== u.uid);
-                const userDoc = await getDoc(doc(db, "users", otherUserId));
-                unreadList.push({
-                  id: docSnap.id,
-                  name: userDoc.exists() ? userDoc.data().name : "Unknown",
-                  text: data.latestMessage?.text || ""
-                });
-              }
-            }
-            setUnreadMessages(unreadList);
-          }
-        );
-
-        unsubNotifications = onSnapshot(
-          query(collection(db, "notifications"), where("recipientId", "==", u.uid), where("read", "==", false)),
-          (snap) => setNotifications(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
-        );
-
-      } else {
-        setUser(null);
-        setPhotoURL(null);
+    // ...rest of your snapshot wiring
+    const playerRef = doc(db, "players", u.uid);
+    unsubPlayer = onSnapshot(playerRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setPhotoURL(data.photoURL || null);
       }
     });
+
+    unsubInbox = onSnapshot(
+      query(collection(db, "match_requests"), where("toUserId", "==", u.uid), where("status", "==", "unread")),
+      (snap) => setUnreadMatchRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
+    unsubMessages = onSnapshot(
+      query(collection(db, "conversations"), where("participants", "array-contains", u.uid)),
+      async (snap) => {
+        const unreadList: any[] = [];
+        for (const docSnap of snap.docs) {
+          const data = docSnap.data();
+          const lastSeen = data.lastRead?.[u.uid];
+          const latest = data.latestMessage?.timestamp;
+          if (latest?.toMillis && (!lastSeen || latest.toMillis() > lastSeen.toMillis())) {
+            const otherUserId = data.participants.find((id: string) => id !== u.uid);
+            const userDoc = await getDoc(doc(db, "users", otherUserId));
+            unreadList.push({
+              id: docSnap.id,
+              name: userDoc.exists() ? userDoc.data().name : "Unknown",
+              text: data.latestMessage?.text || ""
+            });
+          }
+        }
+        setUnreadMessages(unreadList);
+      }
+    );
+
+    unsubNotifications = onSnapshot(
+      query(collection(db, "notifications"), where("recipientId", "==", u.uid), where("read", "==", false)),
+      (snap) => setNotifications(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
+    );
+  } else {
+    setUser(null);
+    setPhotoURL(null);
+    setShowTour(false); // ✅ hide tour on sign-out
+  }
+});
+
 
     return () => {
       unsubAuth();
@@ -245,6 +280,8 @@ useEffect(() => {
     if (!cancelled) setGateReady(true);
   })();
 
+
+
   return () => {
     cancelled = true;
   };
@@ -257,7 +294,25 @@ useEffect(() => {
     router.push("/login");
   };
 
-  const totalNotifications = unreadMessages.length + unreadMatchRequests.length + notifications.length;
+ const totalNotifications = unreadMatchRequests.length + notifications.length; // ❌ exclude messages
+const totalMessages = unreadMessages.length; // ✅ separate count for messages
+
+
+   async function completeOnboardingTour() {
+  try {
+    const u = auth.currentUser;
+    if (!u) {
+      setShowTour(false);
+      return;
+    }
+    await updateDoc(doc(db, "users", u.uid), {
+      onboardingVersionSeen: ONBOARDING_VERSION,
+      onboardingLastShownAt: serverTimestamp(),
+    });
+  } catch {}
+  setShowTour(false);
+  setUserOnboardingSeen(ONBOARDING_VERSION);
+}
 
     // Floating feedback button component
   function FloatingFeedbackButton() {
@@ -301,9 +356,21 @@ useEffect(() => {
                   <Link href="/directory" title="Directory">
                     <Search className="w-6 h-6 text-green-600 hover:text-blue-800" />
                   </Link>
-                  <Link href="/messages" title="Messages">
-                    <MessageCircle className="w-6 h-6 text-green-600 hover:text-blue-800" />
-                  </Link>
+                  {/* Calendar */}
+<Link href="/calendar" title="Calendar">
+  <CalendarDays
+    className={`w-6 h-6 ${isActive("/calendar") ? "text-blue-700" : "text-green-600 hover:text-blue-800"}`}
+  />
+</Link>
+                  <Link href="/messages" title="Messages" className="relative">
+  <MessageCircle className="w-6 h-6 text-green-600 hover:text-blue-800" />
+  {totalMessages > 0 && (
+    <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+      {totalMessages > 9 ? "9+" : totalMessages}
+    </span>
+  )}
+</Link>
+
                   <div className="relative" ref={dropdownRef}>
                     <button onClick={() => setDropdownOpen(!dropdownOpen)} className="relative focus:outline-none">
                       <Bell className="w-6 h-6 text-green-600" />
@@ -340,18 +407,33 @@ useEffect(() => {
                                   </button>
                                 </li>
                                 {notifications.map((notif) => (
-                                  <li
-                                    key={notif.id}
-                                    className="p-3 hover:bg-gray-100 cursor-pointer"
-                                    onClick={async () => {
-                                      setDropdownOpen(false);
-                                      await updateDoc(doc(db, "notifications", notif.id), { read: true });
-                                      router.push("/matches");
-                                    }}
-                                  >
-                                    {notif.message}
-                                  </li>
-                                ))}
+  <li
+    key={notif.id}
+    className="p-3 hover:bg-gray-100 cursor-pointer"
+    onClick={async () => {
+      setDropdownOpen(false);
+      await updateDoc(doc(db, "notifications", notif.id), { read: true });
+
+      // Deep-link rules:
+      if (notif.eventId) {
+        router.push(`/events/${notif.eventId}`);
+        return;
+      }
+      if (notif.conversationId) {
+        router.push(`/messages/${notif.conversationId}`);
+        return;
+      }
+      // Fallback
+      router.push("/matches");
+    }}
+  >
+    <div className="text-sm">
+      <p className="font-medium">{notif.type === "event_join_request" ? "Join Request" : "Notification"}</p>
+      <p className="text-gray-600">{notif.message}</p>
+    </div>
+  </li>
+))}
+
                               </>
                             )}
 
@@ -405,6 +487,16 @@ useEffect(() => {
                         >
                           Support
                         </Link>
+                            <button
+      onClick={() => {
+        setShowSettings(false);
+        setShowTour(true); // 👈 Reopen onboarding tour
+      }}
+      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+    >
+      What’s New
+    </button>
+
                         <button
                           onClick={handleLogout}
                           className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
@@ -426,26 +518,98 @@ useEffect(() => {
 <main className={`max-w-5xl mx-auto px-4 ${hideAllNav ? "pb-0" : "pb-20"}`}>
   {children}
 </main>
-      {user && !hideAllNav && (
-        <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
-          <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm">
-            <Link href="/match" className="flex flex-col items-center text-green-600 hover:text-green-800">
-              <GiTennisCourt className="w-6 h-6 mb-1" />
-              <span>Match Me</span>
-            </Link>
-            <Link href="/matches" className="flex flex-col items-center text-green-600 hover:text-green-800 relative">
-              <GiTennisBall className="w-6 h-6 mb-1" />
-              <span>Matches</span>
-              {unreadMatchRequests.length > 0 && (
-                <span className="absolute top-0 right-1 -mt-1 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none animate-pulse">
-                  {unreadMatchRequests.length > 9 ? "9+" : unreadMatchRequests.length}
-                </span>
-              )}
-            </Link>
-          </div>
-        </footer>
+{user && !hideAllNav && (
+  <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
+    <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm">
+
+      {/* 🏠 Home */}
+      {footerTabs.includes("home") && (
+        <Link
+          href="/home"
+          aria-label="Home"
+          className={`flex flex-col items-center ${
+            isActive("/home") ? "text-blue-700" : "text-green-600 hover:text-green-800"
+          }`}
+        >
+          <Home className="w-6 h-6 mb-1" />
+          <span>Home</span>
+        </Link>
       )}
+
+      {/* 🎯 Match Me */}
+      {footerTabs.includes("match") && (
+        <Link
+          href="/match"
+          aria-label="Match Me"
+          className={`flex flex-col items-center ${
+            isActive("/match") ? "text-blue-700" : "text-green-600 hover:text-green-800"
+          }`}
+        >
+          <GiTennisCourt className="w-6 h-6 mb-1" />
+          <span>Match Me</span>
+        </Link>
+      )}
+
+      {/* 👥 Events (shown when NOT in match flow) */}
+      {footerTabs.includes("events") && (
+        <Link
+          href="/events"
+          aria-label="Events"
+          className={`flex flex-col items-center ${
+            isActive("/events") ? "text-blue-700" : "text-green-600 hover:text-green-800"
+          }`}
+        >
+          <UsersRound className="w-6 h-6 mb-1" />
+          <span>Events</span>
+        </Link>
+      )}
+
+      {/* 🎾 Matches (shown IN match flow) */}
+      {footerTabs.includes("matches") && (
+        <Link
+          href="/matches"
+          aria-label="Matches"
+          className={`relative flex flex-col items-center ${
+            isActive("/matches") ? "text-blue-700" : "text-green-600 hover:text-green-800"
+          }`}
+        >
+          <GiTennisBall className="w-6 h-6 mb-1" />
+          <span>Matches</span>
+          {unreadMatchRequests.length > 0 && (
+            <span className="absolute top-0 right-1 -mt-1 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">
+              {unreadMatchRequests.length > 9 ? "9+" : unreadMatchRequests.length}
+            </span>
+          )}
+        </Link>
+      )}
+      {/* 📅 Calendar (shown in Events flow) */}
+{footerTabs.includes("calendar") && (
+  <Link
+    href="/calendar"
+    aria-label="Calendar"
+    className={`flex flex-col items-center ${
+      isActive("/calendar") ? "text-blue-700" : "text-green-600 hover:text-green-800"
+    }`}
+  >
+    <CalendarDays className="w-6 h-6 mb-1" />
+    <span>Calendar</span>
+  </Link>
+)}
+
+
+    </div>
+  </footer>
+)}
+
+
+
      {user && !hideAllNav && !hideFeedback && <FloatingFeedbackButton />}
+     <OnboardingTour
+  open={!!user && showTour}
+  onClose={completeOnboardingTour}  // close + persist as seen
+  onComplete={completeOnboardingTour}
+/>
+
     </div>
   );
 }
