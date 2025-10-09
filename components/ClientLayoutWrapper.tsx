@@ -78,6 +78,11 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const [userOnboardingSeen, setUserOnboardingSeen] = useState<number | null>(null);
 const [showTour, setShowTour] = useState(false);
 
+// NEW:
+const [needsTour, setNeedsTour] = useState(false);
+const tourShownThisSession = useRef(false);
+
+
 
 useEffect(() => {
   function onKey(e: KeyboardEvent) {
@@ -171,11 +176,13 @@ useEffect(() => {
     setShowVerify(requireVerification && !u.emailVerified);
 
     // ✅ Onboarding tour logic (now correctly scoped)
-    const seen = userDocSnap.exists()
-      ? userDocSnap.data()?.onboardingVersionSeen ?? 0
-      : 0;
-    setUserOnboardingSeen(seen);
-    setShowTour((seen ?? 0) < ONBOARDING_VERSION);
+    // ✅ Onboarding tour decision (defer opening until app is ready)
+const seen = userDocSnap.exists()
+  ? userDocSnap.data()?.onboardingVersionSeen ?? 0
+  : 0;
+setUserOnboardingSeen(seen);
+setNeedsTour((seen ?? 0) < ONBOARDING_VERSION);
+
 
     // ...rest of your snapshot wiring
     const playerRef = doc(db, "players", u.uid);
@@ -224,7 +231,6 @@ useEffect(() => {
   }
 });
 
-
     return () => {
       unsubAuth();
       unsubInbox();
@@ -233,6 +239,19 @@ useEffect(() => {
       unsubPlayer();
     };
   }, []);
+
+  useEffect(() => {
+  // Only show when:
+  if (!gateReady) return;
+  if (!user) return;
+  if (PUBLIC_ROUTES.has(pathname || "")) return;
+  if (!needsTour) return;
+  if (tourShownThisSession.current) return;
+  if (hideAllNav) return;
+
+  tourShownThisSession.current = true;
+  setShowTour(true);
+}, [gateReady, user, pathname, needsTour, hideAllNav]);
 
  useEffect(() => {
   let cancelled = false;
@@ -604,11 +623,18 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
 
 
      {user && !hideAllNav && !hideFeedback && <FloatingFeedbackButton />}
-     <OnboardingTour
-  open={!!user && showTour}
-  onClose={completeOnboardingTour}  // close + persist as seen
+<OnboardingTour
+  open={
+    !!user &&
+    showTour &&
+    gateReady &&
+    !PUBLIC_ROUTES.has(pathname || "") &&
+    !hideAllNav
+  }
+  onClose={completeOnboardingTour}
   onComplete={completeOnboardingTour}
 />
+
 
     </div>
   );
