@@ -301,6 +301,13 @@ useEffect(() => {
   el.style.height = Math.min(el.scrollHeight, 160) + "px";
 }, [input]);
 
+useEffect(() => {
+  // Focus once when the page loads (or when conversation changes),
+  // without hijacking subsequent taps/clicks.
+  focusWithoutScroll();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [conversationID]);
+
 
   // ===== ROWS =====
   const rows = useMemo(() => {
@@ -500,28 +507,23 @@ useEffect(() => {
       >
         <div className="flex items-end gap-2">
           <textarea
-            ref={inputRef}
-            rows={1}
-            className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
-            placeholder="Type a message…"
-            value={input}
-            onTouchStart={(e) => { e.preventDefault(); focusWithoutScroll(); }}
-            onMouseDown={(e) => { e.preventDefault(); focusWithoutScroll(); }}
-          
-              
-           
-            onChange={(e) => {
-              setInput(e.target.value);
-              updateTypingStatus(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            onBlur={() => updateTypingStatus(false)}
-          />
+  ref={inputRef}
+  rows={1}
+  className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
+  placeholder="Type a message…"
+  value={input}
+  onChange={(e) => {
+    setInput(e.target.value);
+    updateTypingStatus(true);
+  }}
+  onKeyDown={(e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }}
+  onBlur={() => updateTypingStatus(false)}
+/>
 
           <button
             onClick={sendMessage}
