@@ -22,6 +22,7 @@ interface Player {
   skillLevel?: string;           // legacy (optional)
   skillBand?: SkillBand | "";    // new
   utr?: number | null;           // new
+  skillRating?: number | null;
   availability: string[];
   bio: string;
   email: string;
@@ -146,8 +147,14 @@ const [lastUpdated, setLastUpdated] = useState<number | null>(null);
     const mySnap = await getDoc(myRef);
     if (!mySnap.exists()) return;
     const myData = mySnap.data() as Player;
-    const myBand = (myData.skillBand || skillFromUTR(myData.utr ?? null) || legacyToBand(myData.skillLevel) || "") as SkillBand | "";
-    setMyProfile({ ...myData, skillBand: myBand });
+   const myBand = (
+  myData.skillBand ||
+  skillFromUTR((myData.skillRating ?? myData.utr) ?? null) ||
+  legacyToBand(myData.skillLevel) ||
+  ""
+) as SkillBand | "";
+setMyProfile({ ...myData, skillBand: myBand });
+
 
     // 2) Postcode coords
     const postcodeSnap = await getDocs(collection(db, "postcodes"));
@@ -166,38 +173,38 @@ const [lastUpdated, setLastUpdated] = useState<number | null>(null);
     const snapshot = await getDocs(collection(db, "players"));
     const allPlayers = snapshot.docs.map((d) => ({ ...(d.data() as Player), id: d.id }));
 
-    const meBand = myBand;
-    const meUtr  = myData.utr ?? null;
+   const meBand   = myBand;
+const meRating = (myData.skillRating ?? myData.utr) ?? null; // ✅ prefer skillRating
+
 
     const scoredPlayers = allPlayers
       .filter((p) => p.id !== auth.currentUser!.uid)
       .map((p) => {
-        const theirBand: SkillBand | "" =
-          p.skillBand || skillFromUTR(p.utr ?? null) || legacyToBand(p.skillLevel) || "";
-
         let score = 0;
         let distance = Infinity;
+        const theirRating = (p.skillRating ?? p.utr) ?? null; // ✅ prefer skillRating
+        const theirBand: SkillBand | "" =
+  p.skillBand || skillFromUTR(theirRating) || legacyToBand(p.skillLevel) || "";
 
-        // Primary matching by mode
-        const bDist = bandDistance(meBand, theirBand);
-        const uGap  = utrDelta(meUtr, p.utr ?? null);
+const bDist = bandDistance(meBand, theirBand);
+const uGap  = utrDelta(meRating, theirRating);
 
-        if (matchMode === "utr" && meUtr != null) {
-          score += utrPoints(uGap);
-          score += bandPoints(bDist) * 0.5; // small secondary influence
-        } else if (matchMode === "skill") {
-          score += bandPoints(bDist);
-          score += utrPoints(uGap) * 0.5;
-        } else {
-          // Auto
-          if (meUtr != null && p.utr != null) {
-            score += utrPoints(uGap);
-            score += bandPoints(bDist) * 0.5;
-          } else {
-            score += bandPoints(bDist);
-            score += utrPoints(uGap) * 0.5;
-          }
-        }
+if (matchMode === "utr" && meRating != null) {
+  score += utrPoints(uGap);
+  score += bandPoints(bDist) * 0.5;
+} else if (matchMode === "skill") {
+  score += bandPoints(bDist);
+  score += utrPoints(uGap) * 0.5;
+} else {
+  if (meRating != null && theirRating != null) {
+    score += utrPoints(uGap);
+    score += bandPoints(bDist) * 0.5;
+  } else {
+    score += bandPoints(bDist);
+    score += utrPoints(uGap) * 0.5;
+  }
+}
+
 
         // Availability (cap 4)
         const shared = A(p.availability).filter((a) =>
@@ -462,11 +469,19 @@ const sortedMatches = useMemo(() => {
     }
 
     if (sortBy === "skill") {
-       const meBand = myProfile.skillBand || skillFromUTR(myProfile.utr ?? null) || legacyToBand(myProfile.skillLevel) || "";
-       const meUtr  = myProfile.utr ?? null;
-       const bandDelta = (p: Player) =>
-        bandDistance(meBand as SkillBand | "" , p.skillBand || skillFromUTR(p.utr ?? null) || legacyToBand(p.skillLevel) || "");
-        const utrGap    = (p: Player) => utrDelta(meUtr, p.utr ?? null);
+       const meBand = myProfile.skillBand ||
+  skillFromUTR((myProfile.skillRating ?? myProfile.utr) ?? null) ||
+  legacyToBand(myProfile.skillLevel) || "";
+const meRating  = (myProfile.skillRating ?? myProfile.utr) ?? null;
+
+const bandDelta = (p: Player) =>
+  bandDistance(
+    meBand as SkillBand | "",
+    p.skillBand || skillFromUTR((p.skillRating ?? p.utr) ?? null) || legacyToBand(p.skillLevel) || ""
+  );
+
+const utrGap = (p: Player) => utrDelta(meRating, (p.skillRating ?? p.utr) ?? null);
+
         // Primary: band distance; Secondary: UTR gap; Tertiary: distance
         const bd = bandDelta(a) - bandDelta(b);
         if (bd !== 0) return bd;
@@ -537,7 +552,7 @@ if (loading) {
       <div className="text-center text-white">
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Find Your Next Match</h1>
         <p className="mt-1 text-sm sm:text-base opacity-90">
-          Smart matching by skill, UTR &amp; availability near {myProfile?.postcode ?? "you"}
+          Smart matching by skill, TMR &amp; availability near {myProfile?.postcode ?? "you"}
         </p>
       </div>
     </div>
@@ -622,7 +637,7 @@ if (loading) {
          >
           <option value="auto">Auto</option>
           <option value="skill">Skill level</option>
-          <option value="utr">UTR</option>
+          <option value="utr">TMR</option>
           </select>
     </div>
 
@@ -745,13 +760,17 @@ if (loading) {
             {/* Mobile (limited) */}
             <div className="mt-1 flex flex-wrap gap-1.5 sm:hidden">
               <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                Skill: {labelForBand(match.skillBand || skillFromUTR(match.utr ?? null) || legacyToBand(match.skillLevel))}
+                Skill: {labelForBand(
+                  match.skillBand ||
+                  skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
+                  legacyToBand(match.skillLevel)
+                  )}
               </span>
-                {typeof match.utr === "number" && (
-    <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-      UTR: {match.utr.toFixed(2)}
-    </span>
-  )}
+           {typeof (match.skillRating ?? match.utr) === "number" && (
+            <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+              TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
+              </span>
+              )}
 
               {visible.map((slot) => {
                 const shared = myProfile
@@ -781,13 +800,17 @@ if (loading) {
             {/* Desktop (full) */}
             <div className="mt-1 hidden sm:flex flex-wrap gap-1.5">
               <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                Skill: {labelForBand(match.skillBand || skillFromUTR(match.utr ?? null) || legacyToBand(match.skillLevel))}
+                Skill: {labelForBand(
+                  match.skillBand ||
+                  skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
+                  legacyToBand(match.skillLevel)
+                  )} 
               </span>
-                {typeof match.utr === "number" && (
-    <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-      UTR: {match.utr.toFixed(2)}
-    </span>
-  )}
+         {typeof (match.skillRating ?? match.utr) === "number" && (
+          <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+          TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
+          </span>
+          )}
 
               {avail.map((slot) => {
                 const shared = myProfile
