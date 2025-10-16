@@ -544,7 +544,9 @@ await setDoc(
     Based on TMR {formData.rating.toFixed(2)}, suggested level is{" "}
     <strong>
       {(Array.isArray(SKILL_OPTIONS) ? SKILL_OPTIONS : [])
-        .find(s => s.value === (skillFromUTR(formData.rating) ?? ""))?.label ?? "—"}
+        .find(s => s.value === (
+          skillFromUTR(typeof formData.rating === "number" ? formData.rating : undefined) ?? ""
+          ))?.label ?? "—"}
     </strong>.
   </p>
 )}
