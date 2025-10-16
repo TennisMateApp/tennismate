@@ -19,8 +19,8 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage
 import Cropper from "react-easy-crop";
 import getCroppedImg from "../utils/cropImage";
 import { Edit2, Trophy, CheckCircle2, CalendarDays } from "lucide-react";
-import type { SkillBand } from "@/lib/skills";
-import { clampUTR, SKILL_OPTIONS, skillFromUTR } from "@/lib/skills";
+import type { SkillBand } from "../../lib/skills";
+import { clampUTR, SKILL_OPTIONS, skillFromUTR } from "../../lib/skills";
 import type { ChangeEvent } from "react";
 import React from "react";
 

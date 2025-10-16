@@ -14,7 +14,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Mail, Lock, User, MapPin, Camera } from "lucide-react";
 
-import { clampUTR, SKILL_OPTIONS, skillFromUTR, type SkillBand } from "@/lib/skills";
+import { clampUTR, SKILL_OPTIONS, skillFromUTR, type SkillBand } from "../../lib/skills";
 
 const DEFAULT_AVATAR = "/images/default-avatar.jpg";
 const RATING_LABEL = "TennisMate Rating (TMR)";
