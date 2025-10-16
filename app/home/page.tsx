@@ -94,7 +94,7 @@ export default function HomeDashboard() {
         title: 'Find Match',
         description: 'Match with players near you and start a chat.',
         icon: null,
-        href: '/matches',
+        href: '/match',
         actionLabel: 'Open',
         status: 'live',
         imageSrc: '/images/findmatchtile.jpg',

@@ -30,7 +30,7 @@ import {
   Clock,
   Loader2, 
 } from "lucide-react";
-import { GiTennisBall } from "react-icons/gi";
+import Image from "next/image";
 import Link from "next/link";
 
 
@@ -817,22 +817,31 @@ const visibleMatches = useMemo(() => {
 return (
   <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 pt-4 sm:pt-6 pb-28 overflow-x-hidden">
     {/* Page title */}
-    <div className="mb-3">
-      {/* icon + title on one row */}
-      <div className="flex items-center gap-3">
-        <GiTennisBall className="h-6 w-6 text-green-600" aria-hidden="true" />
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-          Match Requests
-        </h1>
+{/* Header hero tile */}
+<div className="-mx-4 sm:-mx-6 mb-4">
+  <div className="relative h-40 sm:h-56 md:h-64 overflow-hidden rounded-2xl">
+    <Image
+      src="/images/matches.jpg"
+      alt="Tennis players arranging match requests"
+      fill
+      priority
+      className="object-cover"
+    />
+    <div className="absolute inset-0 bg-black/40" />
+    <div className="absolute inset-0 flex items-center justify-center px-4">
+      <div className="text-center text-white">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Match Requests</h1>
+        <p className="mt-1 text-sm sm:text-base opacity-90">
+          Manage invitations you’ve sent and received — keep the rallies going.
+        </p>
       </div>
-      {/* subtitle on its own row, lined up under the title */}
-      <p className="mt-1 ml-9 text-sm text-gray-600">
-        Manage invitations you’ve sent and received — keep the rallies going.
-      </p>
     </div>
+  </div>
+</div>
+
 
     {/* Sticky toolbar */}
-    <div className="sticky top-16 z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 mb-3 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
+    <div className="sticky top-[56px] z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 mb-3 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
       <div className="flex flex-wrap items-center gap-3">
         {/* Tabs */}
         <div className="inline-flex rounded-lg p-0.5 bg-gray-100">

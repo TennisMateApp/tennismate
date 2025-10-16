@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { db, auth } from "@/lib/firebaseConfig";
+import { type SkillBand, SKILL_OPTIONS, skillFromUTR } from "@/lib/skill";
 import {
   collection, getDocs, doc, getDoc, addDoc,
   serverTimestamp, query, where, updateDoc,
 } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { onAuthStateChanged, applyActionCode } from "firebase/auth";
+import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
-import { GiTennisBall } from "react-icons/gi";
+import Image from "next/image";
 // import { getContinueUrl } from "@/lib/auth/getContinueUrl";
 
 
@@ -18,7 +19,9 @@ interface Player {
   id: string;
   name: string;
   postcode: string;
-  skillLevel: string;
+  skillLevel?: string;           // legacy (optional)
+  skillBand?: SkillBand | "";    // new
+  utr?: number | null;           // new
   availability: string[];
   bio: string;
   email: string;
@@ -28,11 +31,63 @@ interface Player {
   distance?: number;
 }
 
+
 interface PostcodeCoords {
   [postcode: string]: { lat: number; lng: number };
 }
 
 const A = <T,>(x: T[] | undefined | null): T[] => Array.isArray(x) ? x : [];
+
+// ---- Skill band + UTR helpers ----
+
+const BAND_ORDER: SkillBand[] = [
+  "lower_beginner","beginner","upper_beginner",
+  "lower_intermediate","intermediate","upper_intermediate",
+  "lower_advanced","advanced","upper_advanced",
+];
+
+function bandIndex(b?: SkillBand | "" | null) {
+  return b ? BAND_ORDER.indexOf(b as SkillBand) : -1;
+}
+function bandDistance(a?: SkillBand | "" | null, b?: SkillBand | "" | null) {
+  const ia = bandIndex(a);
+  const ib = bandIndex(b);
+  if (ia < 0 || ib < 0) return 99;
+  return Math.abs(ia - ib);
+}
+function utrDelta(a?: number | null, b?: number | null) {
+  if (a == null || b == null) return 99;
+  return Math.abs(a - b);
+}
+// Map legacy "Beginner/Intermediate/Advanced" to a middle band
+function legacyToBand(level?: string): SkillBand | null {
+  if (!level) return null;
+  const norm = level.toLowerCase();
+  if (norm.includes("beginner")) return "beginner";
+  if (norm.includes("intermediate")) return "intermediate";
+  if (norm.includes("advanced") || norm.includes("advance")) return "advanced";
+  return null;
+}
+// Pretty label for chips
+function labelForBand(b?: SkillBand | "" | null) {
+  if (!b) return "Unknown";
+  return SKILL_OPTIONS.find(x => x.value === b)?.label ?? "Unknown";
+}
+// Points tables
+function bandPoints(dist:number){
+  if (dist === 0) return 4;
+  if (dist === 1) return 2;
+  if (dist === 2) return 1;
+  return 0;
+}
+function utrPoints(gap:number){
+  if (gap === 99) return 0;
+  if (gap <= 0.40) return 4;
+  if (gap <= 0.80) return 3;
+  if (gap <= 1.20) return 2;
+  if (gap <= 1.80) return 1;
+  return 0;
+}
 
 
 function getDistanceFromLatLonInKm(
@@ -61,6 +116,7 @@ export default function MatchPage() {
   const [postcodeCoords, setPostcodeCoords] = useState<PostcodeCoords>({});
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<string>("score");
+  const [matchMode, setMatchMode] = useState<"auto"|"skill"|"utr">("auto");
 
 const router = useRouter();
 const params = useSearchParams();
@@ -81,7 +137,7 @@ const [maxKm, setMaxKm] = useState<number>(Infinity);
 const [refreshing, setRefreshing] = useState(false);
 const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
-  const refreshMatches = async () => {
+ const refreshMatches = useCallback(async () => {
   if (!auth.currentUser) return;
   setRefreshing(true);
   try {
@@ -90,7 +146,8 @@ const [lastUpdated, setLastUpdated] = useState<number | null>(null);
     const mySnap = await getDoc(myRef);
     if (!mySnap.exists()) return;
     const myData = mySnap.data() as Player;
-    setMyProfile(myData);
+    const myBand = (myData.skillBand || skillFromUTR(myData.utr ?? null) || legacyToBand(myData.skillLevel) || "") as SkillBand | "";
+    setMyProfile({ ...myData, skillBand: myBand });
 
     // 2) Postcode coords
     const postcodeSnap = await getDocs(collection(db, "postcodes"));
@@ -105,25 +162,50 @@ const [lastUpdated, setLastUpdated] = useState<number | null>(null);
     reqSnap.forEach((d) => { const data = d.data() as any; if (data.toUserId) sentTo.add(data.toUserId); });
     setSentRequests(sentTo);
 
-    // 4) All players + score
+    // 4) All players + score (mode-aware)
     const snapshot = await getDocs(collection(db, "players"));
     const allPlayers = snapshot.docs.map((d) => ({ ...(d.data() as Player), id: d.id }));
+
+    const meBand = myBand;
+    const meUtr  = myData.utr ?? null;
 
     const scoredPlayers = allPlayers
       .filter((p) => p.id !== auth.currentUser!.uid)
       .map((p) => {
+        const theirBand: SkillBand | "" =
+          p.skillBand || skillFromUTR(p.utr ?? null) || legacyToBand(p.skillLevel) || "";
+
         let score = 0;
         let distance = Infinity;
 
-        if (p.skillLevel === myData.skillLevel) score += 2;
-        else if (
-          ["Beginner", "Intermediate"].includes(p.skillLevel) &&
-          ["Beginner", "Intermediate"].includes(myData.skillLevel)
-        ) score += 1;
+        // Primary matching by mode
+        const bDist = bandDistance(meBand, theirBand);
+        const uGap  = utrDelta(meUtr, p.utr ?? null);
 
-        const shared = A(p.availability).filter((a) => A(myData.availability).includes(a)).length;
-        score += shared;
+        if (matchMode === "utr" && meUtr != null) {
+          score += utrPoints(uGap);
+          score += bandPoints(bDist) * 0.5; // small secondary influence
+        } else if (matchMode === "skill") {
+          score += bandPoints(bDist);
+          score += utrPoints(uGap) * 0.5;
+        } else {
+          // Auto
+          if (meUtr != null && p.utr != null) {
+            score += utrPoints(uGap);
+            score += bandPoints(bDist) * 0.5;
+          } else {
+            score += bandPoints(bDist);
+            score += utrPoints(uGap) * 0.5;
+          }
+        }
 
+        // Availability (cap 4)
+        const shared = A(p.availability).filter((a) =>
+          A(myData.availability).includes(a)
+        ).length;
+        score += Math.min(shared, 4);
+
+        // Distance bonus
         const myC = coords[myData.postcode];
         const theirC = coords[p.postcode];
         if (myC && theirC) {
@@ -133,7 +215,7 @@ const [lastUpdated, setLastUpdated] = useState<number | null>(null);
           else if (distance < 20) score += 1;
         }
 
-        return { ...p, score, distance };
+        return { ...p, score, distance, skillBand: theirBand };
       })
       .filter((p) => (p.score ?? 0) > 0);
 
@@ -142,8 +224,7 @@ const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   } finally {
     setRefreshing(false);
   }
-};
-
+}, [matchMode]);
 
   async function finalizeVerification() {
   if (!auth.currentUser) return;
@@ -235,28 +316,22 @@ return () => { document.body.style.overflow = overflow; };
 useEffect(() => {
   const unsub = onAuthStateChanged(auth, async (currentUser) => {
     const isVerifyAction = params.get("mode") === "verifyEmail" && !!params.get("oobCode");
+
     if (!currentUser) {
       router.push("/login");
       return;
     }
     setUser(currentUser);
 
-    await refreshMatches();
-setLoading(false);
-
-
-    // 🚦 NEW: redirect unverified-but-required users
+    // redirect unverified-but-required users (skip if we're consuming a verify action)
     const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-    const requireFlag =
-      userDoc.exists() && (userDoc.data() as any)?.requireVerification === true;
+    const requireFlag = userDoc.exists() && (userDoc.data() as any)?.requireVerification === true;
+    if (requireFlag && !currentUser.emailVerified && !isVerifyAction) {
+      router.replace("/verify-email");
+      return;
+    }
 
-  // Skip redirect if we are currently processing an email verify action on this page
-if (requireFlag && !currentUser.emailVerified && !isVerifyAction) {
-  router.replace("/verify-email");
-  return;
-}
-
-    // Load my profile (only runs if user is allowed to be here)
+    // ensure profile exists
     const myRef = doc(db, "players", currentUser.uid);
     const mySnap = await getDoc(myRef);
     if (!mySnap.exists()) {
@@ -264,86 +339,15 @@ if (requireFlag && !currentUser.emailVerified && !isVerifyAction) {
       router.push("/profile");
       return;
     }
-    const myData = mySnap.data() as Player;
-    setMyProfile(myData);
 
-    // Load postcode coordinates
-    const postcodeSnap = await getDocs(collection(db, "postcodes"));
-    const coords: PostcodeCoords = {};
-    postcodeSnap.forEach((d) => {
-      coords[d.id] = d.data() as { lat: number; lng: number };
-    });
-    setPostcodeCoords(coords);
-
-    // Load sent match requests
-    const reqQuery = query(
-      collection(db, "match_requests"),
-      where("fromUserId", "==", currentUser.uid)
-    );
-    const reqSnap = await getDocs(reqQuery);
-    const sentTo = new Set<string>();
-    reqSnap.forEach((d) => {
-      const data = d.data() as any;
-      if (data.toUserId) sentTo.add(data.toUserId);
-    });
-    setSentRequests(sentTo);
-
-// Load players and compute match scores (safe)
-try {
-  const snapshot = await getDocs(collection(db, "players"));
-  const allPlayers = snapshot.docs.map((d) => {
-    const data = d.data() as Player;
-    return { ...data, id: d.id };
-  });
-
-  const scoredPlayers = allPlayers
-    .filter((p) => p.id !== currentUser.uid)
-    .map((p) => {
-      let score = 0;
-      let distance = Infinity;
-
-      // Skill match
-      if (p.skillLevel === myData.skillLevel) {
-        score += 2;
-      } else if (
-        ["Beginner", "Intermediate"].includes(p.skillLevel) &&
-        ["Beginner", "Intermediate"].includes(myData.skillLevel)
-      ) {
-        score += 1;
-      }
-
-      // Availability match (SAFE)
-      const shared = A(p.availability).filter((a) =>
-        A(myData.availability).includes(a)
-      ).length;
-      score += shared;
-
-      // Distance match
-      const myC = coords[myData.postcode];
-      const theirC = coords[p.postcode];
-      if (myC && theirC) {
-        distance = getDistanceFromLatLonInKm(myC.lat, myC.lng, theirC.lat, theirC.lng);
-        if (distance < 5) score += 3;
-        else if (distance < 10) score += 2;
-        else if (distance < 20) score += 1;
-      }
-
-      return { ...p, score, distance };
-    })
-    .filter((p) => (p.score ?? 0) > 0);
-
-  setRawMatches(scoredPlayers);
-} catch (e) {
-  console.error("Compute matches failed:", e);
-  setRawMatches([]); // fail safe
-} finally {
-  setLoading(false);
-}
-
+    // one single compute path
+    await refreshMatches();
+    setLoading(false);
   });
 
   return () => unsub();
-}, [router, params]);
+}, [router, params, refreshMatches]);
+
 
 useEffect(() => {
   if (!user) return;
@@ -357,7 +361,7 @@ useEffect(() => {
     window.removeEventListener("focus", onFocus);
     document.removeEventListener("visibilitychange", onVis);
   };
-}, [user]); // user must be set
+}, [user, refreshMatches]); // user must be set
 
 
 const [sendingIds, setSendingIds] = useState<Set<string>>(new Set());
@@ -458,14 +462,19 @@ const sortedMatches = useMemo(() => {
     }
 
     if (sortBy === "skill") {
-      const scoreFn = (p: Player) =>
-        p.skillLevel === myProfile.skillLevel
-          ? 2
-          : ["Beginner", "Intermediate"].includes(p.skillLevel) &&
-            ["Beginner", "Intermediate"].includes(myProfile.skillLevel)
-          ? 1
-          : 0;
-      return scoreFn(b) - scoreFn(a);
+       const meBand = myProfile.skillBand || skillFromUTR(myProfile.utr ?? null) || legacyToBand(myProfile.skillLevel) || "";
+       const meUtr  = myProfile.utr ?? null;
+       const bandDelta = (p: Player) =>
+        bandDistance(meBand as SkillBand | "" , p.skillBand || skillFromUTR(p.utr ?? null) || legacyToBand(p.skillLevel) || "");
+        const utrGap    = (p: Player) => utrDelta(meUtr, p.utr ?? null);
+        // Primary: band distance; Secondary: UTR gap; Tertiary: distance
+        const bd = bandDelta(a) - bandDelta(b);
+        if (bd !== 0) return bd;
+        const ud = utrGap(a) - utrGap(b);
+        if (ud !== 0) return ud;
+        const da = typeof a.distance === "number" ? a.distance! : Infinity;
+        const db = typeof b.distance === "number" ? b.distance! : Infinity;
+        return da - db;
     }
 
     // default: best match score, tie-breaker: distance
@@ -482,11 +491,13 @@ useEffect(() => {
   const qHide   = params.get("hide");     // "1" | "0"
   const qShared = params.get("shared");   // "1" | "0"
   const qMax    = params.get("maxKm");    // "any" | number string
+  const qMode   = params.get("mode");     // "auto" | "skill" | "utr"
 
   if (qSort) setSortBy(qSort);
   if (qHide === "0" || qHide === "1") setHideContacted(qHide === "1");
   if (qShared === "0" || qShared === "1") setOnlySharedAvail(qShared === "1");
   if (qMax) setMaxKm(qMax === "any" ? Infinity : Number(qMax));
+  if (qMode === "auto" || qMode === "skill" || qMode === "utr") setMatchMode(qMode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []); // run once on mount
 
@@ -511,15 +522,28 @@ if (loading) {
 }
   return (
     <div className="max-w-2xl mx-auto p-4 pb-28 sm:p-6">
-     <div className="mb-3">
-  <h1 className="text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
-    <GiTennisBall className="h-6 w-6 text-green-600" />
-    Your Top Matches
-  </h1>
-  <p className="text-sm text-gray-600">
-    Players near {myProfile?.postcode ?? "you"} that match your skill & schedule
-  </p>
+     {/* Header hero tile */}
+<div className="-mx-4 sm:-mx-6 mb-4">
+  <div className="relative h-40 sm:h-56 md:h-64 overflow-hidden rounded-2xl">
+    <Image
+      src="/images/match.jpg"
+      alt="Tennis players getting matched for a game"
+      fill
+      priority
+      className="object-cover"
+    />
+    <div className="absolute inset-0 bg-black/40" />
+    <div className="absolute inset-0 flex items-center justify-center px-4">
+      <div className="text-center text-white">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Find Your Next Match</h1>
+        <p className="mt-1 text-sm sm:text-base opacity-90">
+          Smart matching by skill, UTR &amp; availability near {myProfile?.postcode ?? "you"}
+        </p>
+      </div>
+    </div>
+  </div>
 </div>
+
 
 
 {justVerified && (
@@ -584,6 +608,22 @@ if (loading) {
         <option value="availability">Availability</option>
         <option value="skill">Skill fit</option>
       </select>
+      <label className="ml-3 text-sm font-medium">Match by</label>
+      <select
+      value={matchMode}
+      onChange={(e) => {
+        const val = e.target.value as "auto"|"skill"|"utr";
+         setMatchMode(val);
+         setQuery("mode", val);
+         refreshMatches(); // recalc with new mode
+         }}
+         className="text-sm border rounded-lg px-2 py-1 w-full sm:w-auto"
+         title="Primary matching method"
+         >
+          <option value="auto">Auto</option>
+          <option value="skill">Skill level</option>
+          <option value="utr">UTR</option>
+          </select>
     </div>
 
     <div className="flex flex-wrap items-center gap-3">
@@ -678,7 +718,7 @@ if (loading) {
         </h2>
 
         {(() => {
-          const maxScore = 9; // 2 skill + 4 avail + 3 distance
+          const maxScore = 15; // 4 band/4 UTR + 4 avail cap + 3 distance
           const pct = Math.round(((match.score ?? 0) / maxScore) * 100);
           return (
             <span className="text-[10px] sm:text-[11px] px-2 py-[2px] rounded-full bg-green-50 text-green-700 ring-1 ring-green-200">
@@ -705,8 +745,14 @@ if (loading) {
             {/* Mobile (limited) */}
             <div className="mt-1 flex flex-wrap gap-1.5 sm:hidden">
               <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                Skill: {match.skillLevel}
+                Skill: {labelForBand(match.skillBand || skillFromUTR(match.utr ?? null) || legacyToBand(match.skillLevel))}
               </span>
+                {typeof match.utr === "number" && (
+    <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+      UTR: {match.utr.toFixed(2)}
+    </span>
+  )}
+
               {visible.map((slot) => {
                 const shared = myProfile
                   ? A(myProfile.availability).includes(slot)
@@ -735,8 +781,14 @@ if (loading) {
             {/* Desktop (full) */}
             <div className="mt-1 hidden sm:flex flex-wrap gap-1.5">
               <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                Skill: {match.skillLevel}
+                Skill: {labelForBand(match.skillBand || skillFromUTR(match.utr ?? null) || legacyToBand(match.skillLevel))}
               </span>
+                {typeof match.utr === "number" && (
+    <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+      UTR: {match.utr.toFixed(2)}
+    </span>
+  )}
+
               {avail.map((slot) => {
                 const shared = myProfile
                   ? A(myProfile.availability).includes(slot)
