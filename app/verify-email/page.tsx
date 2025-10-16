@@ -17,7 +17,7 @@ export default function VerifyEmailPage() {
   const [sending, setSending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
 
-  const CONTINUE_TO = "/directory";
+  const CONTINUE_TO = "/home";
 
   const buildLoginRedirect = (email?: string) => {
     const params = new URLSearchParams({

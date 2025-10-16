@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { db, auth } from "@/lib/firebaseConfig";
-import { type SkillBand, SKILL_OPTIONS, skillFromUTR } from "@/lib/skill";
+import { type SkillBand, SKILL_OPTIONS, skillFromUTR } from "@/lib/skills";
 import {
   collection, getDocs, doc, getDoc, addDoc,
   serverTimestamp, query, where, updateDoc,
