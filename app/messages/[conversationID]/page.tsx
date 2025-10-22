@@ -47,6 +47,20 @@ function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
 
+  // --- auto-scroll helpers ---
+const firstLoadRef = useRef(true);
+
+const isNearBottom = () => {
+  const el = listRef.current;
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 350;
+};
+
+const scrollToBottom = (smooth = false) => {
+  bottomRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" });
+};
+
+
   // ===== HELPERS =====
 
   const focusWithoutScroll = () => {
@@ -189,6 +203,10 @@ function ChatPage() {
     };
   }, []);
 
+  useEffect(() => {
+  if (isNearBottom()) scrollToBottom(false);
+}, [inputBarH, vvBottomInset]);
+
   // ===== LOAD PARTICIPANT PROFILES (TOP-LEVEL EFFECT) =====
   useEffect(() => {
     if (!participants.length) return;
@@ -221,31 +239,46 @@ function ChatPage() {
     const msgRef = collection(db, "conversations", String(conversationID), "messages");
     const q = query(msgRef, orderBy("timestamp"));
 
-    const unsub = onSnapshot(q, async (snap) => {
-      const msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setMessages(msgs);
+   const unsub = onSnapshot(q, async (snap) => {
+  const msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-      if (!user) return;
+  // decide before React paints whether we should stick to bottom
+  const shouldStick = firstLoadRef.current || isNearBottom();
 
-      // Per-message read flags for 1:1 only
-      if (!isEventChat) {
-        const batch = writeBatch(db);
-        let needsCommit = false;
-        snap.docs.forEach((d) => {
-          const msg = d.data();
-          if (msg.recipientId === user.uid && msg.read === false) {
-            batch.update(d.ref, { read: true });
-            needsCommit = true;
-          }
-        });
-        if (needsCommit) await batch.commit();
+  setMessages(msgs);
+
+  // scroll after DOM updates
+  requestAnimationFrame(() => {
+    if (firstLoadRef.current) {
+      scrollToBottom(false);        // jump on first load
+      firstLoadRef.current = false;
+    } else if (shouldStick) {
+      scrollToBottom(true);         // smooth follow if near bottom
+    }
+  });
+
+  if (!user) return;
+
+  // Per-message read flags for 1:1 only
+  if (!isEventChat) {
+    const batch = writeBatch(db);
+    let needsCommit = false;
+    snap.docs.forEach((d) => {
+      const msg = d.data();
+      if (msg.recipientId === user.uid && msg.read === false) {
+        batch.update(d.ref, { read: true });
+        needsCommit = true;
       }
-
-      // Always bump my lastRead
-      await updateDoc(doc(db, "conversations", String(conversationID)), {
-        [`lastRead.${user.uid}`]: serverTimestamp(),
-      });
     });
+    if (needsCommit) await batch.commit();
+  }
+
+  // Always bump my lastRead
+  await updateDoc(doc(db, "conversations", String(conversationID)), {
+    [`lastRead.${user.uid}`]: serverTimestamp(),
+  });
+});
+
 
     return () => unsub();
   }, [conversationID, user?.uid, isEventChat]);
@@ -487,14 +520,14 @@ useEffect(() => {
       </div>
 
       {/* Scroll-to-bottom FAB */}
-      {showScrollDown && (
-        <button
-          onClick={() => bottomRef.current?.scrollIntoView({ behavior: "smooth" })}
-          className="fixed bottom-24 right-4 rounded-full bg-white border shadow px-3 py-1.5 text-xs text-gray-700"
-        >
-          Jump to latest
-        </button>
-      )}
+     {showScrollDown && (
+  <button
+    onClick={() => scrollToBottom(true)}
+    className="fixed bottom-24 right-4 rounded-full bg-white border shadow px-3 py-1.5 text-xs text-gray-700"
+  >
+    Jump to latest
+  </button>
+)}
 
       {/* Input */}
       <div
