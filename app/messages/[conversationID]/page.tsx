@@ -203,9 +203,16 @@ const scrollToBottom = (smooth = false) => {
     };
   }, []);
 
-  useEffect(() => {
-  if (isNearBottom()) scrollToBottom(false);
-}, [inputBarH, vvBottomInset]);
+ useEffect(() => {
+  // If the textarea is focused (keyboard up), always keep latest visible.
+  // Otherwise, only stick if user was already near bottom.
+  if (document.activeElement === inputRef.current) {
+    scrollToBottom(false);
+  } else if (isNearBottom()) {
+    scrollToBottom(false);
+  }
+}, [vvBottomInset, inputBarH]);
+
 
   // ===== LOAD PARTICIPANT PROFILES (TOP-LEVEL EFFECT) =====
   useEffect(() => {
@@ -442,8 +449,8 @@ useEffect(() => {
         }}
         className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
         style={{
-  scrollPaddingBottom: `${inputBarH + 24}px`,
-  paddingBottom: `${inputBarH + 24}px`,
+  scrollPaddingBottom: `${inputBarH + vvBottomInset + 24}px`,
+  paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
 }}
       >
         {rows.map((row) => {
