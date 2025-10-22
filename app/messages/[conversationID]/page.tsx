@@ -438,93 +438,110 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Messages */}
-      <div
-        ref={listRef}
-        onScroll={() => {
-          const el = listRef.current;
-          if (!el) return;
-          const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 350;
-          setShowScrollDown(!nearBottom);
-        }}
-        className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
-        style={{
-  scrollPaddingBottom: `${inputBarH + vvBottomInset + 24}px`,
-  paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
-}}
-      >
-        {rows.map((row) => {
-          if (row.type === "day") {
-            return (
-              <div key={row.key} className="my-3 text-center">
-                <span className="inline-block rounded-full border bg-white px-3 py-1 text-xs text-gray-600">
-                  {row.label}
-                </span>
-              </div>
-            );
-          }
-
-          if (row.type === "unread") {
-            return (
-              <div key={row.key} className="my-2 flex items-center gap-3">
-                <div className="h-px flex-1 bg-red-200" />
-                <span className="text-[11px] font-medium text-red-600">New</span>
-                <div className="h-px flex-1 bg-red-200" />
-              </div>
-            );
-          }
-
-          const { msg, isOther, isTail } = row as any;
-          const senderProfile = profiles[msg.senderId] || {};
-          const avatarURL = isOther ? (senderProfile.photoURL || "/default-avatar.png") : (userAvatar || "/default-avatar.png");
-          const d = msg.timestamp?.toDate ? msg.timestamp.toDate() : new Date();
-
+{/* Messages */}
+<div
+  ref={listRef}
+  onScroll={() => {
+    const el = listRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 350;
+    setShowScrollDown(!nearBottom);
+  }}
+  className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
+  style={{
+    // Reserve room for input bar + keyboard inset so the last message never hides
+    scrollPaddingBottom: `${inputBarH + vvBottomInset + 24}px`,
+    paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
+  }}
+>
+  {/* ⬇️ Anchor short threads to the bottom */}
+  <div className="min-h-full flex flex-col justify-end">
+    <div>
+      {rows.map((row) => {
+        // ... paste your existing row render EXACTLY as-is ...
+        if (row.type === "day") {
           return (
-            <div key={row.key} className={`mb-1.5 flex ${isOther ? "justify-start" : "justify-end"}`}>
-              {/* Avatar only on cluster tail */}
-              {isOther && isTail ? (
-                <img src={avatarURL} alt="avatar" className="mr-2 h-6 w-6 rounded-full object-cover" />
-              ) : isOther ? (
-                <div className="mr-8" />
-              ) : null}
-
-              <div className="max-w-[75%] sm:max-w-md">
-                <div
-                  className={[
-                    "px-3 py-2 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
-                    isOther ? "bg-gray-100 text-gray-900 rounded-2xl rounded-bl-md" : "bg-green-600 text-white rounded-2xl rounded-br-md",
-                  ].join(" ")}
-                >
-                  {msg.text}
-                </div>
-
-                {isTail && (
-                  <>
-                    <div className={`mt-1 text-[11px] text-gray-400 ${isOther ? "text-left" : "text-right"}`}>{timeLabel(d)}</div>
-                    {isOther && isEventChat && (
-                      <div className="mt-0.5 text-[11px] text-gray-500">{senderProfile.name || "Player"}</div>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {!isOther && isTail ? (
-                <img src={avatarURL} alt="me" className="ml-2 h-6 w-6 rounded-full object-cover" />
-              ) : !isOther ? (
-                <div className="ml-8" />
-              ) : null}
+            <div key={row.key} className="my-3 text-center">
+              <span className="inline-block rounded-full border bg-white px-3 py-1 text-xs text-gray-600">
+                {row.label}
+              </span>
             </div>
           );
-        })}
+        }
 
-        <div
-          ref={bottomRef}
-          style={{
-            height: 1,
-            scrollMarginBottom: inputBarH + vvBottomInset + 24,
-          }}
-        />
-      </div>
+        if (row.type === "unread") {
+          return (
+            <div key={row.key} className="my-2 flex items-center gap-3">
+              <div className="h-px flex-1 bg-red-200" />
+              <span className="text-[11px] font-medium text-red-600">New</span>
+              <div className="h-px flex-1 bg-red-200" />
+            </div>
+          );
+        }
+
+        const { msg, isOther, isTail } = row as any;
+        const senderProfile = profiles[msg.senderId] || {};
+        const avatarURL = isOther
+          ? (senderProfile.photoURL || "/default-avatar.png")
+          : (userAvatar || "/default-avatar.png");
+        const d = msg.timestamp?.toDate ? msg.timestamp.toDate() : new Date();
+
+        return (
+          <div key={row.key} className={`mb-1.5 flex ${isOther ? "justify-start" : "justify-end"}`}>
+            {/* Avatar only on cluster tail */}
+            {isOther && isTail ? (
+              <img src={avatarURL} alt="avatar" className="mr-2 h-6 w-6 rounded-full object-cover" />
+            ) : isOther ? (
+              <div className="mr-8" />
+            ) : null}
+
+            <div className="max-w-[75%] sm:max-w-md">
+              <div
+                className={[
+                  "px-3 py-2 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
+                  isOther
+                    ? "bg-gray-100 text-gray-900 rounded-2xl rounded-bl-md"
+                    : "bg-green-600 text-white rounded-2xl rounded-br-md",
+                ].join(" ")}
+              >
+                {msg.text}
+              </div>
+
+              {isTail && (
+                <>
+                  <div className={`mt-1 text-[11px] text-gray-400 ${isOther ? "text-left" : "text-right"}`}>
+                    {timeLabel(d)}
+                  </div>
+                  {isOther && isEventChat && (
+                    <div className="mt-0.5 text-[11px] text-gray-500">
+                      {senderProfile.name || "Player"}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {!isOther && isTail ? (
+              <img src={avatarURL} alt="me" className="ml-2 h-6 w-6 rounded-full object-cover" />
+            ) : !isOther ? (
+              <div className="ml-8" />
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+
+    {/* Bottom spacer so scrollToBottom() lands correctly */}
+    <div
+      ref={bottomRef}
+      style={{
+        height: 1,
+        scrollMarginBottom: inputBarH + vvBottomInset + 24,
+      }}
+    />
+  </div>
+</div>
+
 
       {/* Scroll-to-bottom FAB */}
      {showScrollDown && (
