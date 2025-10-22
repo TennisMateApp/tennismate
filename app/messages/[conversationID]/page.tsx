@@ -384,7 +384,7 @@ useEffect(() => {
 
   // ===== RENDER =====
   return (
-    <div className="flex flex-col min-h-[100dvh] bg-white">
+    <div className="flex flex-col h-[100svh] bg-white overflow-hidden">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b shadow-sm px-4 py-2">
         <div className="flex items-center gap-3">
@@ -442,9 +442,9 @@ useEffect(() => {
         }}
         className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
         style={{
-          scrollPaddingBottom: `${inputBarH + vvBottomInset + 24}px`,
-          paddingBottom: `${inputBarH + vvBottomInset + 24}px`,
-        }}
+  scrollPaddingBottom: `${inputBarH + 24}px`,
+  paddingBottom: `${inputBarH + 24}px`,
+}}
       >
         {rows.map((row) => {
           if (row.type === "day") {
