@@ -227,7 +227,7 @@ function ActionTile({
   description,
   href,
   icon,
-  actionLabel,
+  actionLabel = "Open",
   status,
   imageSrc, // ← add this
   imagePosition,
@@ -237,7 +237,7 @@ function ActionTile({
   description: string;
   href: string;
   icon: React.ReactNode | null;
-  actionLabel: string;
+  actionLabel?: string;
   status: 'live' | 'soon';
   imageSrc?: string; // ← add this
   imagePosition?: string;
