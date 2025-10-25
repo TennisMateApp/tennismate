@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  User, MessageCircle, Bell, Search, Settings, Home, CalendarDays, UsersRound
+  User, MessageCircle, Search, Settings, Home, CalendarDays, UsersRound
 } from "lucide-react";
 import { GiTennisCourt, GiTennisBall, GiTennisRacket } from "react-icons/gi";
 import {
@@ -21,6 +21,9 @@ const OnboardingTour = dynamic(
   { ssr: false }
 );
 import { ONBOARDING_VERSION } from "@/app/constants/onboarding";
+import NotificationBell from "@/components/notifications/NotificationBell";
+
+
 console.log("OnboardingTour:", OnboardingTour);
 
 
@@ -69,11 +72,8 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const [photoURL, setPhotoURL] = useState<string | null>(null);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
   const [unreadMessages, setUnreadMessages] = useState<any[]>([]);
-  const [notifications, setNotifications] = useState<any[]>([]);
   const [showSettings, setShowSettings] = useState(false);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showVerify, setShowVerify] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
   const [userOnboardingSeen, setUserOnboardingSeen] = useState<number | null>(null);
 const [showTour, setShowTour] = useState(false);
@@ -82,20 +82,6 @@ const [showTour, setShowTour] = useState(false);
 const [needsTour, setNeedsTour] = useState(false);
 const tourShownThisSession = useRef(false);
 
-
-
-useEffect(() => {
-  function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      setDropdownOpen(false);
-      setShowSettings(false);
-    }
-  }
-  if (dropdownOpen || showSettings) {
-    window.addEventListener("keydown", onKey);
-  }
-  return () => window.removeEventListener("keydown", onKey);
-}, [dropdownOpen, showSettings]);
 
 const router = useRouter();
 const pathname = usePathname() || "";
@@ -137,108 +123,97 @@ const hideNavFeedback =
 const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFeedback;
 
 
-useEffect(() => {
-  function handleClickOutside(event: MouseEvent) {
-    const target = event.target as Node;
-
-    if (dropdownRef.current && !dropdownRef.current.contains(target)) {
-      setDropdownOpen(false);
-    }
-    if (settingsRef.current && !settingsRef.current.contains(target)) {
-      setShowSettings(false);
-    }
-  }
-
-  if (dropdownOpen || showSettings) {
-    document.addEventListener("mousedown", handleClickOutside);
-  }
-  return () => {
-    document.removeEventListener("mousedown", handleClickOutside);
-  };
-}, [dropdownOpen, showSettings]);
-
-
   useEffect(() => {
-    let unsubAuth = () => {};
-    let unsubInbox = () => {};
-    let unsubMessages = () => {};
-    let unsubNotifications = () => {};
-    let unsubPlayer = () => {};
+  let unsubAuth: () => void = () => {};
+  let unsubInbox: () => void = () => {};
+  let unsubMessages: () => void = () => {};
+  let unsubPlayer: () => void = () => {};
 
-   unsubAuth = onAuthStateChanged(auth, async (u) => {
-  if (u) {
-    await u.reload();
-    setUser(auth.currentUser);
+  unsubAuth = onAuthStateChanged(auth, async (u) => {
+    // tear down any prior listeners before wiring fresh ones on user switch
+    unsubInbox(); unsubMessages(); unsubPlayer();
 
-    const userDocSnap = await getDoc(doc(db, "users", u.uid));
-    const requireVerification =
-      userDocSnap.exists() && userDocSnap.data()?.requireVerification === true;
-    setShowVerify(requireVerification && !u.emailVerified);
+    if (u) {
+      await u.reload();
+      setUser(auth.currentUser);
 
-    // ✅ Onboarding tour logic (now correctly scoped)
-    // ✅ Onboarding tour decision (defer opening until app is ready)
-const seen = userDocSnap.exists()
-  ? userDocSnap.data()?.onboardingVersionSeen ?? 0
-  : 0;
-setUserOnboardingSeen(seen);
-setNeedsTour((seen ?? 0) < ONBOARDING_VERSION);
+      const userDocSnap = await getDoc(doc(db, "users", u.uid));
+      const requireVerification =
+        userDocSnap.exists() && userDocSnap.data()?.requireVerification === true;
+      setShowVerify(requireVerification && !u.emailVerified);
 
+      const seen = userDocSnap.exists() ? userDocSnap.data()?.onboardingVersionSeen ?? 0 : 0;
+      setUserOnboardingSeen(seen);
+      setNeedsTour((seen ?? 0) < ONBOARDING_VERSION);
 
-    // ...rest of your snapshot wiring
-    const playerRef = doc(db, "players", u.uid);
-    unsubPlayer = onSnapshot(playerRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setPhotoURL(data.photoURL || null);
-      }
-    });
-
-    unsubInbox = onSnapshot(
-      query(collection(db, "match_requests"), where("toUserId", "==", u.uid), where("status", "==", "unread")),
-      (snap) => setUnreadMatchRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })))
-    );
-
-    unsubMessages = onSnapshot(
-      query(collection(db, "conversations"), where("participants", "array-contains", u.uid)),
-      async (snap) => {
-        const unreadList: any[] = [];
-        for (const docSnap of snap.docs) {
+      const playerRef = doc(db, "players", u.uid);
+      unsubPlayer = onSnapshot(playerRef, (docSnap) => {
+        if (docSnap.exists()) {
           const data = docSnap.data();
-          const lastSeen = data.lastRead?.[u.uid];
-          const latest = data.latestMessage?.timestamp;
-          if (latest?.toMillis && (!lastSeen || latest.toMillis() > lastSeen.toMillis())) {
-            const otherUserId = data.participants.find((id: string) => id !== u.uid);
-            const userDoc = await getDoc(doc(db, "users", otherUserId));
-            unreadList.push({
-              id: docSnap.id,
-              name: userDoc.exists() ? userDoc.data().name : "Unknown",
-              text: data.latestMessage?.text || ""
-            });
-          }
+          setPhotoURL((data as any).photoURL || null);
         }
-        setUnreadMessages(unreadList);
-      }
-    );
+      });
 
-    unsubNotifications = onSnapshot(
-      query(collection(db, "notifications"), where("recipientId", "==", u.uid), where("read", "==", false)),
-      (snap) => setNotifications(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
-    );
-  } else {
-    setUser(null);
-    setPhotoURL(null);
-    setShowTour(false); // ✅ hide tour on sign-out
-  }
-});
+      unsubInbox = onSnapshot(
+        query(
+          collection(db, "match_requests"),
+          where("toUserId", "==", u.uid),
+          where("status", "==", "unread")
+        ),
+        (snap) => setUnreadMatchRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      );
 
-    return () => {
-      unsubAuth();
-      unsubInbox();
-      unsubMessages();
-      unsubNotifications();
-      unsubPlayer();
-    };
-  }, []);
+      unsubMessages = onSnapshot(
+        query(collection(db, "conversations"), where("participants", "array-contains", u.uid)),
+        async (snap) => {
+          const unreadList: any[] = [];
+          for (const docSnap of snap.docs) {
+            const data = docSnap.data() as any;
+           const lastSeen = data.lastRead?.[u.uid];
+const latest = data.latestMessage?.timestamp;
+
+// Identify who sent the latest message (be defensive about the field name)
+const latestSender: string | undefined =
+  data.latestMessage?.senderId ??
+  data.latestMessage?.fromUserId ??
+  data.latestMessage?.authorId;
+
+// Only count if:
+// 1) there's a newer message than lastSeen
+// 2) that newer (latest) message was NOT sent by the current user (inbound)
+const hasNewer = latest?.toMillis && (!lastSeen || latest.toMillis() > lastSeen.toMillis());
+const inbound = latestSender && latestSender !== u.uid;
+
+if (hasNewer && inbound) {
+  const otherUserId = data.participants.find((id: string) => id !== u.uid);
+  const userDoc = await getDoc(doc(db, "users", otherUserId));
+  unreadList.push({
+    id: docSnap.id,
+    name: userDoc.exists() ? userDoc.data().name : "Unknown",
+    text: data.latestMessage?.text || ""
+  });
+}
+
+          }
+          setUnreadMessages(unreadList);
+        }
+      );
+    } else {
+      setUser(null);
+      setPhotoURL(null);
+      setShowTour(false);
+    }
+  });
+
+  // ✅ proper cleanup
+  return () => {
+    unsubAuth();
+    unsubInbox();
+    unsubMessages();
+    unsubPlayer();
+  };
+}, []);
+
 
   useEffect(() => {
   // Only show when:
@@ -313,7 +288,6 @@ setNeedsTour((seen ?? 0) < ONBOARDING_VERSION);
     router.push("/login");
   };
 
- const totalNotifications = unreadMatchRequests.length + notifications.length; // ❌ exclude messages
 const totalMessages = unreadMessages.length; // ✅ separate count for messages
 
 
@@ -381,7 +355,7 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
     className={`w-6 h-6 ${isActive("/calendar") ? "text-blue-700" : "text-green-600 hover:text-blue-800"}`}
   />
 </Link>
-                  <Link href="/messages" title="Messages" className="relative">
+        <Link href="/messages" title="Messages" className="relative">
   <MessageCircle className="w-6 h-6 text-green-600 hover:text-blue-800" />
   {totalMessages > 0 && (
     <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
@@ -390,102 +364,8 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
   )}
 </Link>
 
-                  <div className="relative" ref={dropdownRef}>
-                    <button onClick={() => setDropdownOpen(!dropdownOpen)} className="relative focus:outline-none">
-                      <Bell className="w-6 h-6 text-green-600" />
-                      {totalNotifications > 0 && (
-                        <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
-                          {totalNotifications > 9 ? "9+" : totalNotifications}
-                        </span>
-                      )}
-                    </button>
+<NotificationBell />
 
-                    {dropdownOpen && (
-                      <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 shadow-lg rounded-md z-50">
-                        {unreadMatchRequests.length === 0 && unreadMessages.length === 0 && notifications.length === 0 ? (
-                          <div className="p-4 text-sm text-gray-500">No notifications</div>
-                        ) : (
-                          <ul className="divide-y divide-gray-100 max-h-96 overflow-y-auto text-sm">
-                            {notifications.length > 0 && (
-                              <>
-                                <li className="flex justify-between items-center px-3 py-2 text-sm text-gray-700 font-semibold bg-gray-50 border-b border-gray-200">
-                                  <span>Notifications</span>
-                                  <button
-                                    onClick={async () => {
-                                      const batch = writeBatch(db);
-                                      notifications.forEach((notif) => {
-                                        const ref = doc(db, "notifications", notif.id);
-                                        batch.update(ref, { read: true });
-                                      });
-                                      await batch.commit();
-                                      setNotifications([]);
-                                    }}
-                                    className="text-blue-600 hover:underline text-xs"
-                                  >
-                                    Clear All
-                                  </button>
-                                </li>
-                                {notifications.map((notif) => (
-  <li
-    key={notif.id}
-    className="p-3 hover:bg-gray-100 cursor-pointer"
-    onClick={async () => {
-      setDropdownOpen(false);
-      await updateDoc(doc(db, "notifications", notif.id), { read: true });
-
-      // Deep-link rules:
-      if (notif.eventId) {
-        router.push(`/events/${notif.eventId}`);
-        return;
-      }
-      if (notif.conversationId) {
-        router.push(`/messages/${notif.conversationId}`);
-        return;
-      }
-      // Fallback
-      router.push("/matches");
-    }}
-  >
-    <div className="text-sm">
-      <p className="font-medium">{notif.type === "event_join_request" ? "Join Request" : "Notification"}</p>
-      <p className="text-gray-600">{notif.message}</p>
-    </div>
-  </li>
-))}
-
-                              </>
-                            )}
-
-                            {unreadMatchRequests.map((req) => (
-                              <li
-                                key={req.id}
-                                className="p-3 hover:bg-gray-100 cursor-pointer"
-                                onClick={() => {
-                                  setDropdownOpen(false);
-                                  router.push("/matches");
-                                }}
-                              >
-                                Match request from {req.fromName || "a player"}
-                              </li>
-                            ))}
-
-                            {unreadMessages.map((msg) => (
-                              <li
-                                key={msg.id}
-                                className="p-3 hover:bg-gray-100 cursor-pointer"
-                                onClick={() => {
-                                  setDropdownOpen(false);
-                                  router.push("/messages");
-                                }}
-                              >
-                                New message from {msg.name}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    )}
-                  </div>
                   <div className="relative" ref={settingsRef}>
                     <button onClick={() => setShowSettings(!showSettings)} title="Settings">
                       <Settings className="w-6 h-6 text-green-600 hover:text-green-800" />

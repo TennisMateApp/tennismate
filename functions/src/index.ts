@@ -1,9 +1,9 @@
 import { setGlobalOptions } from "firebase-functions/v2";
-import { onDocumentUpdated } from "firebase-functions/v2/firestore";
-import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { sendEventRemindersV2 } from "./eventReminders";
+import { onRequest } from "firebase-functions/v2/https";
+import * as crypto from "crypto";
 
 
 // ✅ Set correct region for Firestore: australia-southeast2
@@ -15,7 +15,7 @@ if (admin.apps.length === 0) {
 const db = admin.firestore();
 
 // ---------- EMAIL HELPERS (Trigger Email extension) ----------
-const MAIL_COLLECTION = "mail"; // change if your extension uses a different collection
+const MAIL_COLLECTION = "mail"; // extension watches this
 
 async function getUserEmail(uid: string): Promise<string | null> {
   // Try Firestore "users" first
@@ -66,7 +66,14 @@ function formatLocal(iso?: string | null): string {
   return isNaN(dt.getTime()) ? "" : dt.toLocaleString();
 }
 
-async function enqueueEmail(to: string, subject: string, html: string, text?: string) {
+
+async function enqueueEmail(
+  to: string,
+  subject: string,
+  html: string,
+  text?: string,
+  meta?: Record<string, any> // allows tagging emails for debugging
+) {
   await db.collection(MAIL_COLLECTION).add({
     to,
     message: {
@@ -74,8 +81,12 @@ async function enqueueEmail(to: string, subject: string, html: string, text?: st
       html,
       text: text ?? html.replace(/<[^>]+>/g, " "),
     },
+    ...meta,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 }
+
+
 
 // Auto-sync calendar when a new event is created
 export const syncCalendarOnEventCreate = onDocumentCreated("events/{eventId}", async (event) => {
@@ -230,6 +241,9 @@ export const emailOnJoinRequestCreated = onDocumentCreated(
         <a href="https://tennismate.vercel.app/events/${eventId}">View event</a>
       </p>
     `;
+
+    console.log(`📧 Emailing host ${hostEmail} about join request for event ${eventId}`);
+
 
     await enqueueEmail(hostEmail, subject, html);
 
@@ -585,18 +599,27 @@ export const processCompletedMatch = onDocumentCreated(
     console.log(`✅ Processed completed match: ${matchId}`);
   }
 );
+
 export const sendPushNotification = onDocumentCreated(
   "notifications/{notifId}",
   async (event) => {
-    const notifData = event.data?.data();
+    const notifId = event.params.notifId;
+    const n = event.data?.data() || {};
+    console.log(`[MR_BELL_CONSUMER] push start`, { notifId, type: n.type, source: n.source, runId: n.runId });
+
+    const notifData = n;
     if (!notifData) {
       console.log("❌ Notification data missing");
       return;
     }
 
-    const recipientId = notifData.recipientId;
-    const tokenDoc = await db.collection("device_tokens").doc(recipientId).get();
+    if (notifData.recipientId && notifData.fromUserId && notifData.recipientId === notifData.fromUserId) {
+      console.log("🛑 Ignoring self-targeted notification doc.");
+      return;
+    }
 
+    const recipientId = notifData.recipientId as string;
+    const tokenDoc = await db.collection("device_tokens").doc(recipientId).get();
     if (!tokenDoc.exists) {
       console.log(`❌ No device token found for user: ${recipientId}`);
       return;
@@ -608,15 +631,15 @@ export const sendPushNotification = onDocumentCreated(
       return;
     }
 
-const payload = {
-  data: {
-    title: notifData.message || "🎾 TennisMate Notification",
-    body: "You have a new notification",
-    type: notifData.type || "general",
-    fromUserId: notifData.fromUserId || "",
-    url: notifData.url || "https://tennis-match.com.au",
-  },
-};
+    const payload = {
+      data: {
+        title: notifData.message || "🎾 TennisMate Notification",
+        body: "You have a new notification",
+        type: notifData.type || "general",
+        fromUserId: notifData.fromUserId || "",
+        url: notifData.url || "https://tennis-match.com.au",
+      },
+    };
 
     try {
       console.log("📲 Sending push to token:", token);
@@ -624,7 +647,6 @@ const payload = {
       console.log(`✅ Notification sent to ${recipientId}`);
     } catch (error: any) {
       console.error("❌ Failed to send push notification:", error);
-
       if (
         error.code === "messaging/invalid-registration-token" ||
         error.code === "messaging/registration-token-not-registered"
@@ -635,144 +657,333 @@ const payload = {
     }
   }
 );
+
+
+export const emailOnNewMessageNotification = onDocumentCreated(
+  "notifications/{notifId}",
+  async (event) => {
+    const notifId = event.params.notifId;
+    const n = event.data?.data() || {};
+    console.log(`[MR_BELL_CONSUMER] email start`, { notifId, type: n.type, source: n.source, runId: n.runId });
+
+    const notif = n;
+    if (!notif) return;
+
+    const recipientId = notif.recipientId as string | undefined;
+    if (!recipientId) return;
+
+    const userSnap = await db.collection("users").doc(recipientId).get();
+    const toEmail = userSnap.exists ? userSnap.get("email") : null;
+    if (!toEmail) {
+      console.log(`❌ No email found for recipient ${recipientId}`);
+      return;
+    }
+
+    const getName = async (uid?: string) => {
+      if (!uid) return "A player";
+      const s = await db.collection("players").doc(uid).get();
+      return s.exists ? (s.get("name") || "A player") : "A player";
+    };
+
+    if (notif.type === "message") {
+      const fromName = await getName(notif.fromUserId);
+      const conversationId = notif.conversationId;
+      const body = (notif.body || notif.message || "").toString();
+      const snippet = body.length > 200 ? body.slice(0, 200) + "…" : body;
+
+      const subject = `New message from ${fromName} 🎾`;
+      const html = `
+        <p>${fromName} sent you a message:</p>
+        <blockquote>${snippet}</blockquote>
+        <p><a href="https://tennismate.vercel.app/messages/${conversationId}">Open your conversation</a></p>
+        <p style="font-size:12px;color:#777">This is an automated TennisMate message alert.</p>
+      `;
+
+      await enqueueEmail(toEmail, subject, html, snippet, {
+        category: "msg_direct_notify",
+        conversationId,
+        fromUserId: notif.fromUserId || "",
+        recipientId,
+      });
+      console.log(`✅ Email sent (message) to ${toEmail}`);
+      return;
+    }
+
+    if (notif.type === "match_request") {
+      const fromName = await getName(notif.fromUserId);
+      const subject = `${fromName} challenged you to a match 🎾`;
+      const html = `
+        <p>${fromName} has challenged you to a match.</p>
+        <p><a href="${notif.url || "https://tennismate.vercel.app/matches"}">Review the match request</a></p>
+        <p style="font-size:12px;color:#777">This is an automated TennisMate alert.</p>
+      `;
+      await enqueueEmail(toEmail, subject, html, undefined, {
+        category: "match_request_notify",
+        matchId: notif.matchId || "",
+        fromUserId: notif.fromUserId || "",
+        recipientId,
+      });
+      console.log(`✅ Email sent (match_request) to ${toEmail}`);
+      return;
+    }
+
+    if (notif.type === "match_accepted") {
+      const subject = `Your match request was accepted 🎉`;
+      const html = `
+        <p>${notif.message || "Your match request was accepted!"}</p>
+        <p><a href="${notif.url || "https://tennismate.vercel.app/matches"}">Open matches</a></p>
+        <p style="font-size:12px;color:#777">This is an automated TennisMate alert.</p>
+      `;
+      await enqueueEmail(toEmail, subject, html, undefined, {
+        category: "match_accepted_notify",
+        matchId: notif.matchId || "",
+        recipientId,
+      });
+      console.log(`✅ Email sent (match_accepted) to ${toEmail}`);
+      return;
+    }
+  }
+);
+
+
 export const notifyOnNewMessage = onDocumentCreated(
   "conversations/{conversationId}/messages/{messageId}",
   async (event) => {
     const message = event.data?.data();
-    const { conversationId } = event.params;
-
+    const { conversationId, messageId } = event.params;
     if (!message) return;
 
     const senderId = message.senderId as string;
-    const recipientId = message.recipientId as string;
-    const text = message.text as string;
-    const read = message.read as boolean;
+    const recipientId = message.recipientId as (string | null);
+    const text = (message.text as string) || "";
+    const read = message.read === true;
 
-    if (!recipientId || !text || read === true) return;
+    // guards
+    if (!recipientId) return;
+    if (recipientId === senderId) return;
+    if (!text || read) return;
 
-    // ✅ Get token from device_tokens
-  const tokenQuery = await db
-  .collection("device_tokens")
-  .where("uid", "==", recipientId)
-  .limit(1)
-  .get();
+    // push
+    try {
+      const tokenQuery = await db
+        .collection("device_tokens")
+        .where("uid", "==", recipientId)
+        .limit(1)
+        .get();
 
-  
+      const fcmToken = tokenQuery.empty ? null : tokenQuery.docs[0].get("token");
+      console.log(`📲 Retrieved token: ${fcmToken}`);
 
-const fcmToken = tokenQuery.empty ? null : tokenQuery.docs[0].get("token");
-console.log(`📲 Retrieved token: ${fcmToken}`);
-    if (!fcmToken) {
-      console.log(`❌ No FCM token found for ${recipientId}`);
-      return;
+      if (fcmToken) {
+        const userSnap = await db.collection("users").doc(recipientId).get();
+        const activeConversationId = userSnap.get("activeConversationId");
+
+        if (activeConversationId !== conversationId) {
+          const senderDoc = await db.collection("players").doc(senderId).get();
+          const senderName = senderDoc.get("name") || "A player";
+
+          await admin.messaging().send({
+            token: fcmToken,
+            data: {
+              title: `New message from ${senderName}`,
+              body: text.length > 60 ? text.slice(0, 60) + "…" : text,
+              url: "https://tennismate.vercel.app/messages",
+              type: "new_message",
+              conversationId,
+              fromUserId: senderId,
+            },
+          });
+          console.log(`✅ Push sent to ${recipientId}`);
+        } else {
+          console.log("👀 User is viewing this conversation. No push sent.");
+        }
+      } else {
+        console.log(`❌ No FCM token found for ${recipientId}`);
+      }
+    } catch (error) {
+      console.error("❌ Failed to send push notification:", error);
     }
 
-    const userSnap = await db.collection("users").doc(recipientId).get();
-    const activeConversationId = userSnap.get("activeConversationId");
 
-    if (activeConversationId === conversationId) {
-      console.log(`👀 User is viewing this conversation. No push sent.`);
-      return;
+
+    // in-app bell (this drives the email function)
+    try {
+      const userSnap = await db.collection("users").doc(recipientId).get();
+      const activeConversationId = userSnap.get("activeConversationId");
+
+      if (activeConversationId === conversationId) {
+        console.log("🔕 Recipient is in-thread — skip bell notification.");
+      } else {
+        const notifId = `msg_${conversationId}_${messageId}_${recipientId}`;
+        await db.collection("notifications").doc(notifId).set({
+          recipientId,
+          type: "message",
+          conversationId,
+          messageId,
+          title: "New message",
+          body: text.length > 100 ? text.slice(0, 100) + "…" : text,
+          url: `https://tennismate.vercel.app/messages/${conversationId}`,
+          fromUserId: senderId,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          read: false,
+        }, { merge: true });
+        console.log(`✅ Bell notification created for ${recipientId}`);
+      }
+    } catch (err) {
+      console.error("❌ Failed to create bell notification:", err);
     }
-
-    const senderDoc = await db.collection("players").doc(senderId).get();
-    const senderName = senderDoc.get("name") || "A player";
-
-try {
-  await admin.messaging().send({
-    token: fcmToken,
-    data: {
-      title: `New message from ${senderName}`,
-      body: text.length > 60 ? text.slice(0, 60) + "…" : text,
-      url: "https://tennismate.vercel.app/messages",
-      type: "new_message",
-      conversationId,
-      fromUserId: senderId,
-    },
-  });
-
-  console.log(`✅ Push sent to ${recipientId}`);
-} catch (error) {
-  console.error("❌ Failed to send push notification:", error);
-}
-
   }
 );
-
 
 export const sendMatchRequestNotification = onDocumentCreated(
   "match_requests/{matchId}",
   async (event) => {
+    const runId = crypto.randomUUID?.() || Math.random().toString(36).slice(2);
     const data = event.data?.data();
-    if (!data) return;
+    const matchId = event.params.matchId as string;
 
-    const { toUserId, fromUserId } = data;
+    console.log(`[MR_BELL][${runId}] trigger start`, {
+      fn: "sendMatchRequestNotification",
+      matchId,
+      region: process.env.GCLOUD_PROJECT ? undefined : "australia-southeast2",
+      eventParams: event.params,
+      hasData: !!data,
+    });
 
-    // Get recipient's FCM token
-    const tokenSnap = await db
-      .collection("device_tokens")
-      .where("uid", "==", toUserId)
-      .limit(1)
-      .get();
-
-    const fcmToken = tokenSnap.empty ? null : tokenSnap.docs[0].get("token");
-
-    if (!fcmToken) {
-      console.log(`❌ No FCM token found for user ${toUserId}`);
+    if (!data) {
+      console.log(`[MR_BELL][${runId}] no data → stop`);
       return;
     }
 
-    // Get sender name
-    const senderDoc = await db.collection("players").doc(fromUserId).get();
-    const senderName = senderDoc.exists ? senderDoc.get("name") : "A player";
-
-    try {
-      // Send push notification
-      await admin.messaging().send({
-        token: fcmToken,
-        data: {
-          title: "New match request!",
-          body: `${senderName} has challenged you to a match.`,
-          url: "https://tennismate.vercel.app/matches",
-          type: "match_request",
-          matchId: event.params.matchId,
-          fromUserId,
-        },
-      });
-
-      console.log(`✅ Match request notification sent to ${toUserId}`);
-    } catch (error) {
-      console.error("❌ Failed to send match request push notification:", error);
+    const { toUserId, fromUserId, bellNotified } = data;
+    if (!toUserId || !fromUserId) {
+      console.log(`[MR_BELL][${runId}] missing to/from → stop`, { toUserId, fromUserId });
+      return;
     }
-  }
-);
-export const notifyMatchAccepted = onDocumentUpdated(
-  "match_requests/{matchId}",
-  async (event) => {
-    const before = event.data?.before?.data();
-    const after = event.data?.after?.data();
 
-    if (!before || !after) return;
-    if (before.status === "accepted" || after.status !== "accepted") return;
+    const notifId = `matchRequest_${matchId}_${toUserId}`;
+    const matchRef = db.collection("match_requests").doc(matchId);
+    const notifRef = db.collection("notifications").doc(notifId);
 
-    const { fromUserId } = after;
-    const matchId = event.params.matchId;
+    // Preflight: list any existing bells for this match/recipient
+    const dupSnap = await db.collection("notifications")
+      .where("type", "==", "match_request")
+      .where("matchId", "==", matchId)
+      .where("recipientId", "==", toUserId)
+      .get();
 
-    // Get recipient name
-    const recipientSnap = await db.collection("players").doc(after.toUserId).get();
-    const recipientName = recipientSnap.exists ? recipientSnap.get("name") : "A player";
-
-    // ✅ Create Firestore notification (let sendPushNotification handle the push)
-    await db.collection("notifications").add({
-      recipientId: fromUserId,
-      matchId,
-      message: `${recipientName} accepted your match request!`,
-      type: "match_accepted",
-      url: "https://tennismate.vercel.app/matches",
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-      read: false,
+    console.log(`[MR_BELL][${runId}] preflight`, {
+      found: dupSnap.size,
+      ids: dupSnap.docs.map(d => d.id),
+      bellNotified,
     });
 
-    console.log(`✅ Match accepted notification created for ${fromUserId}`);
+    // If we already see the canonical doc, just mark and exit
+    if (dupSnap.docs.some(d => d.id === notifId)) {
+      console.log(`[MR_BELL][${runId}] canonical exists → mark source + stop`);
+      await matchRef.set({ bellNotified: true }, { merge: true });
+      return;
+    }
+
+    // If we see non-canonical dupes, log them (don’t delete yet; we want to SEE them first)
+    if (dupSnap.size > 0) {
+      console.log(`[MR_BELL][${runId}] non-canonical duplicates detected`, {
+        nonCanonical: dupSnap.docs.filter(d => d.id !== notifId).map(d => ({
+          id: d.id,
+          fields: d.data(),
+        })),
+      });
+    }
+
+    // Short-circuit on flag
+    if (bellNotified === true) {
+      console.log(`[MR_BELL][${runId}] bellNotified flag true → stop`);
+      return;
+    }
+
+    // Resolve sender name (best effort)
+    let senderName = "A player";
+    try {
+      const s = await db.collection("players").doc(fromUserId).get();
+      senderName = s.exists ? (s.get("name") || "A player") : "A player";
+    } catch (e) {
+      console.log(`[MR_BELL][${runId}] name lookup failed`, { error: String(e) });
+    }
+
+    // Transaction: write canonical + mark source
+    await db.runTransaction(async (tx) => {
+      const [mSnap, nSnap] = await Promise.all([tx.get(matchRef), tx.get(notifRef)]);
+      const alreadyFlagged = mSnap.exists && mSnap.get("bellNotified") === true;
+
+      console.log(`[MR_BELL][${runId}] txn read`, {
+        alreadyFlagged,
+        canonicalExists: nSnap.exists,
+      });
+
+      if (alreadyFlagged && nSnap.exists) {
+        console.log(`[MR_BELL][${runId}] nothing to do → stop`);
+        return;
+      }
+
+      tx.set(notifRef, {
+        recipientId: toUserId,
+        type: "match_request",
+        matchId,
+        fromUserId,
+        title: "New match request",
+        body: `${senderName} has challenged you to a match.`,
+        message: `${senderName} has challenged you to a match.`,
+        url: "https://tennismate.vercel.app/matches",
+        source: "cf:sendMatchRequestNotification",
+        runId, // 👈 for correlation
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        read: false,
+      }, { merge: true });
+
+      tx.set(matchRef, { bellNotified: true }, { merge: true });
+    });
+
+    console.log(`[MR_BELL][${runId}] canonical write complete`, { notifId });
+
+    // --- Post-write hard de-dupe (best-effort sweep) ---
+try {
+  const extras = await db.collection("notifications")
+    .where("type", "==", "match_request")
+    .where("matchId", "==", matchId)
+    .where("recipientId", "==", toUserId)
+    .get();
+
+  if (!extras.empty) {
+    const batch = db.batch();
+    let deleted = 0;
+
+    extras.docs.forEach((d) => {
+      if (d.id !== notifId) {
+        batch.delete(d.ref);
+        deleted++;
+      }
+    });
+
+    if (deleted > 0) {
+      await batch.commit();
+      console.log(`[MR_BELL][${runId}] dedupe deleted ${deleted} extra bell(s)`, { kept: notifId });
+    } else {
+      console.log(`[MR_BELL][${runId}] dedupe found no extras to delete`, { kept: notifId });
+    }
+  } else {
+    console.log(`[MR_BELL][${runId}] dedupe found none`, { kept: notifId });
+  }
+} catch (e) {
+  console.warn(`[MR_BELL][${runId}] dedupe sweep failed`, { error: String(e) });
+}
+// --- end dedupe ---
+
   }
 );
-exports.sendEventRemindersV2 = sendEventRemindersV2;
+
+
+
+
+export { sendEventRemindersV2 };
+
+
