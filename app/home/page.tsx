@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import {
   CalendarPlus,
   UsersRound,
@@ -16,6 +16,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Image from "next/image";
+import { collection, query, where, getCountFromServer } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+
 
 // --- light Card/Button fallbacks (remove if using shadcn/ui components) ---
 function Card({
@@ -74,67 +77,97 @@ type Tile = {
   description: string;
   icon: React.ReactNode | null;
   href: string;
-  actionLabel: string;
+  actionLabel?: string;
   status: 'live' | 'soon';
   imageSrc?: string;
   imagePosition?: string;
+  badge?: React.ReactNode;  
 };
 
 export default function HomeDashboard() {
+
+const [eventsCount, setEventsCount] = useState(0);
+
+useEffect(() => {
+  // Keep the query simple and robust. If you want “future only” add the time filter (see note below).
+  const q = query(
+    collection(db, "events"),
+    where("status", "==", "open")
+  );
+
+  getCountFromServer(q)
+    .then((snap) => setEventsCount(snap.data().count))
+    .catch((err) => {
+      console.error("[Events badge] count error:", err);
+      setEventsCount(0);
+    });
+}, []);
+
+
   const router = useRouter();
 
   // Placeholder counts (wire later)
   const invitesPending = 0;
   const upcomingCount = 0;
 
-  const tiles: Tile[] = useMemo(
-    () => [
-      {
-        key: 'find-match',
-        title: 'Find Match',
-        description: 'Match with players near you and start a chat.',
-        icon: null,
-        href: '/match',
-        actionLabel: 'Open',
-        status: 'live',
-        imageSrc: '/images/findmatchtile.jpg',
-      },
-{
-  key: 'events',
-  title: 'Events',
-  description: 'Browse games & social hits or host your own.',
-  icon: null,
-  href: '/events',
-  actionLabel: 'Browse',
-  status: 'live',
-  imageSrc: '/images/eventtile.jpg',
-  imagePosition: 'center 80%', // show more of the lower area (balls)
-},
+const tiles: Tile[] = useMemo(
+  () => [
+    {
+      key: 'find-match',
+      title: 'Find Match',
+      description: 'Match with players near you and start a chat.',
+      icon: null,
+      href: '/match',
+      status: 'live',
+      imageSrc: '/images/findmatchtile.jpg',
+    },
+    {
+      key: 'events',
+      title: 'Events',
+      description: 'Browse games & social hits or host your own.',
+      icon: null,
+      href: '/events',
+      status: 'live',
+      imageSrc: '/images/eventtile.jpg',
+      imagePosition: 'center 80%',
+badge: (
+  <span className="relative inline-flex items-center gap-2 rounded-full px-3.5 py-1 text-xs font-extrabold
+                    text-white bg-emerald-600 ring-1 ring-white/60
+                    shadow-[0_6px_20px_rgba(16,185,129,.45)]">
+    {/* pulsing dot */}
+    <span className="relative flex h-2.5 w-2.5">
+      <span className="absolute inline-flex h-full w-full rounded-full bg-white/80 opacity-75 animate-ping"></span>
+      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-white"></span>
+    </span>
+    {eventsCount === 1 ? '1 available' : `${eventsCount} available`}
+  </span>
+),
+    },
+    {
+      key: 'competitive',
+      title: 'Competitive',
+      description: 'Compete for ranking (coming soon).',
+      icon: null,
+      href: '#',
+      actionLabel: 'Coming soon',
+      status: 'soon',
+      imageSrc: '/images/competitive.jpg',
+    },
+    {
+      key: 'find-coach',
+      title: 'Find a Coach',
+      description: 'Book 1:1 or group lessons (coming soon).',
+      icon: null,
+      href: '#',
+      actionLabel: 'Coming soon',
+      status: 'soon',
+      imageSrc: '/images/coach.jpg',
+      imagePosition: 'center 20%',
+    },
+  ],
+  [eventsCount]
+);
 
-      {
-        key: 'competitive',
-        title: 'Competitive',
-        description: 'Compete for ranking (coming soon).',
-        icon: null,
-        href: '#',
-        actionLabel: 'Coming soon',
-        status: 'soon',
-        imageSrc: '/images/competitive.jpg',
-      },
-      {
-        key: 'find-coach',
-        title: 'Find a Coach',
-        description: 'Book 1:1 or group lessons (coming soon).',
-        icon: null,
-        href: '#',
-        actionLabel: 'Coming soon',
-        status: 'soon',
-        imageSrc: '/images/coach.jpg',
-        imagePosition: 'center 20%',
-      },
-    ],
-    []
-  );
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:py-8">
@@ -198,6 +231,7 @@ function ActionTile({
   status,
   imageSrc, // ← add this
   imagePosition,
+  badge,  
 }: {
   title: string;
   description: string;
@@ -207,6 +241,7 @@ function ActionTile({
   status: 'live' | 'soon';
   imageSrc?: string; // ← add this
   imagePosition?: string;
+  badge?: React.ReactNode; 
 }) {
 
   const isSoon = status === 'soon';
@@ -232,6 +267,12 @@ const content = (
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
       </>
     )}
+
+       {badge && (
+        <div className="absolute right-3 top-3 z-10">
+          {badge}
+        </div>
+      )}
 
     <div className="relative flex items-start justify-between gap-3">
       <div>
