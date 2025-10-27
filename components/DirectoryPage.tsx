@@ -18,6 +18,7 @@ import { db } from "@/lib/firebaseConfig";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { GiTennisBall } from "react-icons/gi";
+import { skillFromUTR } from "@/lib/skills"; // assumes this returns a label like "Upper Beginner"
 
 interface Player {
   id: string;
@@ -28,10 +29,36 @@ interface Player {
   bio?: string;
   photoURL?: string;
   timestamp?: any;
+  joinedAt?: any;  
   nameLower?: string;
 }
 
 const PAGE_SIZE = 20;
+
+function getSkillLabel(v: DocumentData): string {
+  // common alternate field names
+  const direct =
+    v.skillLevel ||
+    v.skill ||
+    v.skill_label ||
+    v.skillBand ||
+    v.skill_band;
+
+  if (direct && typeof direct === "string") return direct;
+
+  // derive from ratings if present (adjust keys to your schema)
+  const utr = typeof v.utr === "number" ? v.utr : undefined;
+  const trm = typeof v.tmr === "number" ? v.tmr : undefined;
+  const rating = utr ?? trm;
+  if (typeof rating === "number") {
+    try {
+      const label = skillFromUTR(rating); // e.g., "Upper Beginner"
+      if (label) return label;
+    } catch {}
+  }
+
+  return ""; // show "—" in UI when blank
+}
 
 export default function DirectoryPage() {
   // ----- browse mode state (no search) -----
@@ -73,9 +100,10 @@ export default function DirectoryPage() {
             id: d.id,
             name: v.name ?? "",
             postcode: v.postcode ?? "",
-            skillLevel: v.skillLevel ?? "",
+            skillLevel: getSkillLabel(v),  
             photoURL: v.photoURL ?? undefined,
             timestamp: v.timestamp ?? undefined,
+            joinedAt: v.joinedAt ?? undefined, 
             nameLower: v.nameLower ?? undefined,
           } as Player;
         });
@@ -111,9 +139,10 @@ export default function DirectoryPage() {
           id: d.id,
           name: v.name ?? "",
           postcode: v.postcode ?? "",
-          skillLevel: v.skillLevel ?? "",
+          skillLevel: getSkillLabel(v),  
           photoURL: v.photoURL ?? undefined,
           timestamp: v.timestamp ?? undefined,
+          joinedAt: v.joinedAt ?? undefined, 
           nameLower: v.nameLower ?? undefined,
         } as Player;
       });
@@ -159,9 +188,10 @@ export default function DirectoryPage() {
             id: d.id,
             name: v.name ?? "",
             postcode: v.postcode ?? "",
-            skillLevel: v.skillLevel ?? "",
+            skillLevel: getSkillLabel(v),  
             photoURL: v.photoURL ?? undefined,
             timestamp: v.timestamp ?? undefined,
+            joinedAt: v.joinedAt ?? undefined, 
             nameLower: v.nameLower ?? undefined,
           } as Player;
         });
@@ -203,9 +233,10 @@ export default function DirectoryPage() {
           id: d.id,
           name: v.name ?? "",
           postcode: v.postcode ?? "",
-          skillLevel: v.skillLevel ?? "",
+          skillLevel: getSkillLabel(v),  
           photoURL: v.photoURL ?? undefined,
           timestamp: v.timestamp ?? undefined,
+          joinedAt: v.joinedAt ?? undefined, 
           nameLower: v.nameLower ?? undefined,
         } as Player;
       });
@@ -294,13 +325,19 @@ export default function DirectoryPage() {
             {/* Cards grid */}
             <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {visiblePlayers.map((player, index) => {
-                const ts =
-                  typeof player.timestamp?.toDate === "function"
-                    ? player.timestamp.toDate().getTime()
-                    : player.timestamp
-                    ? new Date(player.timestamp).getTime()
-                    : 0;
-                const isNew = ts > 0 && Date.now() - ts < 3 * 24 * 60 * 60 * 1000;
+                 const joinedMs =
+    typeof player.joinedAt?.toDate === "function"
+      ? player.joinedAt.toDate().getTime()
+      : typeof player.timestamp?.toDate === "function"
+      ? player.timestamp.toDate().getTime()
+      : player.joinedAt
+      ? new Date(player.joinedAt).getTime()
+      : player.timestamp
+      ? new Date(player.timestamp).getTime()
+      : 0;
+
+  const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
+  const isNew = joinedMs > 0 && (Date.now() - joinedMs) < ONE_WEEK;
 
                 return (
                   <motion.article
