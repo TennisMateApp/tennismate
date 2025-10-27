@@ -17,6 +17,7 @@ import {
   QuerySnapshot,
   arrayUnion,
   setDoc,
+  limit,              
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -122,6 +123,26 @@ function getDistanceFromLatLonInKm(
   return Math.round(R * c);
 }
 
+// --- URL & court fetch helpers ---
+const normalizeUrl = (u?: string | null): string | undefined => {
+  if (!u) return undefined;
+  const s = String(u).trim();
+  if (!s) return undefined;
+  const href = /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  try { return new URL(href).toString(); } catch { return undefined; }
+};
+
+// Try multiple collections because some courts live in `booking` not `courts`
+async function fetchCourtDocById(dbRef: typeof db, id: string) {
+  const cols = ["courts", "booking"]; // add more if needed later
+  for (const col of cols) {
+    const snap = await getDoc(doc(dbRef, col, id));
+    if (snap.exists()) return snap.data() as any;
+  }
+  return null;
+}
+
+
 const CourtBadge = ({
   name,
   lat,   // keep for distance elsewhere
@@ -141,6 +162,8 @@ const CourtBadge = ({
     : name;
 
   const mapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+  const safeBooking = normalizeUrl(bookingUrl || undefined);
+
 
   return (
     <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 text-blue-800 ring-1 ring-blue-200 px-2.5 py-1 text-xs">
@@ -159,20 +182,21 @@ const CourtBadge = ({
         >
           Map
         </a>
-        {bookingUrl && (
-          <>
-            <span className="h-3 w-px bg-blue-200" aria-hidden />
-            <a
-              href={bookingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline decoration-blue-300 underline-offset-2 hover:decoration-blue-400"
-              title="Open booking page"
-            >
-              Book
-            </a>
-          </>
-        )}
+       {safeBooking && (
+  <>
+    <span className="h-3 w-px bg-blue-200" aria-hidden />
+    <a
+      href={safeBooking}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline decoration-blue-300 underline-offset-2 hover:decoration-blue-400"
+      title="Open booking page"
+    >
+      Book
+    </a>
+  </>
+)}
+
       </span>
     </span>
   );
@@ -254,7 +278,7 @@ const computeSuggestionSilently = useCallback(
         suggestedCourtName: top.name,
         suggestedCourtLat: top.lat,
         suggestedCourtLng: top.lng,
-        suggestedCourtBookingUrl: top.bookingUrl || null,
+        suggestedCourtBookingUrl: normalizeUrl(top.bookingUrl) ?? null,
         suggestedCourtComputedAt: serverTimestamp(),
       });
 
@@ -267,7 +291,7 @@ const computeSuggestionSilently = useCallback(
                 suggestedCourtName: top.name,
                 suggestedCourtLat: top.lat,
                 suggestedCourtLng: top.lng,
-                suggestedCourtBookingUrl: top.bookingUrl || undefined,
+                suggestedCourtBookingUrl: normalizeUrl(top.bookingUrl) ?? undefined,
               }
             : m
         )
@@ -287,55 +311,74 @@ const hydratingRef = useRef<Set<string>>(new Set());
 // ⬇️ ADD THIS EFFECT right after the auto-suggest effect
 useEffect(() => {
   // Find matches that have a court id but are missing exact lat/lng (or booking URL)
- const targets = matches
-  .filter(
-    (m) =>
-      m.suggestedCourtId &&
-      (m.suggestedCourtLat == null ||
-       m.suggestedCourtLng == null ||
-       m.suggestedCourtBookingUrl == null ||
-       m.suggestedCourtAddress == null) // 👈 hydrate when address missing
-  )
+const targets = matches
+  .filter((m) => {
+    const missing = (
+      m.suggestedCourtLat == null ||
+      m.suggestedCourtLng == null ||
+      m.suggestedCourtBookingUrl == null ||
+      m.suggestedCourtAddress == null
+    );
+    // hydrate if: we have an ID OR at least a name — and something is missing
+    return missing && (m.suggestedCourtId || m.suggestedCourtName);
+  })
   .slice(0, 5);
+
 
   targets.forEach(async (m) => {
     if (hydratingRef.current.has(m.id)) return;
     hydratingRef.current.add(m.id);
     try {
-      const courtSnap = await getDoc(doc(db, "courts", m.suggestedCourtId!));
-      if (!courtSnap.exists()) return;
 
-const c = courtSnap.data() as any;
+     // resolve by ID (courts/booking) or by name if no ID
+async function resolveCourtData(id?: string | null, name?: string | null) {
+  if (id) {
+    const byId = await fetchCourtDocById(db, id);
+    if (byId) return { data: byId, resolvedId: id };
+  }
+  if (name) {
+    for (const col of ["courts", "booking"] as const) {
+      const qy = query(collection(db, col), where("name", "==", name), limit(1));
+      const snap = await getDocs(qy);
+      if (!snap.empty) {
+        const docSnap = snap.docs[0];
+        return { data: docSnap.data() as any, resolvedId: docSnap.id };
+      }
+    }
+  }
+  return null;
+}
 
-// 🔽 Extract address from common shapes you might have
-const address =
-  typeof c.address === "string"
-    ? c.address
-    : typeof c.location?.address === "string"
-    ? c.location.address
-    : typeof c.addressLine === "string"
-    ? c.addressLine
-    : null;
+const found = await resolveCourtData(m.suggestedCourtId, m.suggestedCourtName || null);
+if (!found) return;
+const c = found.data as any;
+const resolvedId = found.resolvedId;
 
-// Existing lat/lng extraction (leave as-is if you still want distance calc to work)
-const lat =
-  typeof c.lat === "number"
-    ? c.lat
-    : typeof c.location?.lat === "number"
-    ? c.location.lat
-    : null;
-const lng =
-  typeof c.lng === "number"
-    ? c.lng
-    : typeof c.location?.lng === "number"
-    ? c.location.lng
-    : null;
 
-const bookingUrl = c.bookingUrl ?? null;
-const name = c.name ?? m.suggestedCourtName ?? null;
+      const address =
+        typeof c.address === "string" ? c.address
+        : typeof c.location?.address === "string" ? c.location.address
+        : typeof c.addressLine === "string" ? c.addressLine
+        : null;
 
-// 🔽 Write back to the match doc
-await updateDoc(doc(db, "match_requests", m.id), {
+      const lat =
+        typeof c.lat === "number" ? c.lat
+        : typeof c.location?.lat === "number" ? c.location.lat
+        : null;
+
+      const lng =
+        typeof c.lng === "number" ? c.lng
+        : typeof c.location?.lng === "number" ? c.location.lng
+        : null;
+
+      const rawBooking =
+        c.bookingUrl ?? c.bookingURL ?? c.booking_link ?? c.bookingLink ?? c.website ?? c.url ?? null;
+      const bookingUrl = normalizeUrl(rawBooking) ?? null;
+
+      const name = c.name ?? m.suggestedCourtName ?? null;
+
+      await updateDoc(doc(db, "match_requests", m.id), {
+  ...(resolvedId && !m.suggestedCourtId ? { suggestedCourtId: resolvedId } : {}),
   ...(name ? { suggestedCourtName: name } : {}),
   ...(lat != null ? { suggestedCourtLat: lat } : {}),
   ...(lng != null ? { suggestedCourtLng: lng } : {}),
@@ -343,21 +386,20 @@ await updateDoc(doc(db, "match_requests", m.id), {
   suggestedCourtBookingUrl: bookingUrl,
 });
 
-// 🔽 Optimistically update local state
-setMatches((prev) =>
-  prev.map((x) =>
-    x.id === m.id
-      ? {
-          ...x,
-          suggestedCourtName: name || x.suggestedCourtName,
-          suggestedCourtLat: lat ?? x.suggestedCourtLat,
-          suggestedCourtLng: lng ?? x.suggestedCourtLng,
-          suggestedCourtBookingUrl: bookingUrl ?? x.suggestedCourtBookingUrl,
-          suggestedCourtAddress: address ?? x.suggestedCourtAddress, // 👈 add
-        }
-      : x
-  )
-);
+      setMatches((prev) =>
+        prev.map((x) =>
+          x.id === m.id
+            ? {
+                ...x,
+                suggestedCourtName: name ?? x.suggestedCourtName,
+                suggestedCourtLat: lat ?? x.suggestedCourtLat,
+                suggestedCourtLng: lng ?? x.suggestedCourtLng,
+                suggestedCourtAddress: address ?? x.suggestedCourtAddress,
+                suggestedCourtBookingUrl: bookingUrl ?? x.suggestedCourtBookingUrl,
+              }
+            : x
+        )
+      );
 
     } finally {
       hydratingRef.current.delete(m.id);
@@ -628,7 +670,7 @@ const handleSuggestCourt = useCallback(async (match: Match) => {
       suggestedCourtLat: top.lat,
       suggestedCourtLng: top.lng,
       suggestedCourtAddress: top.address || null, 
-      suggestedCourtBookingUrl: top.bookingUrl || null,
+      suggestedCourtBookingUrl: normalizeUrl(top.bookingUrl) ?? null,
       suggestedCourtComputedAt: serverTimestamp(),
     });
 
@@ -642,7 +684,7 @@ const handleSuggestCourt = useCallback(async (match: Match) => {
               suggestedCourtName: top.name,
               suggestedCourtLat: top.lat,
               suggestedCourtLng: top.lng,
-              suggestedCourtBookingUrl: top.bookingUrl || undefined,
+              suggestedCourtBookingUrl: normalizeUrl(top.bookingUrl) ?? undefined,
             }
           : m
       )
@@ -840,7 +882,7 @@ const initials = (otherName || "?").trim().charAt(0).toUpperCase();
       name={match.suggestedCourtName}
       lat={match.suggestedCourtLat}
       lng={match.suggestedCourtLng}
-      bookingUrl={match.suggestedCourtBookingUrl}
+      bookingUrl={match.status === "accepted" ? match.suggestedCourtBookingUrl : undefined}
       address={match.suggestedCourtAddress}  
     />
   ) : (
