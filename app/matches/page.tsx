@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   onSnapshot,
   query,
@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { suggestCourt } from "@/lib/suggestCourt";
 
 
 // --- Helpers ---
@@ -95,6 +96,9 @@ type Match = {
   suggestedCourtName?: string;
   suggestedCourtLat?: number;
   suggestedCourtLng?: number;
+  suggestedCourtAddress?: string;
+  suggestedCourtBookingUrl?: string;
+  suggestedCourtId?: string;
   createdAt?: any;
   started?: boolean;
   startedAt?: any;
@@ -117,6 +121,64 @@ function getDistanceFromLatLonInKm(
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return Math.round(R * c);
 }
+
+const CourtBadge = ({
+  name,
+  lat,   // keep for distance elsewhere
+  lng,   // keep for distance elsewhere
+  bookingUrl,
+  address,
+}: {
+  name: string;
+  lat?: number | null;
+  lng?: number | null;
+  bookingUrl?: string | null;
+  address?: string | null;
+}) => {
+  // Build a search query. If address is present, use "Name, Address".
+  const q = address?.trim()
+    ? `${name}, ${address}`
+    : name;
+
+  const mapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 text-blue-800 ring-1 ring-blue-200 px-2.5 py-1 text-xs">
+      <span className="inline-flex items-center gap-1 font-medium">
+        <span aria-hidden>🏟️</span>
+        {name}
+      </span>
+      <span className="h-3 w-px bg-blue-200" aria-hidden />
+      <span className="inline-flex items-center gap-1">
+        <a
+          href={mapHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline decoration-blue-300 underline-offset-2 hover:decoration-blue-400"
+          title="Open in Google Maps"
+        >
+          Map
+        </a>
+        {bookingUrl && (
+          <>
+            <span className="h-3 w-px bg-blue-200" aria-hidden />
+            <a
+              href={bookingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-blue-300 underline-offset-2 hover:decoration-blue-400"
+              title="Open booking page"
+            >
+              Book
+            </a>
+          </>
+        )}
+      </span>
+    </span>
+  );
+};
+
+
 
 
 function MatchesPage() {
@@ -145,6 +207,171 @@ const [acceptingId, setAcceptingId] = useState<string | null>(null);
 const [decliningId, setDecliningId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"recent" | "oldest" | "distance">("recent");
 const [unreadOnly, setUnreadOnly] = useState(false);
+
+const suggestingRef = useRef<Set<string>>(new Set());
+
+// 1) put this first
+const getOpponentPostcode = useCallback(async (opponentId: string): Promise<string | null> => {
+  // try cache first
+  const cached = oppCache[opponentId];
+  if (cached && cached.postcode) return cached.postcode || null;
+
+  try {
+    const s = await getDoc(doc(db, "players", opponentId));
+    const d = s.exists() ? (s.data() as any) : null;
+    const pc = d?.postcode || null;
+    setOppCache((prev) => ({
+      ...prev,
+      [opponentId]: d
+        ? { postcode: d.postcode, lat: d.lat, lng: d.lng, photoURL: d.photoURL, name: d.name }
+        : null,
+    }));
+    return pc;
+  } catch (e) {
+    console.error("Failed to load opponent postcode", e);
+    setOppCache((prev) => ({ ...prev, [opponentId]: null }));
+    return null;
+  }
+}, [oppCache]);
+
+// 2) then this
+const computeSuggestionSilently = useCallback(
+  async (match: Match) => {
+    if (suggestingRef.current.has(match.id)) return;
+    suggestingRef.current.add(match.id);
+    try {
+      if (!myPlayer?.postcode) return;
+      const otherId = match.playerId === currentUserId ? match.opponentId : match.playerId;
+      const oppPostcode = await getOpponentPostcode(otherId);
+      if (!oppPostcode) return;
+      const res = await suggestCourt(myPlayer.postcode, oppPostcode, { maxResults: 1, searchRadiusKm: 15 });
+      const top = res.results?.[0];
+      if (!top) return;
+
+      const refMatch = doc(db, "match_requests", match.id);
+      await updateDoc(refMatch, {
+        suggestedCourtId: top.id,
+        suggestedCourtName: top.name,
+        suggestedCourtLat: top.lat,
+        suggestedCourtLng: top.lng,
+        suggestedCourtBookingUrl: top.bookingUrl || null,
+        suggestedCourtComputedAt: serverTimestamp(),
+      });
+
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.id === match.id
+            ? {
+                ...m,
+                suggestedCourtId: top.id,
+                suggestedCourtName: top.name,
+                suggestedCourtLat: top.lat,
+                suggestedCourtLng: top.lng,
+                suggestedCourtBookingUrl: top.bookingUrl || undefined,
+              }
+            : m
+        )
+      );
+    } catch (e) {
+      console.debug("Auto suggest failed", e);
+    } finally {
+      suggestingRef.current.delete(match.id);
+    }
+  },
+  [currentUserId, myPlayer, getOpponentPostcode, setMatches]
+);
+
+// put this near the top with your other refs
+const hydratingRef = useRef<Set<string>>(new Set());
+
+// ⬇️ ADD THIS EFFECT right after the auto-suggest effect
+useEffect(() => {
+  // Find matches that have a court id but are missing exact lat/lng (or booking URL)
+ const targets = matches
+  .filter(
+    (m) =>
+      m.suggestedCourtId &&
+      (m.suggestedCourtLat == null ||
+       m.suggestedCourtLng == null ||
+       m.suggestedCourtBookingUrl == null ||
+       m.suggestedCourtAddress == null) // 👈 hydrate when address missing
+  )
+  .slice(0, 5);
+
+  targets.forEach(async (m) => {
+    if (hydratingRef.current.has(m.id)) return;
+    hydratingRef.current.add(m.id);
+    try {
+      const courtSnap = await getDoc(doc(db, "courts", m.suggestedCourtId!));
+      if (!courtSnap.exists()) return;
+
+const c = courtSnap.data() as any;
+
+// 🔽 Extract address from common shapes you might have
+const address =
+  typeof c.address === "string"
+    ? c.address
+    : typeof c.location?.address === "string"
+    ? c.location.address
+    : typeof c.addressLine === "string"
+    ? c.addressLine
+    : null;
+
+// Existing lat/lng extraction (leave as-is if you still want distance calc to work)
+const lat =
+  typeof c.lat === "number"
+    ? c.lat
+    : typeof c.location?.lat === "number"
+    ? c.location.lat
+    : null;
+const lng =
+  typeof c.lng === "number"
+    ? c.lng
+    : typeof c.location?.lng === "number"
+    ? c.location.lng
+    : null;
+
+const bookingUrl = c.bookingUrl ?? null;
+const name = c.name ?? m.suggestedCourtName ?? null;
+
+// 🔽 Write back to the match doc
+await updateDoc(doc(db, "match_requests", m.id), {
+  ...(name ? { suggestedCourtName: name } : {}),
+  ...(lat != null ? { suggestedCourtLat: lat } : {}),
+  ...(lng != null ? { suggestedCourtLng: lng } : {}),
+  ...(address ? { suggestedCourtAddress: address } : {}),
+  suggestedCourtBookingUrl: bookingUrl,
+});
+
+// 🔽 Optimistically update local state
+setMatches((prev) =>
+  prev.map((x) =>
+    x.id === m.id
+      ? {
+          ...x,
+          suggestedCourtName: name || x.suggestedCourtName,
+          suggestedCourtLat: lat ?? x.suggestedCourtLat,
+          suggestedCourtLng: lng ?? x.suggestedCourtLng,
+          suggestedCourtBookingUrl: bookingUrl ?? x.suggestedCourtBookingUrl,
+          suggestedCourtAddress: address ?? x.suggestedCourtAddress, // 👈 add
+        }
+      : x
+  )
+);
+
+    } finally {
+      hydratingRef.current.delete(m.id);
+    }
+  });
+}, [matches, db]);
+
+// 3) then the effect that calls it
+useEffect(() => {
+  if (!currentUserId || !myPlayer?.postcode || matches.length === 0) return;
+  const candidates = matches.filter((m) => !m.suggestedCourtName).slice(0, 3);
+  candidates.forEach((m) => computeSuggestionSilently(m));
+}, [matches, currentUserId, myPlayer?.postcode, computeSuggestionSilently]);
+
 
 
 // Sync toolbar state to URL without adding history entries
@@ -175,93 +402,117 @@ useEffect(() => {
     return () => unsub();
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
   if (!currentUserId) return;
-  (async () => {
-    try {
-      // me
-      const me = await getDoc(doc(db, "players", currentUserId));
-      if (me.exists()) {
-        const d = me.data() as any;
-        setMyPlayer({ postcode: d.postcode, lat: d.lat, lng: d.lng }); // lat/lng optional
-      } else {
-        setMyPlayer(null);
+
+  const fromQ = query(
+    collection(db, "match_requests"),
+    where("fromUserId", "==", currentUserId)
+  );
+  const toQ = query(
+    collection(db, "match_requests"),
+    where("toUserId", "==", currentUserId)
+  );
+
+  const state: Record<string, Match> = {};
+
+  const toMatch = (d: DocumentData, id: string): Match => ({
+    id,
+    playerId: d.fromUserId,
+    opponentId: d.toUserId,
+    court: d.court,
+    time: d.time,
+    status: d.status,
+    message: d.message,
+    fromName: d.fromName,
+    toName: d.toName,
+    suggestedCourtName: d.suggestedCourtName,
+    suggestedCourtLat: d.suggestedCourtLat,
+    suggestedCourtLng: d.suggestedCourtLng,
+    suggestedCourtAddress: d.suggestedCourtAddress,
+    suggestedCourtBookingUrl: d.suggestedCourtBookingUrl,
+    suggestedCourtId: d.suggestedCourtId,
+    createdAt: d.createdAt ?? d.timestamp,
+    started: d.started,
+    startedAt: d.startedAt,
+  });
+
+  const proc = (snap: QuerySnapshot<DocumentData>) => {
+    let changed = false;
+
+    snap.docChanges().forEach((chg) => {
+      const id = chg.doc.id;
+
+      if (chg.type === "removed") {
+        if (state[id]) {
+          delete state[id];
+          changed = true;
+        }
+        return;
       }
 
-      // postcode coords (same collection you use on /match)
-      const pcSnap = await getDocs(collection(db, "postcodes"));
-      const map: PCMap = {};
-      pcSnap.forEach((p) => { map[p.id] = p.data() as { lat: number; lng: number }; });
-      setPostcodeCoords(map);
-    } catch (e) {
-      console.error("Failed to load player/coords:", e);
-    }
-  })();
+      // added or modified
+      const m = toMatch(chg.doc.data(), id);
+      const prev = state[id];
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(m)) {
+        state[id] = m;
+        changed = true;
+      }
+    });
+
+    if (changed) setMatches(Object.values(state));
+    setLoading(false);
+  };
+
+  const unsubFrom = onSnapshot(fromQ, proc);
+  const unsubTo = onSnapshot(toQ, proc);
+  return () => {
+    unsubFrom();
+    unsubTo();
+  };
 }, [currentUserId]);
 
+// Warm opponent cache so avatars/names are available
+useEffect(() => {
+  if (!currentUserId || matches.length === 0) return;
 
-  // Listen for match requests
-  useEffect(() => {
-    if (!currentUserId) return;
+  // Get each visible opponent id (the "other" person per card)
+  const opponentIds = Array.from(
+    new Set(
+      matches.map(m => (m.playerId === currentUserId ? m.opponentId : m.playerId))
+    )
+  );
 
-    const fromQ = query(
-      collection(db, "match_requests"),
-      where("fromUserId", "==", currentUserId)
-    );
-    const toQ = query(
-      collection(db, "match_requests"),
-      where("toUserId", "==", currentUserId)
-    );
+  opponentIds.forEach(async (uid) => {
+    // If we already looked this up (even if null), skip
+    if (uid in oppCache) return;
 
-    const all: Record<string, Match> = {};
-   const proc = (snap: QuerySnapshot<DocumentData>) => {
-  let updated = false;
+    try {
+      const snap = await getDoc(doc(db, "players", uid));
+      const d = snap.exists() ? (snap.data() as any) : null;
 
-  // ⬇️ add this block
-  snap.docChanges().forEach((chg) => {
-    if (chg.type === "removed" && all[chg.doc.id]) {
-      delete all[chg.doc.id];
-      updated = true;
-    }
-    if (updated) setMatches(Object.values(all));
-    setLoading(false);
+      // Accept common field names for avatar
+      const photo =
+        d?.photoURL ?? d?.photoUrl ?? d?.avatarUrl ?? null;
 
-  });
-
-  snap.docs.forEach((d) => {
-    const data = d.data();
-    const m: Match = {
-      id: d.id,
-      playerId: data.fromUserId,
-      opponentId: data.toUserId,
-      court: data.court,
-      time: data.time,
-      status: data.status,
-      message: data.message,
-      fromName: data.fromName,
-      toName: data.toName,
-      suggestedCourtName: data.suggestedCourtName,
-      suggestedCourtLat: data.suggestedCourtLat,
-      suggestedCourtLng: data.suggestedCourtLng,
-      createdAt: data.createdAt ?? data.timestamp,
-      started: data.started,
-      startedAt: data.startedAt,
-    };
-
-    const prev = all[d.id];
-    if (!prev || prev.status !== m.status || prev.started !== m.started) {
-      all[d.id] = m;
-      updated = true;
+      setOppCache((prev) => ({
+        ...prev,
+        [uid]: d
+          ? {
+              postcode: d.postcode,
+              lat: d.lat,
+              lng: d.lng,
+              photoURL: photo, // normalize to .photoURL
+              name: d.name,
+            }
+          : null,
+      }));
+    } catch {
+      setOppCache((prev) => ({ ...prev, [uid]: null }));
     }
   });
+}, [matches, currentUserId]); // ← do NOT include oppCache here to avoid loops
 
-  if (updated) setMatches(Object.values(all));
-};
-
-    const unsubFrom = onSnapshot(fromQ, proc);
-    const unsubTo = onSnapshot(toQ, proc);
-    return () => { unsubFrom(); unsubTo(); };
-  }, [currentUserId]);
 
   // Accept a match and award badge
 const acceptMatch = async (matchId: string, currentUserId: string) => {
@@ -345,6 +596,63 @@ const handleStartMatch = useCallback(async (match: Match) => {
   }
 }, [currentUserId]);
 
+const handleSuggestCourt = useCallback(async (match: Match) => {
+  try {
+    if (!myPlayer?.postcode) {
+      alert("Your profile is missing a postcode. Please set it in your profile.");
+      return;
+    }
+    const otherId = match.playerId === currentUserId ? match.opponentId : match.playerId;
+    const oppPostcode = await getOpponentPostcode(otherId);
+    if (!oppPostcode) {
+      alert("Opponent postcode missing. Ask them to update their profile.");
+      return;
+    }
+
+    // Ask the suggestor for the top result near the midpoint
+    const res = await suggestCourt(myPlayer.postcode, oppPostcode, {
+      maxResults: 3,
+      searchRadiusKm: 15,
+    });
+    const top = res.results?.[0];
+    if (!top) {
+      alert("No nearby courts found. Try widening the search radius later.");
+      return;
+    }
+
+    // Cache onto match doc so both players see the same suggestion
+    const refMatch = doc(db, "match_requests", match.id);
+    await updateDoc(refMatch, {
+      suggestedCourtId: top.id,
+      suggestedCourtName: top.name,
+      suggestedCourtLat: top.lat,
+      suggestedCourtLng: top.lng,
+      suggestedCourtAddress: top.address || null, 
+      suggestedCourtBookingUrl: top.bookingUrl || null,
+      suggestedCourtComputedAt: serverTimestamp(),
+    });
+
+    // Optimistically update local UI
+    setMatches((prev) =>
+      prev.map((m) =>
+        m.id === match.id
+          ? {
+              ...m,
+              suggestedCourtId: top.id,
+              suggestedCourtName: top.name,
+              suggestedCourtLat: top.lat,
+              suggestedCourtLng: top.lng,
+              suggestedCourtBookingUrl: top.bookingUrl || undefined,
+            }
+          : m
+      )
+    );
+  } catch (e) {
+    console.error("Suggest court failed:", e);
+    alert("Could not suggest a court right now. Please try again.");
+  }
+}, [currentUserId, myPlayer, getOpponentPostcode, setMatches]);
+
 
 const handleCompleteGame = useCallback((match: Match) => {
   router.push(`/matches/${match.id}/complete/details`);
@@ -359,329 +667,343 @@ const deleteMatch = useCallback(async (id: string) => {
 
   // Chat logic omitted for brevity
 
-const renderMatch = useCallback(
-  (match: Match) => {
-const isMine = match.playerId === currentUserId;
-const other  = isMine ? match.opponentId : match.playerId;
-const profileHref = `/players/${other}`;
-const otherName = isMine ? (match.toName || "Opponent") : (match.fromName || "Opponent");
+const renderMatch = useCallback((match: Match) => {
+  const isMine = match.playerId === currentUserId;
+  const other  = isMine ? match.opponentId : match.playerId;
+  const profileHref = `/players/${other}`;
+const otherName =
+  oppCache[other]?.name ??
+  (isMine ? (match.toName || "Opponent") : (match.fromName || "Opponent"));
+
 const avatarUrl = oppCache[other]?.photoURL || "";
 const initials = (otherName || "?").trim().charAt(0).toUpperCase();
-const inProgress = match.status === "accepted" && !!match.started;
 
+  const inProgress = match.status === "accepted" && !!match.started;
 
-    const created =
-      match.createdAt?.toDate
-        ? match.createdAt.toDate()
-        : match.createdAt
-        ? new Date(match.createdAt)
-        : null;
+  const created =
+    match.createdAt?.toDate
+      ? match.createdAt.toDate()
+      : match.createdAt
+      ? new Date(match.createdAt)
+      : null;
 
-        // add this after `const created = ...`
-const startedAt =
-  match.startedAt?.toDate
-    ? match.startedAt.toDate()
-    : match.startedAt
-    ? new Date(match.startedAt)
-    : null;
+  const startedAt =
+    match.startedAt?.toDate
+      ? match.startedAt.toDate()
+      : match.startedAt
+      ? new Date(match.startedAt)
+      : null;
 
-    // ---- Distance (prefer exact court lat/lng; fallback to postcode→coords) ----
-let distanceKm: number | null = null;
+  // ---- Distance (prefer exact court lat/lng; fallback to postcode→coords) ----
+  let distanceKm: number | null = null;
 
-try {
-  // A) If match has a suggested court with lat/lng AND I have my lat/lng:
-  if (
-    typeof match.suggestedCourtLat === "number" &&
-    typeof match.suggestedCourtLng === "number" &&
-    myPlayer &&
-    typeof myPlayer.lat === "number" &&
-    typeof myPlayer.lng === "number"
-  ) {
-    distanceKm = getDistanceFromLatLonInKm(
-      myPlayer.lat, myPlayer.lng,
-      match.suggestedCourtLat, match.suggestedCourtLng
-    );
-  } else if (myPlayer) {
-    // B) Otherwise fallback to postcode→coords using opponent's postcode
-    const computeFromPC = (theirPostcode?: string | null) => {
-      const mine = myPlayer.postcode ? postcodeCoords[myPlayer.postcode] : undefined;
-      const theirs = theirPostcode ? postcodeCoords[theirPostcode] : undefined;
-      if (mine && theirs) {
-        distanceKm = getDistanceFromLatLonInKm(mine.lat, mine.lng, theirs.lat, theirs.lng);
-      }
-    };
-
-    const cached = oppCache[other];
-    if (cached) {
-      computeFromPC(cached.postcode);
-    } else if (cached === undefined) {
-      // first encounter of this opponent: fetch once and cache
-      (async () => {
-        try {
-const s = await getDoc(doc(db, "players", other));
-const d = s.exists() ? (s.data() as any) : null;
-setOppCache((prev) => ({
-  ...prev,
-  [other]: d
-    ? { postcode: d.postcode, lat: d.lat, lng: d.lng, photoURL: d.photoURL, name: d.name }
-    : null,
-}));
-        } catch {
-          setOppCache((prev) => ({ ...prev, [other]: null }));
+  try {
+    if (
+      typeof match.suggestedCourtLat === "number" &&
+      typeof match.suggestedCourtLng === "number" &&
+      myPlayer &&
+      typeof myPlayer.lat === "number" &&
+      typeof myPlayer.lng === "number"
+    ) {
+      distanceKm = getDistanceFromLatLonInKm(
+        myPlayer.lat,
+        myPlayer.lng,
+        match.suggestedCourtLat,
+        match.suggestedCourtLng
+      );
+    } else if (myPlayer) {
+      const computeFromPC = (theirPostcode?: string | null) => {
+        const mine = myPlayer.postcode ? postcodeCoords[myPlayer.postcode] : undefined;
+        const theirs = theirPostcode ? postcodeCoords[theirPostcode] : undefined;
+        if (mine && theirs) {
+          distanceKm = getDistanceFromLatLonInKm(mine.lat, mine.lng, theirs.lat, theirs.lng);
         }
-      })();
+      };
+
+      const cached = oppCache[other];
+      if (cached) {
+        computeFromPC(cached.postcode);
+      } else if (cached === undefined) {
+        (async () => {
+          try {
+            const s = await getDoc(doc(db, "players", other));
+            const d = s.exists() ? (s.data() as any) : null;
+            setOppCache((prev) => ({
+              ...prev,
+              [other]: d
+                ? { postcode: d.postcode, lat: d.lat, lng: d.lng, photoURL: d.photoURL, name: d.name }
+                : null,
+            }));
+          } catch {
+            setOppCache((prev) => ({ ...prev, [other]: null }));
+          }
+        })();
+      }
     }
+  } catch {
+    // ignore; distanceKm stays null
   }
-} catch {
-  // ignore; distanceKm stays null
-}
 
-
-    return (
-<li
-  key={match.id}
-  className={"relative w-full overflow-hidden pr-24 sm:pr-12 rounded-2xl bg-white ring-1 p-4 shadow-sm hover:shadow transition " + (match.status === "unread" ? "ring-green-200" : "ring-black/5")}
->
-
-  {/* left accent for unread */}
-  {match.status === "unread" && (
-    <div className="absolute inset-y-0 left-0 w-1 bg-green-400/70" />
-  )}
-        {/* Top-right overlay: Unread + delete */}
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-2">
-{match.status === "unread" && <Chip tone="warning">Unread</Chip>}
-<button
-  onClick={() => deleteMatch(match.id)}
-  title="Delete request"
-  aria-label="Delete request"
-  className="p-1 rounded-md text-red-500/80 hover:text-red-600 hover:bg-red-50"
->
-  <Trash2 className="h-4 w-4" />
-</button>
-
-        </div>
-
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-{/* Header (opponent-first) */}
-<div className="flex items-start gap-3">
-  {/* Avatar */}
-  <div className="h-9 w-9 rounded-full overflow-hidden bg-gray-100 ring-1 ring-black/5 shrink-0">
-    {avatarUrl ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={avatarUrl} alt={otherName} className="h-full w-full object-cover" />
-    ) : (
-      <div className="h-full w-full grid place-items-center text-sm text-gray-600">
-        {initials}
-      </div>
-    )}
-  </div>
-
-  {/* ⬇️ restored wrapper so truncation/status layout works */}
-  <div className="min-w-0 flex-1">
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-16 sm:pr-0">
-      <span className="font-semibold text-gray-900 truncate">{otherName}</span>
-     <span className="shrink-0 text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700 ring-1 ring-gray-200">
-  {isMine ? "Outgoing" : "Incoming"}
-</span>
-
-
-      {/* Status pill */}
-      <div className="ml-auto">
-        {inProgress ? (
-          <Chip tone="brand">Game in progress</Chip>
-        ) : match.status === "accepted" ? (
-          <Chip tone="success">Accepted</Chip>
-        ) : match.status !== "unread" ? (
-          <Chip>{match.status}</Chip>
-        ) : null}
-      </div>
-    </div>
-
-    {/* Direction sublabel */}
-    <div className="mt-0.5 text-xs text-gray-500 truncate">
-      {isMine ? (
-        <>You <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> {otherName}</>
-      ) : (
-        <>{otherName} <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> You</>
+  // 👇 THIS is the important part the parser was complaining about:
+  return (
+    <li
+      key={match.id}
+      className={
+        "relative w-full overflow-hidden pr-24 sm:pr-12 rounded-2xl bg-white ring-1 p-4 shadow-sm hover:shadow transition " +
+        (match.status === "unread" ? "ring-green-200" : "ring-black/5")
+      }
+    >
+      {/* left accent for unread */}
+      {match.status === "unread" && (
+        <div className="absolute inset-y-0 left-0 w-1 bg-green-400/70" />
       )}
-    </div>
-  </div>
-</div>
 
-            {/* Message */}
-<p className="mt-2 text-sm text-gray-700 line-clamp-2">
-  {match.message || "No message"}
-</p>
+      {/* Top-right overlay: Unread + delete */}
+      <div className="absolute top-2 right-2 z-10 flex items-center gap-2">
+        {match.status === "unread" && <Chip tone="warning">Unread</Chip>}
+        <button
+          onClick={() => deleteMatch(match.id)}
+          title="Delete request"
+          aria-label="Delete request"
+          className="p-1 rounded-md text-red-500/80 hover:text-red-600 hover:bg-red-50"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
 
-            {/* Meta */}
-<div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-  <Clock className="h-3.5 w-3.5 opacity-60" />
-  {inProgress && startedAt ? (
-    <span title={startedAt.toLocaleString()}>Started {formatRelativeTime(startedAt)}</span>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          {/* Header (opponent-first) */}
+          <div className="flex items-start gap-3">
+            {/* Avatar */}
+            <div className="h-9 w-9 rounded-full overflow-hidden bg-gray-100 ring-1 ring-black/5 shrink-0">
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatarUrl} alt={otherName} className="h-full w-full object-cover" />
+              ) : (
+                <div className="h-full w-full grid place-items-center text-sm text-gray-600">
+                  {initials}
+                </div>
+              )}
+            </div>
+
+            {/* Name + status */}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-16 sm:pr-0">
+                <span className="font-semibold text-gray-900 truncate">{otherName}</span>
+                <span className="shrink-0 text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700 ring-1 ring-gray-200">
+                  {isMine ? "Outgoing" : "Incoming"}
+                </span>
+
+                <div className="ml-auto">
+                  {inProgress ? (
+                    <Chip tone="brand">Game in progress</Chip>
+                  ) : match.status === "accepted" ? (
+                    <Chip tone="success">Accepted</Chip>
+                  ) : match.status !== "unread" ? (
+                    <Chip>{match.status}</Chip>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="mt-0.5 text-xs text-gray-500 truncate">
+                {isMine ? (
+                  <>You <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> {otherName}</>
+                ) : (
+                  <>{otherName} <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> You</>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Message */}
+          <p className="mt-2 text-sm text-gray-700 line-clamp-2">
+            {match.message || "No message"}
+          </p>
+
+          {/* Meta */}
+          <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+            <Clock className="h-3.5 w-3.5 opacity-60" />
+            {inProgress && startedAt ? (
+              <span title={startedAt.toLocaleString()}>Started {formatRelativeTime(startedAt)}</span>
+            ) : (
+              <span title={created ? created.toLocaleString() : undefined}>
+                {formatRelativeTime(created)}
+              </span>
+            )}
+
+            {typeof distanceKm === "number" && <Chip className="ml-1">~{distanceKm} km</Chip>}
+
+<div className="ml-auto flex items-center gap-2">
+  {match.suggestedCourtName ? (
+    <CourtBadge
+      name={match.suggestedCourtName}
+      lat={match.suggestedCourtLat}
+      lng={match.suggestedCourtLng}
+      bookingUrl={match.suggestedCourtBookingUrl}
+      address={match.suggestedCourtAddress}  
+    />
   ) : (
-    <span title={created ? created.toLocaleString() : undefined}>{formatRelativeTime(created)}</span>
-  )}
-
-  {typeof distanceKm === "number" && <Chip className="ml-1">~{distanceKm} km</Chip>}
-
-  <span className="ml-auto text-gray-400/90 italic">🏟️ Court suggestion coming soon</span>
-</div>
-
-
-{/* Actions */}
-<div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap gap-2">
-  {match.status === "accepted" ? (
-    inProgress ? (
-      <>
-        <button
-          onClick={() => handleCompleteGame(match)}
-          aria-label="Complete game"
-          className={`w-full sm:w-auto min-w-[140px] ${BTN.brand}`}
-        >
-          <Check className="h-4 w-4" />
-          Complete Game
-        </button>
-
-        <button
-          onClick={() => {
-            const sortedIDs = [currentUserId!, other].sort().join("_");
-            router.push(`/messages/${sortedIDs}`);
-          }}
-          aria-label="Open chat"
-          className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-        >
-          <MessageCircle className="h-4 w-4" />
-          Chat
-        </button>
-
-        <Link
-          href={profileHref}
-          aria-label="View profile"
-          className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
-        >
-          View profile
-        </Link>
-      </>
-    ) : (
-      <>
-        <button
-          onClick={() => handleStartMatch(match)}
-          disabled={startingId === match.id}
-          aria-label="Start game"
-          className={`w-full sm:w-auto min-w-[130px] ${BTN.primary} ${startingId === match.id ? "opacity-60 cursor-not-allowed" : ""}`}
-        >
-          {startingId === match.id ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Starting…
-            </>
-          ) : (
-            <>
-              <Check className="h-4 w-4" />
-              Start Game
-            </>
-          )}
-        </button>
-
-        <button
-          onClick={() => {
-            const sortedIDs = [currentUserId!, other].sort().join("_");
-            router.push(`/messages/${sortedIDs}`);
-          }}
-          aria-label="Open chat"
-          className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-        >
-          <MessageCircle className="h-4 w-4" />
-          Chat
-        </button>
-
-        <Link
-          href={profileHref}
-          aria-label="View profile"
-          className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
-        >
-          View profile
-        </Link>
-      </>
-    )
-  ) : (
-    <>
-      {match.opponentId === currentUserId ? (
-        // You RECEIVED this request → Accept / Decline
-        <>
-          <button
-            onClick={() => currentUserId && acceptMatch(match.id, currentUserId)}
-            aria-label="Accept request"
-            className={`w-full sm:w-auto min-w-[120px] ${BTN.primary}`}
-          >
-            <Check className="h-4 w-4" />
-            Accept
-          </button>
-
-          <button
-            onClick={() => {
-              const sortedIDs = [currentUserId!, other].sort().join("_");
-              router.push(`/messages/${sortedIDs}`);
-            }}
-            aria-label="Open chat"
-            className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-          >
-            <MessageCircle className="h-4 w-4" />
-            Chat
-          </button>
-
-          <Link
-            href={profileHref}
-            aria-label="View profile"
-            className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
-          >
-            View profile
-          </Link>
-
-          <button
-            onClick={() => deleteMatch(match.id)}
-            aria-label="Decline request"
-            className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-          >
-            <X className="h-4 w-4" />
-            Decline
-          </button>
-        </>
-      ) : (
-       // You SENT this request → no Withdraw button (use top-right trash)
-<>
-  <button
-    onClick={() => {
-      const sortedIDs = [currentUserId!, other].sort().join("_");
-      router.push(`/messages/${sortedIDs}`);
-    }}
-    aria-label="Open chat"
-    className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-  >
-    <MessageCircle className="h-4 w-4" />
-    Chat
-  </button>
-
-  <Link
-    href={profileHref}
-    aria-label="View profile"
-    className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
-  >
-    View profile
-  </Link>
-</>
-
-      )}
-    </>
+    <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      Finding court…
+    </span>
   )}
 </div>
 
 
           </div>
+
+          {/* Actions */}
+          <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap gap-2">
+            {match.status === "accepted" ? (
+              inProgress ? (
+                <>
+                  <button
+                    onClick={() => handleCompleteGame(match)}
+                    aria-label="Complete game"
+                    className={`w-full sm:w-auto min-w-[140px] ${BTN.brand}`}
+                  >
+                    <Check className="h-4 w-4" />
+                    Complete Game
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const sortedIDs = [currentUserId!, other].sort().join("_");
+                      router.push(`/messages/${sortedIDs}`);
+                    }}
+                    aria-label="Open chat"
+                    className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    Chat
+                  </button>
+
+                  <Link
+                    href={profileHref}
+                    aria-label="View profile"
+                    className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+                  >
+                    View profile
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => handleStartMatch(match)}
+                    disabled={startingId === match.id}
+                    aria-label="Start game"
+                    className={`w-full sm:w-auto min-w-[130px] ${BTN.primary} ${startingId === match.id ? "opacity-60 cursor-not-allowed" : ""}`}
+                  >
+                    {startingId === match.id ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Starting…
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4" />
+                        Start Game
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const sortedIDs = [currentUserId!, other].sort().join("_");
+                      router.push(`/messages/${sortedIDs}`);
+                    }}
+                    aria-label="Open chat"
+                    className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    Chat
+                  </button>
+
+                  <Link
+                    href={profileHref}
+                    aria-label="View profile"
+                    className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+                  >
+                    View profile
+                  </Link>
+                </>
+              )
+            ) : (
+              <>
+                {match.opponentId === currentUserId ? (
+                  <>
+                    <button
+                      onClick={() => currentUserId && acceptMatch(match.id, currentUserId)}
+                      aria-label="Accept request"
+                      className={`w-full sm:w-auto min-w-[120px] ${BTN.primary}`}
+                    >
+                      <Check className="h-4 w-4" />
+                      Accept
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const sortedIDs = [currentUserId!, other].sort().join("_");
+                        router.push(`/messages/${sortedIDs}`);
+                      }}
+                      aria-label="Open chat"
+                      className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      Chat
+                    </button>
+
+                    <Link
+                      href={profileHref}
+                      aria-label="View profile"
+                      className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+                    >
+                      View profile
+                    </Link>
+
+                    <button
+                      onClick={() => deleteMatch(match.id)}
+                      aria-label="Decline request"
+                      className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+                    >
+                      <X className="h-4 w-4" />
+                      Decline
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        const sortedIDs = [currentUserId!, other].sort().join("_");
+                        router.push(`/messages/${sortedIDs}`);
+                      }}
+                      aria-label="Open chat"
+                      className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      Chat
+                    </button>
+
+                    <Link
+                      href={profileHref}
+                      aria-label="View profile"
+                      className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+                    >
+                      View profile
+                    </Link>
+
+                    
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </div>
-      </li>
-    );
+      </div>
+    </li>
+  );
 }, [
   currentUserId,
   router,
@@ -692,6 +1014,7 @@ setOppCache((prev) => ({
   postcodeCoords,
   oppCache,
 ]);
+
 
 const pendingCount = useMemo(
   () => matches.filter((m) => m.status !== "accepted").length,
@@ -873,13 +1196,13 @@ return (
   Incoming: {incomingPendingCount} • Outgoing: {outgoingPendingCount}
 </span>
 
-        {/* Filters */}
-<div className="w-full sm:w-auto sm:ml-auto flex items-center gap-3">
+{/* Filters */}
+<div className="w-full sm:w-auto sm:ml-auto flex flex-wrap items-center gap-3">
   {/* Direction */}
   <select
     value={direction}
     onChange={(e) => setDirection(e.target.value as "all" | "received" | "sent")}
-    className="text-sm border rounded-lg px-2 py-1 w-[120px] sm:w-auto"
+    className="text-sm border rounded-lg px-2 py-1 flex-none w-[120px] sm:w-auto"
     title="Filter direction"
   >
     <option value="all">All</option>
@@ -891,7 +1214,7 @@ return (
   <select
     value={sortBy}
     onChange={(e) => setSortBy(e.target.value as "recent" | "oldest" | "distance")}
-    className="text-sm border rounded-lg px-2 py-1 w-[130px]"
+    className="text-sm border rounded-lg px-2 py-1 flex-none w-[130px]"
     title="Sort"
   >
     <option value="recent">Newest</option>
@@ -900,7 +1223,7 @@ return (
   </select>
 
   {/* Unread only */}
-  <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+  <label className="inline-flex items-center gap-2 text-sm text-gray-700 flex-none">
     <input
       type="checkbox"
       className="h-4 w-4 accent-green-600"
@@ -916,10 +1239,11 @@ return (
     value={queryText}
     onChange={(e) => setQueryText(e.target.value)}
     placeholder="Search names…"
-    className="text-sm border rounded-lg px-2 py-1 w-[160px]"
     aria-label="Search requests by name"
+    className="text-sm border rounded-lg px-2 py-1 min-w-0 w-full sm:w-48 max-w-full flex-1"
   />
 </div>
+
 
       </div>
     </div>
