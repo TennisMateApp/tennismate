@@ -80,11 +80,15 @@ export async function initNativePush() {
   // Create channel (safe to call more than once)
   try {
     await PushNotifications.createChannel({
-      id: 'messages',
-      name: 'Messages',
-      description: 'New messages and match updates',
-      importance: 5,
-    });
+  id: 'messages',
+  name: 'Messages',
+  description: 'New messages and match updates',
+  importance: 5,              // IMPORTANCE_HIGH
+  sound: 'default',           // use default sound
+  vibration: true,
+  lights: true,
+});
+
   } catch {}
 
   // Check/request permission, then register
