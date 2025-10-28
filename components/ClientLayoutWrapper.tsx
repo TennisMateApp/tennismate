@@ -64,16 +64,12 @@ const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
   }, []);
 }
 
-// ---------------------------------------------------
-
-function ClientLayoutWrapper({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-  // fire and forget; it’s guarded for web/SSR
-  initNativePush();
-}, []);
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   useSystemTheme(); // <-- Call the hook at the top of your component
+    useEffect(() => {
+    initNativePush();
+  }, []);
 
   const [user, setUser] = useState<any>(null);
   const [photoURL, setPhotoURL] = useState<string | null>(null);
