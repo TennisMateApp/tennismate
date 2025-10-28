@@ -22,6 +22,7 @@ const OnboardingTour = dynamic(
 );
 import { ONBOARDING_VERSION } from "@/app/constants/onboarding";
 import NotificationBell from "@/components/notifications/NotificationBell";
+import { initNativePush } from '@/lib/nativePush';
 
 
 console.log("OnboardingTour:", OnboardingTour);
@@ -64,6 +65,19 @@ const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
 }
 
 // ---------------------------------------------------
+
+function ClientLayoutWrapper({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        await initNativePush();
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  return <>{children}</>;
+}
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   useSystemTheme(); // <-- Call the hook at the top of your component
@@ -136,6 +150,13 @@ const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFe
     if (u) {
       await u.reload();
       setUser(auth.currentUser);
+          // ✅ Initialize native push for Android app runtime
+    try {
+      await initNativePush();
+    } catch (e) {
+      console.warn("initNativePush skipped/non-native or failed:", e);
+    }
+
 
       const userDocSnap = await getDoc(doc(db, "users", u.uid));
       const requireVerification =
