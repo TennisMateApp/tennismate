@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "16871894453",
+    "project_id": "tennismate-d8acb",
+    "storage_bucket": "tennismate-d8acb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:16871894453:android:36779a95dcb08facdebdfc",
+        "android_client_info": {
+          "package_name": "com.tennismate.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDp4CbYLL3Xcl6RURSn5nmP2ycZx2umkOg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

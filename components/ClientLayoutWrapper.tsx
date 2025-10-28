@@ -23,6 +23,8 @@ const OnboardingTour = dynamic(
 import { ONBOARDING_VERSION } from "@/app/constants/onboarding";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
+import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
 
 
 console.log("OnboardingTour:", OnboardingTour);
@@ -80,6 +82,18 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const settingsRef = useRef<HTMLDivElement>(null);
   const [userOnboardingSeen, setUserOnboardingSeen] = useState<number | null>(null);
 const [showTour, setShowTour] = useState(false);
+
+// ...inside a top-level useEffect that runs on mount:
+useEffect(() => {
+  if (!Capacitor.isNativePlatform()) return;
+
+  // Put the WebView *below* the OS status bar so nothing is covered
+  StatusBar.setOverlaysWebView({ overlay: false });
+
+  // Optional polish: light background + dark icons in the status bar
+  StatusBar.setBackgroundColor({ color: '#ffffff' });
+  StatusBar.setStyle({ style: Style.Dark });
+}, []);
 
 // NEW:
 const [needsTour, setNeedsTour] = useState(false);
@@ -347,7 +361,7 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
     <InstallPwaIosPrompt />
     <PushClientOnly />
       {!hideAllNav && (
-       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
+       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b safe-top">
   <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center">
               <img src="/logo.png" alt="TennisMate" className="w-[40px] h-[40px] rounded-full object-cover" />
@@ -431,7 +445,10 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
         </header>
       )}
 
-<main className={`max-w-5xl mx-auto px-4 ${hideAllNav ? "pb-0" : "pb-20"}`}>
+<main
+  className={`max-w-5xl mx-auto px-4 ${hideAllNav ? "pb-0" : "pb-20"}`}
+  style={{ marginTop: "var(--safe-area-top)" }}
+>
   {children}
 </main>
 {user && !hideAllNav && (

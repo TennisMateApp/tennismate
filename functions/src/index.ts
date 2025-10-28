@@ -14,6 +14,107 @@ if (admin.apps.length === 0) {
 }
 const db = admin.firestore();
 
+// --- Route helper (handles absolute URLs and relative paths) ---
+function toRoute(input?: unknown): string {
+  if (typeof input !== "string" || !input) return "/";
+  if (input.startsWith("/")) return input; // already a route
+  try {
+    return new URL(input).pathname || "/";
+  } catch {
+    return "/";
+  }
+}
+
+
+// ---------- PUSH HELPERS (native first, web fallback) ----------
+// Use fcmToken field when present; fall back to doc id.
+async function getAndroidTokensForUser(uid: string): Promise<string[]> {
+  const snap = await db.collection("users").doc(uid).collection("devices").get();
+  const tokens: string[] = [];
+
+  snap.forEach((d) => {
+    const platform = (d.get("platform") as string) || "web";
+    if (platform !== "android") return;
+
+    const tokenInDoc = d.get("fcmToken") as string | undefined;
+    const token = tokenInDoc || d.id; // our client writes both; be resilient
+    if (token) tokens.push(token);
+  });
+
+  return tokens;
+}
+
+async function sendAndroidPushToUser(
+  uid: string,
+  payload: { title: string; body: string; route?: string; type?: string }
+): Promise<boolean> {
+  const tokens = await getAndroidTokensForUser(uid);
+  if (!tokens.length) return false;
+
+  const message: admin.messaging.MulticastMessage = {
+    tokens,
+    // Top-level notification (for older clients / general fallback)
+    notification: {
+      title: payload.title,
+      body: payload.body,
+    },
+    // Data your app reads for deep links & meta
+    data: {
+      ...(payload.route ? { route: payload.route } : {}),
+      ...(payload.type ? { type: payload.type } : {}),
+    },
+    // Android-specific polish
+android: {
+  priority: "high",
+  collapseKey: payload.type || "general",
+  notification: {
+    channelId: "messages",
+    icon: "ic_stat_tm",
+    color: "#10B981",
+    sound: "tennis_ball_hit",   // <-- plays res/raw/tennis_ball_hit.ogg
+    visibility: "public",
+  },
+},
+
+
+  };
+
+  const res = await admin.messaging().sendEachForMulticast(message);
+
+  // Clean up invalid tokens to keep lists healthy
+  await Promise.all(
+    res.responses.map(async (r, i) => {
+      if (!r.success) {
+        const code = (r as any).error?.code as string | undefined;
+        if (
+          code === "messaging/registration-token-not-registered" ||
+          code === "messaging/invalid-registration-token"
+        ) {
+          const bad = tokens[i];
+          try {
+            await db.collection("users").doc(uid).collection("devices").doc(bad).delete();
+            console.log("🧹 Removed invalid Android token", { uid, token: bad });
+          } catch {}
+        }
+      }
+    })
+  );
+
+  return true;
+}
+
+
+/** If you already have VAPID web push, call it here. Otherwise this can be a no-op. */
+async function sendWebPushToUser(
+  uid: string,
+  payload: { title: string; body: string; route?: string; type?: string }
+): Promise<boolean> {
+  // TODO: hook into your existing web-push code if applicable.
+  // Return true if a web push was sent.
+  return false;
+}
+
+
 // ---------- EMAIL HELPERS (Trigger Email extension) ----------
 const MAIL_COLLECTION = "mail"; // extension watches this
 
@@ -608,55 +709,43 @@ export const sendPushNotification = onDocumentCreated(
     console.log(`[MR_BELL_CONSUMER] push start`, { notifId, type: n.type, source: n.source, runId: n.runId });
 
     const notifData = n;
-    if (!notifData) {
-      console.log("❌ Notification data missing");
-      return;
-    }
+    if (!notifData) return;
 
     if (notifData.recipientId && notifData.fromUserId && notifData.recipientId === notifData.fromUserId) {
       console.log("🛑 Ignoring self-targeted notification doc.");
       return;
     }
 
-    const recipientId = notifData.recipientId as string;
-    const tokenDoc = await db.collection("device_tokens").doc(recipientId).get();
-    if (!tokenDoc.exists) {
-      console.log(`❌ No device token found for user: ${recipientId}`);
+    const recipientId = notifData.recipientId as string | undefined;
+    if (!recipientId) {
+      console.log("❌ Missing recipientId");
       return;
     }
 
-    const token = tokenDoc.data()?.token;
-    if (!token) {
-      console.log(`❌ Token field missing for user: ${recipientId}`);
-      return;
+    const title = (notifData.title || notifData.message || "🎾 TennisMate").toString();
+    const body = (notifData.body || "You have a new notification").toString();
+  const route =
+  (typeof notifData.route === "string" && notifData.route)
+    ? notifData.route
+    : toRoute(notifData.url);
+
+
+    // 1) Try native Android first
+    const nativeSent = await sendAndroidPushToUser(recipientId, {
+      title, body, route, type: notifData.type || "general",
+    });
+
+    // 2) Fallback to web push if no Android devices
+    if (!nativeSent) {
+      await sendWebPushToUser(recipientId, {
+        title, body, route, type: notifData.type || "general",
+      });
     }
 
-    const payload = {
-      data: {
-        title: notifData.message || "🎾 TennisMate Notification",
-        body: "You have a new notification",
-        type: notifData.type || "general",
-        fromUserId: notifData.fromUserId || "",
-        url: notifData.url || "https://tennis-match.com.au",
-      },
-    };
-
-    try {
-      console.log("📲 Sending push to token:", token);
-      await admin.messaging().send({ token, ...payload });
-      console.log(`✅ Notification sent to ${recipientId}`);
-    } catch (error: any) {
-      console.error("❌ Failed to send push notification:", error);
-      if (
-        error.code === "messaging/invalid-registration-token" ||
-        error.code === "messaging/registration-token-not-registered"
-      ) {
-        await db.collection("device_tokens").doc(recipientId).delete();
-        console.log(`🧹 Deleted invalid FCM token for ${recipientId}`);
-      }
-    }
+    console.log(`✅ sendPushNotification complete (native=${nativeSent}) for ${recipientId}`);
   }
 );
+
 
 
 export const emailOnNewMessageNotification = onDocumentCreated(
@@ -754,86 +843,70 @@ export const notifyOnNewMessage = onDocumentCreated(
     if (!message) return;
 
     const senderId = message.senderId as string;
-    const recipientId = message.recipientId as (string | null);
+    const recipientId = message.recipientId as string | null;
     const text = (message.text as string) || "";
     const read = message.read === true;
 
-    // guards
     if (!recipientId) return;
     if (recipientId === senderId) return;
     if (!text || read) return;
 
-    // push
     try {
-      const tokenQuery = await db
-        .collection("device_tokens")
-        .where("uid", "==", recipientId)
-        .limit(1)
-        .get();
-
-      const fcmToken = tokenQuery.empty ? null : tokenQuery.docs[0].get("token");
-      console.log(`📲 Retrieved token: ${fcmToken}`);
-
-      if (fcmToken) {
-        const userSnap = await db.collection("users").doc(recipientId).get();
-        const activeConversationId = userSnap.get("activeConversationId");
-
-        if (activeConversationId !== conversationId) {
-          const senderDoc = await db.collection("players").doc(senderId).get();
-          const senderName = senderDoc.get("name") || "A player";
-
-          await admin.messaging().send({
-            token: fcmToken,
-            data: {
-              title: `New message from ${senderName}`,
-              body: text.length > 60 ? text.slice(0, 60) + "…" : text,
-              url: "https://tennismate.vercel.app/messages",
-              type: "new_message",
-              conversationId,
-              fromUserId: senderId,
-            },
-          });
-          console.log(`✅ Push sent to ${recipientId}`);
-        } else {
-          console.log("👀 User is viewing this conversation. No push sent.");
-        }
+      // Avoid push if recipient is actively viewing this conversation
+      const userSnap = await db.collection("users").doc(recipientId).get();
+      const activeConversationId = userSnap.exists ? userSnap.get("activeConversationId") : undefined;
+      if (activeConversationId === conversationId) {
+        console.log("👀 User is viewing this conversation. No push sent.");
       } else {
-        console.log(`❌ No FCM token found for ${recipientId}`);
+        const senderDoc = await db.collection("players").doc(senderId).get();
+        const senderName = (senderDoc.exists ? senderDoc.get("name") : "") || "A player";
+        const body = text.length > 60 ? text.slice(0, 60) + "…" : text;
+
+        // 1) Try native Android first
+        const nativeSent = await sendAndroidPushToUser(recipientId, {
+          title: `New message from ${senderName}`,
+          body,
+          route: `/messages/${conversationId}`,
+          type: "new_message",
+        });
+
+        // 2) Fallback to web push if no Android devices
+        if (!nativeSent) {
+          await sendWebPushToUser(recipientId, {
+            title: `New message from ${senderName}`,
+            body,
+            route: `/messages/${conversationId}`,
+            type: "new_message",
+          });
+        }
+        console.log(`✅ Push path executed (native=${nativeSent}) for ${recipientId}`);
       }
     } catch (error) {
       console.error("❌ Failed to send push notification:", error);
     }
 
-
-
-    // in-app bell (this drives the email function)
+    // In-app bell doc (drives your email function)
     try {
-      const userSnap = await db.collection("users").doc(recipientId).get();
-      const activeConversationId = userSnap.get("activeConversationId");
-
-      if (activeConversationId === conversationId) {
-        console.log("🔕 Recipient is in-thread — skip bell notification.");
-      } else {
-        const notifId = `msg_${conversationId}_${messageId}_${recipientId}`;
-        await db.collection("notifications").doc(notifId).set({
-          recipientId,
-          type: "message",
-          conversationId,
-          messageId,
-          title: "New message",
-          body: text.length > 100 ? text.slice(0, 100) + "…" : text,
-          url: `https://tennismate.vercel.app/messages/${conversationId}`,
-          fromUserId: senderId,
-          timestamp: admin.firestore.FieldValue.serverTimestamp(),
-          read: false,
-        }, { merge: true });
-        console.log(`✅ Bell notification created for ${recipientId}`);
-      }
+      const notifId = `msg_${conversationId}_${messageId}_${recipientId}`;
+      await db.collection("notifications").doc(notifId).set({
+        recipientId,
+        type: "message",
+        conversationId,
+        messageId,
+        title: "New message",
+        body: text.length > 100 ? text.slice(0, 100) + "…" : text,
+        url: `https://tennismate.vercel.app/messages/${conversationId}`,
+        fromUserId: senderId,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        read: false,
+      }, { merge: true });
+      console.log(`✅ Bell notification created for ${recipientId}`);
     } catch (err) {
       console.error("❌ Failed to create bell notification:", err);
     }
   }
 );
+
 
 export const sendMatchRequestNotification = onDocumentCreated(
   "match_requests/{matchId}",
