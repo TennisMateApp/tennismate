@@ -101,7 +101,7 @@ export async function initNativePush() {
 
 /**
  * Call this after the user logs in (or auth state changes) to ensure
- * any already-received token is written under users/*/devices/*.
+ * any already-received token is written under users/{uid}/devices/{token}.
  */
 export async function bindTokenToUserIfAvailable() {
   if (typeof window === 'undefined') return;
