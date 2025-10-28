@@ -22,7 +22,7 @@ const OnboardingTour = dynamic(
 );
 import { ONBOARDING_VERSION } from "@/app/constants/onboarding";
 import NotificationBell from "@/components/notifications/NotificationBell";
-import { initNativePush } from '@/lib/nativePush';
+import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 
 
 console.log("OnboardingTour:", OnboardingTour);
@@ -68,16 +68,9 @@ const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
 function ClientLayoutWrapper({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        await initNativePush();
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  return <>{children}</>;
-}
+  // fire and forget; it’s guarded for web/SSR
+  initNativePush();
+}, []);
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   useSystemTheme(); // <-- Call the hook at the top of your component
@@ -302,7 +295,14 @@ if (hasNewer && inbound) {
   };
 }, [pathname, router]);
 
-
+useEffect(() => {
+  const unsub = onAuthStateChanged(auth, async (u) => {
+    if (u) {
+      await bindTokenToUserIfAvailable();
+    }
+  });
+  return () => unsub();
+}, []);
 
   const handleLogout = async () => {
     await signOut(auth);
