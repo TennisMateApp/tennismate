@@ -393,7 +393,14 @@ useEffect(() => {
   return (
     <div className="flex flex-col h-[100svh] bg-white overflow-hidden">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b shadow-sm px-4 py-2">
+      <div
+  className="sticky z-10 bg-white/90 backdrop-blur border-b shadow-sm px-4 py-2"
+  style={{
+    top: 'env(safe-area-inset-top, 0px)',
+    paddingTop: 'env(safe-area-inset-top, 0px)',
+  }}
+>
+
         <div className="flex items-center gap-3">
           <button onClick={() => router.push("/messages")} aria-label="Back">
             <ArrowLeft className="w-5 h-5 text-gray-700" />
@@ -544,14 +551,16 @@ useEffect(() => {
 
 
       {/* Scroll-to-bottom FAB */}
-     {showScrollDown && (
+{showScrollDown && (
   <button
     onClick={() => scrollToBottom(true)}
-    className="fixed bottom-24 right-4 rounded-full bg-white border shadow px-3 py-1.5 text-xs text-gray-700"
+    className="fixed right-4 rounded-full bg-white border shadow px-3 py-1.5 text-xs text-gray-700"
+    style={{ bottom: 'calc(96px + env(safe-area-inset-bottom, 0px))' }} // 96px ≈ bottom nav + input bar
   >
     Jump to latest
   </button>
 )}
+
 
       {/* Input */}
       <div
