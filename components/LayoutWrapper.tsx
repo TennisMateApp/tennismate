@@ -8,7 +8,7 @@ import { GiTennisCourt, GiTennisBall } from "react-icons/gi";
 import { collection, query, where, onSnapshot, getDoc, doc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import NotificationBell from "@/components/NotificationBell";
+import NotificationBell from "@/components/notifications/NotificationBell";
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<any>(null);
