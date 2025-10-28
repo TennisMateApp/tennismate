@@ -84,7 +84,7 @@ export async function initNativePush() {
   name: 'Messages',
   description: 'New messages and match updates',
   importance: 5,              // IMPORTANCE_HIGH
-  sound: 'default',           // use default sound
+  sound: 'tennis_ball_hit',          // use default sound
   vibration: true,
   lights: true,
 });
