@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseConfig";
 import { onAuthStateChanged } from "firebase/auth";
@@ -86,6 +86,14 @@ export default function ProfilePage() {
   badges: [] as string[],
   timestamp: null as any,
 });
+
+// Profile photo presence (preview, stored, or freshly cropped)
+// NOTE: compute after formData is declared to avoid "Cannot access 'formData' before initialization"
+const hasPhoto = useMemo(
+  () => Boolean(previewURL || formData.photoURL || croppedImage),
+  [previewURL, formData.photoURL, croppedImage]
+);
+
   const [matchStats, setMatchStats] = useState({ matches: 0, completed: 0, wins: 0 });
 
   useEffect(() => {
@@ -216,7 +224,7 @@ const handleRemovePhoto = async () => {
       const refSt = ref(storage, `profile_pictures/${user.uid}/profile.jpg`);
       await deleteObject(refSt).catch(() => {}); // ignore if missing
     }
-    setStatus("Photo removed.");
+    setStatus("Photo removed. Please upload a new profile photo before saving.");
   } catch {
     setStatus("Could not remove photo.");
   }
@@ -226,7 +234,14 @@ const handleRemovePhoto = async () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+
+    // Require a profile photo to save
+if (!hasPhoto) {
+  setStatus("Please add a profile photo to continue.");
+  return;
+}
     // basic client-side validation
+    
 if (!formData.name.trim()) {
   setStatus("Please enter your name.");
   return;
@@ -609,8 +624,13 @@ await setDoc(
     <div className="mt-1 text-xs text-gray-500">{formData.bio.length}/300</div>
   </div>
 
-  {/* Photo */}
-  <div className="flex items-center gap-4">
+  {/* Photo (required) */}
+<div>
+  <label className="block text-sm font-medium text-gray-800">
+    Profile Photo <span className="text-red-600">*</span>
+  </label>
+
+  <div className="mt-1 flex items-center gap-4">
     {previewURL ? (
       <img
         src={previewURL}
@@ -618,10 +638,15 @@ await setDoc(
         alt="Preview"
       />
     ) : (
-      <div className="h-20 w-20 rounded-full bg-gray-100 ring-2 ring-gray-200" />
+      <div
+        className={`h-20 w-20 rounded-full ring-2 ${
+          hasPhoto ? "bg-gray-100 ring-gray-200" : "bg-red-50 ring-red-200"
+        }`}
+        aria-label="No profile photo selected"
+      />
     )}
 
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-2 items-center">
       <label
         htmlFor="upload"
         className="cursor-pointer inline-block rounded-xl bg-green-600 text-white px-3 py-2 text-sm font-semibold shadow hover:bg-green-700"
@@ -645,8 +670,16 @@ await setDoc(
           Remove Photo
         </button>
       )}
+
+      {!hasPhoto && (
+        <span className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+          A profile photo is required to save.
+        </span>
+      )}
     </div>
   </div>
+</div>
+
 </form>
 
           </section>
@@ -701,13 +734,15 @@ await setDoc(
         Cancel
       </button>
       <button
-        form="editProfile"
-        type="submit"
-        disabled={saving}
-        className="rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 disabled:opacity-50"
-      >
-        {saving ? "Saving…" : "Save Profile"}
-      </button>
+  form="editProfile"
+  type="submit"
+  disabled={saving || !hasPhoto}
+  title={!hasPhoto ? "Add a profile photo to enable Save" : undefined}
+  className="rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+>
+  {saving ? "Saving…" : "Save Profile"}
+</button>
+
     </div>
 
     <div className="text-right">

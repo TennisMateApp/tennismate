@@ -8,6 +8,7 @@
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -29,3 +30,4 @@ body {
 /* helpers */
 .safe-top { padding-top: var(--safe-area-top); }
 .safe-bottom { padding-bottom: var(--safe-area-bottom); }
+.sticky-safe { position: sticky; top: var(--safe-top); }

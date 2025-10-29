@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { useEffect, useState } from "react";
+import { signInWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
@@ -14,7 +14,18 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = searchParams?.get("next") || "/home";
+
+  // If already signed in, go to /home (or next) immediately
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (u) router.replace(next);
+    });
+    return () => unsub();
+  }, [router, next]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,9 +33,19 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      router.push("/home"); // Redirect after login
+      router.replace(next);
     } catch (err: any) {
-      setError("Invalid email or password.");
+      // Friendlier Firebase auth error messages
+      const code = err?.code || "";
+      if (code.includes("user-not-found") || code.includes("wrong-password")) {
+        setError("Invalid email or password.");
+      } else if (code.includes("too-many-requests")) {
+        setError("Too many attempts. Please try again later.");
+      } else if (code.includes("network-request-failed")) {
+        setError("Network error. Check your connection and try again.");
+      } else {
+        setError("Unable to sign in. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -116,11 +137,15 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-4 flex flex-col items-center gap-3">
-            <Link href="/forgot-password" className="text-sm text-green-700 hover:underline">
+            <Link
+              href="/forgot-password"
+              className="text-sm text-green-700 hover:underline"
+            >
               Forgot Password?
             </Link>
 
-            <Link href="/signup" className="w-full">
+            {/* Preserve ?next= for signup path too */}
+            <Link href={`/signup${next ? `?next=${encodeURIComponent(next)}` : ""}`} className="w-full">
               <button
                 type="button"
                 className="w-full border border-gray-300 text-gray-800 py-2.5 rounded-lg hover:bg-gray-50 transition"

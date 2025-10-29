@@ -44,6 +44,42 @@ async function getAndroidTokensForUser(uid: string): Promise<string[]> {
   return tokens;
 }
 
+/**
+ * True if user has at least one Android device doc with a valid token and push not disabled.
+ * Expects device docs at users/{uid}/devices/{deviceId} with fields:
+ *   platform: "android" | "web"
+ *   fcmToken?: string
+ *   notificationsEnabled?: boolean
+ *   pushOptOut?: boolean
+ *   revoked?: boolean
+ */
+async function hasActiveAndroidPush(uid: string): Promise<boolean> {
+  const snap = await db
+    .collection("users")
+    .doc(uid)
+    .collection("devices")
+    .where("platform", "==", "android")
+    .get();
+
+  if (snap.empty) return false;
+
+  for (const d of snap.docs) {
+    const disabled = d.get("notificationsEnabled") === false || d.get("pushOptOut") === true;
+    const revoked = d.get("revoked") === true;
+    const tokenInDoc = d.get("fcmToken") as string | undefined;
+    const token = tokenInDoc || d.id;
+    if (token && !disabled && !revoked) return true;
+  }
+  return false;
+}
+
+/** Convenience: returns true only if we SHOULD send email. */
+async function shouldEmailUser(uid: string): Promise<boolean> {
+  const androidActive = await hasActiveAndroidPush(uid);
+  return !androidActive; // email only when Android push is NOT active
+}
+
+
 async function sendAndroidPushToUser(
   uid: string,
   payload: { title: string; body: string; route?: string; type?: string }
@@ -316,13 +352,27 @@ export const emailOnJoinRequestCreated = onDocumentCreated(
     }
 
     const hostEmail = await getUserEmail(hostId);
-    if (!hostEmail) {
-      console.log("❌ No email for host; skipping.");
-      return;
-    }
+if (!hostEmail) {
+  console.log("❌ No email for host; skipping.");
+  return;
+}
 
-    // 👇 NEW: build a friendly greeting name for the host
-    const hostNameFromPlayers = await getPlayerName(hostId);
+// ✋ Suppress email if host has active Android push
+const emailAllowed = await shouldEmailUser(hostId);
+if (!emailAllowed) {
+  console.log("📭 Suppressing host email (active Android push).", { hostId });
+  await db
+    .collection("events")
+    .doc(eventId)
+    .collection("join_requests")
+    .doc(reqId)
+    .set({ emailHostNotified: true }, { merge: true });
+  return;
+}
+
+// 👇 NEW: build a friendly greeting name for the host
+const hostNameFromPlayers = await getPlayerName(hostId);
+
     const hostGreetingName =
       hostNameFromPlayers && hostNameFromPlayers !== "Player"
         ? hostNameFromPlayers
@@ -389,16 +439,29 @@ export const emailOnJoinRequestAccepted = onDocumentUpdated(
 
     const { eventId, reqId } = event.params as { eventId: string; reqId: string };
     const { title, location, startISO } = await getEventSummary(eventId);
+const requesterId = after.userId || "";
+const requesterEmail = await getUserEmail(requesterId);
+if (!requesterEmail) {
+  console.log("❌ No email for requester; skipping.");
+  return;
+}
 
-    const requesterId = after.userId || "";
-    const requesterEmail = await getUserEmail(requesterId);
-    if (!requesterEmail) {
-      console.log("❌ No email for requester; skipping.");
-      return;
-    }
+// ✋ Suppress email if requester has active Android push
+const emailAllowed = await shouldEmailUser(requesterId);
+if (!emailAllowed) {
+  console.log("📭 Suppressing requester email (active Android push).", { requesterId });
+  await db
+    .collection("events")
+    .doc(eventId)
+    .collection("join_requests")
+    .doc(reqId)
+    .set({ emailAcceptedNotified: true }, { merge: true });
+  return;
+}
 
-    // 👇 NEW: build a friendly greeting name for the requester
-    const requesterNameFromPlayers = await getPlayerName(requesterId);
+// 👇 NEW: build a friendly greeting name for the requester
+const requesterNameFromPlayers = await getPlayerName(requesterId);
+
     const requesterGreetingName =
       requesterNameFromPlayers && requesterNameFromPlayers !== "Player"
         ? requesterNameFromPlayers
@@ -758,24 +821,30 @@ export const emailOnNewMessageNotification = onDocumentCreated(
     const notif = n;
     if (!notif) return;
 
-    const recipientId = notif.recipientId as string | undefined;
-    if (!recipientId) return;
+const recipientId = notif.recipientId as string | undefined;
+if (!recipientId) return;
 
-    const userSnap = await db.collection("users").doc(recipientId).get();
-    const toEmail = userSnap.exists ? userSnap.get("email") : null;
-    if (!toEmail) {
-      console.log(`❌ No email found for recipient ${recipientId}`);
-      return;
-    }
+const userSnap = await db.collection("users").doc(recipientId).get();
+const toEmail = userSnap.exists ? userSnap.get("email") : null;
+if (!toEmail) {
+  console.log(`❌ No email found for recipient ${recipientId}`);
+  return;
+}
 
-    const getName = async (uid?: string) => {
-      if (!uid) return "A player";
-      const s = await db.collection("players").doc(uid).get();
-      return s.exists ? (s.get("name") || "A player") : "A player";
-    };
+// ✋ Global gate: suppress all notification emails if Android push is active
+const emailAllowed = await shouldEmailUser(recipientId);
+if (!emailAllowed) {
+  console.log("📭 Suppressing notification email (active Android push).", {
+    recipientId,
+    type: notif.type
+  });
+  return;
+}
+
 
     if (notif.type === "message") {
-      const fromName = await getName(notif.fromUserId);
+      const fromName = notif.fromUserId ? await getPlayerName(notif.fromUserId) : "A player";
+
       const conversationId = notif.conversationId;
       const body = (notif.body || notif.message || "").toString();
       const snippet = body.length > 200 ? body.slice(0, 200) + "…" : body;
@@ -799,7 +868,7 @@ export const emailOnNewMessageNotification = onDocumentCreated(
     }
 
     if (notif.type === "match_request") {
-      const fromName = await getName(notif.fromUserId);
+      const fromName = notif.fromUserId ? await getPlayerName(notif.fromUserId) : "A player";
       const subject = `${fromName} challenged you to a match 🎾`;
       const html = `
         <p>${fromName} has challenged you to a match.</p>
