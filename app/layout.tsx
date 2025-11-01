@@ -1,8 +1,7 @@
 // app/layout.tsx
 import "./globals.css";
 import type { ReactNode } from "react";
-import AuthLayoutWrapper from "@/components/AuthLayoutWrapper";
-import AuthGate from "@/components/AuthGate";
+import ClientLayoutWrapper from "@/components/ClientLayoutWrapper";
 
 export const metadata = {
   title: "TennisMate",
@@ -23,14 +22,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           name="viewport"
           content="width=device-width, initial-scale=1, viewport-fit=cover"
         />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta
+          name="apple-mobile-web-app-status-bar-style"
+          content="black-translucent"
+        />
         <meta name="format-detection" content="telephone=no" />
       </head>
       <body>
-        {/* AuthGate decides login vs home; wrapper handles your app shell */}
-        <AuthGate>
-          <AuthLayoutWrapper>{children}</AuthLayoutWrapper>
-        </AuthGate>
+        <ClientLayoutWrapper>{children}</ClientLayoutWrapper>
       </body>
     </html>
   );
