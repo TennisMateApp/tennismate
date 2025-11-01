@@ -15,6 +15,11 @@
         <item name="android:background">@null</item>
     </style>
 
+    <style name="Theme.SplashScreen" parent="Theme.SplashScreen.IconBackground">
+    <item name="windowSplashScreenBackground">#0B132B</item> <!-- matches capacitor.config.ts -->
+    <item name="postSplashScreenTheme">@style/AppTheme</item>
+</style>
+
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
