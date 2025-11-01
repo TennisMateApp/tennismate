@@ -25,6 +25,7 @@ import NotificationBell from "@/components/notifications/NotificationBell";
 import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
+import TennisMateLoader from '@/components/TennisMateLoader';
 
 
 console.log("OnboardingTour:", OnboardingTour);
@@ -351,9 +352,9 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
     );
   }
 
-    if (!gateReady && !PUBLIC_ROUTES.has(pathname || "")) {
-    return null; // prevent first-paint flicker on gated pages
-  }
+ if (!gateReady && !PUBLIC_ROUTES.has(pathname || "")) {
+  return <TennisMateLoader />; // 🎾 Show the TennisMate loader while app initializes
+}
 
   return (
  <div className={`min-h-screen text-gray-900 ${hideAllNav ? "" : "bg-gray-100"} ${hideAllNav ? "" : "pb-20"}`}>
