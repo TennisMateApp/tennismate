@@ -26,6 +26,7 @@ import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import TennisMateLoader from '@/components/TennisMateLoader';
+import { SplashScreen } from '@capacitor/splash-screen'; //
 
 
 console.log("OnboardingTour:", OnboardingTour);
@@ -74,6 +75,19 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     initNativePush();
   }, []);
 
+  // ✅ Keep native splash visible briefly, then hide (prevents white flash)
+useEffect(() => {
+  if (!Capacitor.isNativePlatform()) return;
+
+  // give the WebView time to paint before hiding splash
+  const t = setTimeout(() => {
+    SplashScreen.hide().catch(() => {});
+  }, 400);
+
+  return () => clearTimeout(t);
+}, []);
+
+
   const [user, setUser] = useState<any>(null);
   const [photoURL, setPhotoURL] = useState<string | null>(null);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
@@ -88,13 +102,11 @@ const [showTour, setShowTour] = useState(false);
 useEffect(() => {
   if (!Capacitor.isNativePlatform()) return;
 
-  // Put the WebView *below* the OS status bar so nothing is covered
   StatusBar.setOverlaysWebView({ overlay: false });
-
-  // Optional polish: light background + dark icons in the status bar
-  StatusBar.setBackgroundColor({ color: '#ffffff' });
-  StatusBar.setStyle({ style: Style.Dark });
+  StatusBar.setBackgroundColor({ color: '#0B132B' }); // ✅ same color as splash
+  StatusBar.setStyle({ style: Style.Light });          // ✅ white icons
 }, []);
+
 
 // NEW:
 const [needsTour, setNeedsTour] = useState(false);
