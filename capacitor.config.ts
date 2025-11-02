@@ -7,28 +7,25 @@ const config: CapacitorConfig = {
 
   // Load your production PWA in the WebView
   server: {
-    url: 'https://tennismate-s7vk.vercel.app/',
+    // ✅ point to your stable production URL and remove trailing slash
+    url: 'https://tennismate-s7vk.vercel.app', 
     cleartext: false,
+    // (Optional) allow navigation to this host (and any others you may bounce to)
+    allowNavigation: ['tennismate-s7vk.vercel.app'],
   },
 
   android: {
+    // Keep this false unless you knowingly load http assets
     allowMixedContent: false,
   },
 
-  // 🔽 Native splash configuration
   plugins: {
     SplashScreen: {
-      // 0 lets Android 12+ decide; or use ~1200 for a consistent brief show
+      // You can drop to 600–800 for a snappier feel if you like
       launchShowDuration: 1200,
       launchAutoHide: true,
-
-      // Set to your brand background color (swap this to your green if preferred)
-      backgroundColor: '#0B132B', // e.g. try a brand green like '#16A34A'
-
-      // Keep the logo crisp and centered (from assets/splash.png)
+      backgroundColor: '#0B132B',
       androidScaleType: 'CENTER_INSIDE',
-
-      // No spinner—clean look
       showSpinner: false,
     },
   },
