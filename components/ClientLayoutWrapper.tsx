@@ -10,7 +10,6 @@ import { GiTennisCourt, GiTennisBall, GiTennisRacket } from "react-icons/gi";
 import {
   collection, query, where, onSnapshot, getDoc, doc, updateDoc, writeBatch, serverTimestamp
 } from "firebase/firestore";
-// ✅ Import the function instead
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import InstallPwaAndroidPrompt from "@/components/InstallPwaAndroidPrompt";
@@ -20,19 +19,26 @@ const OnboardingTour = dynamic(
   () => import("@/components/OnboardingTour").then((m) => m.default),
   { ssr: false }
 );
+const PushClientOnly = dynamic(
+  () => import("@/components/PushClientOnly").then(m => m.default),
+  { ssr: false }
+);
 import { ONBOARDING_VERSION } from "@/app/constants/onboarding";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
-import TennisMateLoader from '@/components/TennisMateLoader';
 import { SplashScreen } from '@capacitor/splash-screen'; //
 
+function useAppBootLoader() {
+  const [bootDone, setBootDone] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setBootDone(true), 800);
+    return () => clearTimeout(t);
+  }, []);
+  return bootDone;
+}
 
-console.log("OnboardingTour:", OnboardingTour);
-
-
-const PushClientOnly = dynamic(() => import("./PushClientOnly"), { ssr: false });
 
 // ---- Add the useSystemTheme hook after imports ----
 function useSystemTheme() {
@@ -74,6 +80,9 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     useEffect(() => {
     initNativePush();
   }, []);
+
+    const bootDone = useAppBootLoader();
+
 
   // ✅ Keep native splash visible briefly, then hide (prevents white flash)
 useEffect(() => {
@@ -118,7 +127,6 @@ const pathname = usePathname() || "";
 const isActive = (href: string) =>
 pathname === href || pathname.startsWith(href + "/");  
 const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
-const [gateReady, setGateReady] = useState(false);
 
 // Show "Matches" instead of "Events" when the user is in the match flow
 const inMatchFlow =
@@ -252,9 +260,8 @@ if (hasNewer && inbound) {
 }, []);
 
 
-  useEffect(() => {
+useEffect(() => {
   // Only show when:
-  if (!gateReady) return;
   if (!user) return;
   if (PUBLIC_ROUTES.has(pathname || "")) return;
   if (!needsTour) return;
@@ -263,60 +270,30 @@ if (hasNewer && inbound) {
 
   tourShownThisSession.current = true;
   setShowTour(true);
-}, [gateReady, user, pathname, needsTour, hideAllNav]);
+}, [user, pathname, needsTour, hideAllNav]);
 
- useEffect(() => {
-  let cancelled = false;
 
+
+// ✅ Redirect watcher on navigation (does NOT touch gateReady)
+useEffect(() => {
   (async () => {
-    // Public routes: render immediately (no gating)
-    if (PUBLIC_ROUTES.has(pathname || "")) {
-      if (!cancelled) setGateReady(true);
-      return;
-    }
-
-    // Start gating → hide content until we decide
-    if (!cancelled) setGateReady(false);
-
     const u = auth.currentUser;
-
-    // Not signed in: let page-level logic handle redirects
-    if (!u) {
-      if (!cancelled) setGateReady(true);
-      return;
-    }
+    if (!u) return;
 
     await u.reload();
 
-    // Check Firestore flag
     const snap = await getDoc(doc(db, "users", u.uid));
-    const requireVerification =
-      snap.exists() && snap.data()?.requireVerification === true;
-
+    const requireVerification = snap.exists() && snap.data()?.requireVerification === true;
     const needsVerify = requireVerification && !u.emailVerified;
 
-    // Needs verification and not on /verify-email → force /verify-email
     if (needsVerify && !pathname?.startsWith("/verify-email")) {
       router.replace("/verify-email");
-      return; // we'll render verify page on next route
     }
-
-    // Already verified but on /verify-email → send to /match
-    if (!needsVerify && pathname?.startsWith("/verify-email")) {
-      router.replace("/match");
-      return;
-    }
-
-    // All good → render current page
-    if (!cancelled) setGateReady(true);
   })();
-
-
-
-  return () => {
-    cancelled = true;
-  };
 }, [pathname, router]);
+
+
+
 
 useEffect(() => {
   const unsub = onAuthStateChanged(auth, async (u) => {
@@ -364,9 +341,16 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
     );
   }
 
- if (!gateReady && !PUBLIC_ROUTES.has(pathname || "")) {
-  return <TennisMateLoader />; // 🎾 Show the TennisMate loader while app initializes
+  // Show lightweight splash until boot timer completes (runs AFTER all hooks)
+if (!bootDone) {
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-white">
+      <img src="/logo.png" alt="TennisMate" className="w-28 h-28 animate-bounce" />
+      <div className="mt-4 text-green-700 font-semibold">Loading TennisMate...</div>
+    </div>
+  );
 }
+
 
   return (
  <div className={`min-h-screen text-gray-900 ${hideAllNav ? "" : "bg-gray-100"} ${hideAllNav ? "" : "pb-20"}`}>
@@ -551,16 +535,11 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
 
      {user && !hideAllNav && !hideFeedback && <FloatingFeedbackButton />}
 <OnboardingTour
-  open={
-    !!user &&
-    showTour &&
-    gateReady &&
-    !PUBLIC_ROUTES.has(pathname || "") &&
-    !hideAllNav
-  }
+  open={!!user && showTour && !PUBLIC_ROUTES.has(pathname || "") && !hideAllNav}
   onClose={completeOnboardingTour}
   onComplete={completeOnboardingTour}
 />
+
 
 
     </div>
