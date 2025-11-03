@@ -2,6 +2,7 @@
 import "./globals.css";
 import type { ReactNode } from "react";
 import ClientLayoutWrapper from "@/components/ClientLayoutWrapper";
+import AuthGate from "@/components/AuthGate";
 
 export const metadata = {
   title: "TennisMate",
@@ -25,9 +26,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="format-detection" content="telephone=no" />
       </head>
-      <body>
-        {/* ✅ Single global client wrapper so it does NOT remount on nav */}
-        <ClientLayoutWrapper>{children}</ClientLayoutWrapper>
+      <body className="m-0 min-h-[100dvh] overflow-x-hidden">
+        {/* ✅ Global client wrapper + auth gate */}
+        <AuthGate>
+          <ClientLayoutWrapper>{children}</ClientLayoutWrapper>
+        </AuthGate>
       </body>
     </html>
   );

@@ -52,16 +52,20 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative min-h-screen">
-      {/* Background */}
-      <Image
-        src="/images/login-tennis-court.jpg"
-        alt=""
-        fill
-        priority
-        className="object-cover opacity-90"
-      />
-      <div className="absolute inset-0 bg-black/40" />
+    <div className="relative min-h-[100dvh] overflow-hidden">
+  {/* Background */}
+<div className="fixed inset-0 z-0">
+  <div className="relative h-full w-full">
+    <Image
+      src="/images/login-tennis-court.jpg"
+      alt=""
+      fill
+      priority
+      className="object-cover"
+    />
+  </div>
+  <div className="absolute inset-0 bg-black/40" />
+</div>
 
       {/* Content */}
       <div className="relative z-10 min-h-screen flex items-center justify-center px-4">
