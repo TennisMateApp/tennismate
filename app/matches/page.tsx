@@ -28,8 +28,8 @@ import {
   Check,
   X,
   ArrowRight,
+  Clock,
   Loader2, 
-  ExternalLink,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -146,8 +146,8 @@ async function fetchCourtDocById(dbRef: typeof db, id: string) {
 
 const CourtBadge = ({
   name,
-  lat,
-  lng,
+  lat,   // keep for distance elsewhere
+  lng,   // keep for distance elsewhere
   bookingUrl,
   address,
 }: {
@@ -157,55 +157,51 @@ const CourtBadge = ({
   bookingUrl?: string | null;
   address?: string | null;
 }) => {
-  const q = address?.trim() ? `${name}, ${address}` : name;
+  // Build a search query. If address is present, use "Name, Address".
+  const q = address?.trim()
+    ? `${name}, ${address}`
+    : name;
+
   const mapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
   const safeBooking = normalizeUrl(bookingUrl || undefined);
 
-  return (
-    <div className="w-full max-w-[520px]">
-      <div className="text-center text-[11px] font-semibold tracking-wide text-green-800/80 uppercase">
-        Suggested court
-      </div>
 
-      <div className="mt-1 rounded-xl bg-green-50 ring-1 ring-green-200/80 shadow-sm px-3 py-2.5">
-        <div className="flex items-center justify-between gap-3">
-          {/* name + address */}
-          <div className="min-w-0 flex-1">
-            <div className="font-semibold text-green-900 truncate">{name}</div>
-            {address && (
-              <div className="text-xs text-green-900/80 truncate">{address}</div>
-            )}
-          </div>
-
-          {/* actions */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <a
-              href={mapHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-green-800 ring-1 ring-green-200 hover:bg-green-100"
-              title="Open in Google Maps"
-            >
-              Map
-            </a>
-
-            {safeBooking && (
-              <a
-                href={safeBooking}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
-                title="Open booking page"
-              >
-                Book <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+ return (
+  <span className="inline-flex items-center gap-2 rounded-full bg-gray-50 text-gray-800 ring-1 ring-gray-200 px-2.5 py-1 text-xs">
+    <span className="inline-flex items-center gap-1 font-medium">
+      <span aria-hidden>🏟️</span>
+      {name}
+    </span>
+    <span className="h-3 w-px bg-gray-200" aria-hidden />
+    <span className="inline-flex items-center gap-2">
+      <a
+        href={mapHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline decoration-gray-300 underline-offset-2 hover:decoration-gray-400"
+        title="Open in Google Maps"
+      >
+        Map
+      </a>
+      {safeBooking && (
+        <>
+          <span className="h-3 w-px bg-gray-200" aria-hidden />
+          <a
+            href={safeBooking}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-gray-300 underline-offset-2 hover:decoration-gray-400"
+            title="Open booking page"
+          >
+            Book
+          </a>
+        </>
+      )}
+    </span>
+  </span>
+);
 };
+
 
 
 
@@ -872,25 +868,44 @@ return (
           {match.message || "No message"}
         </p>
 
-{/* Meta — line 2 (court chip) */}
-<div className="mt-4 flex items-center justify-center w-full">
-  {match.suggestedCourtName ? (
-    <CourtBadge
-      name={match.suggestedCourtName}
-      lat={match.suggestedCourtLat}
-      lng={match.suggestedCourtLng}
-      bookingUrl={match.status === "accepted" ? match.suggestedCourtBookingUrl : undefined}
-      address={match.suggestedCourtAddress}
-    />
-  ) : (
-    <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      Finding court…
-    </span>
-  )}
-</div>
+        {/* Meta — line 1 */}
+        <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+          <Clock className="h-3.5 w-3.5 opacity-60" />
+          {inProgress && startedAt ? (
+            <span title={startedAt.toLocaleString()}>
+              Started {formatRelativeTime(startedAt)}
+            </span>
+          ) : (
+            <span title={created ? created.toLocaleString() : undefined}>
+              {match.status === "accepted"
+                ? "Accepted"
+                : match.status === "unread"
+                ? "Unread"
+                : match.status}{" "}
+              • {formatRelativeTime(created)}
+            </span>
+          )}
 
+          {typeof distanceKm === "number" && <span className="ml-1">• ~{distanceKm} km</span>}
+        </div>
 
+        {/* Meta — line 2 (court chip) */}
+        <div className="mt-1 flex items-center justify-center w-full">
+          {match.suggestedCourtName ? (
+            <CourtBadge
+              name={match.suggestedCourtName}
+              lat={match.suggestedCourtLat}
+              lng={match.suggestedCourtLng}
+              bookingUrl={match.status === "accepted" ? match.suggestedCourtBookingUrl : undefined}
+              address={match.suggestedCourtAddress}
+            />
+          ) : (
+            <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Finding court…
+            </span>
+          )}
+        </div>
       </div>
     </div>
 
@@ -985,20 +1000,17 @@ return (
                 Accept
               </button>
 
-             {tab !== "pending" && (
-  <button
-    onClick={() => {
-      const sortedIDs = [currentUserId!, other].sort().join("_");
-      router.push(`/messages/${sortedIDs}`);
-    }}
-    aria-label="Open chat"
-    className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-  >
-    <MessageCircle className="h-4 w-4" />
-    Chat
-  </button>
-)}
-
+              <button
+                onClick={() => {
+                  const sortedIDs = [currentUserId!, other].sort().join("_");
+                  router.push(`/messages/${sortedIDs}`);
+                }}
+                aria-label="Open chat"
+                className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+              >
+                <MessageCircle className="h-4 w-4" />
+                Chat
+              </button>
 
               <Link
                 href={profileHref}
@@ -1019,20 +1031,17 @@ return (
             </>
           ) : (
             <>
-           {tab !== "pending" && (
-  <button
-    onClick={() => {
-      const sortedIDs = [currentUserId!, other].sort().join("_");
-      router.push(`/messages/${sortedIDs}`);
-    }}
-    aria-label="Open chat"
-    className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-  >
-    <MessageCircle className="h-4 w-4" />
-    Chat
-  </button>
-)}
-
+              <button
+                onClick={() => {
+                  const sortedIDs = [currentUserId!, other].sort().join("_");
+                  router.push(`/messages/${sortedIDs}`);
+                }}
+                aria-label="Open chat"
+                className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+              >
+                <MessageCircle className="h-4 w-4" />
+                Chat
+              </button>
 
               <Link
                 href={profileHref}
@@ -1057,7 +1066,6 @@ return (
   myPlayer,
   postcodeCoords,
   oppCache,
-  tab,
 ]);
 
 

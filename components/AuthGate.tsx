@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { onAuthStateChanged, User } from "firebase/auth";
 import { auth } from "@/lib/firebase"; // or "@/lib/firebaseConfig"
 
 const PUBLIC_ROUTES = new Set<string>([
@@ -11,67 +11,37 @@ const PUBLIC_ROUTES = new Set<string>([
   "/reset-password",
   "/privacy",
   "/terms",
-  "/", // treat root as public so we can decide where to send the user
 ]);
-
-// Optional: allowlist check so we don't redirect to external URLs via ?next=
-function isSafeInternalPath(p?: string | null) {
-  return !!p && p.startsWith("/") && !p.startsWith("//");
-}
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-
   const pathname = usePathname() || "/";
-  const searchParams = useSearchParams();
   const router = useRouter();
-
-  // Prevent multiple router.replace calls on the same render cycle
-  const redirected = useRef(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setCurrentUser(u);
       setReady(true);
+
+      // If not signed in, force to /login unless already on a public route
+      if (!u) {
+        if (!PUBLIC_ROUTES.has(pathname)) {
+          const next = pathname === "/" ? "/home" : pathname; // where to go after login
+          router.replace(`/login?next=${encodeURIComponent(next)}`);
+        }
+        return;
+      }
+
+      // If signed in, avoid staying on login/signup; go to /home (or keep deep link)
+      if (u && (pathname === "/" || pathname === "/login" || pathname === "/signup")) {
+        router.replace("/home");
+      }
     });
     return () => unsub();
-  }, []);
+  }, [pathname, router]);
 
-  useEffect(() => {
-    if (!ready || redirected.current) return;
-
-    const user = currentUser;
-    const isPublic = PUBLIC_ROUTES.has(pathname);
-    const nextParam = searchParams?.get("next");
-    const safeNext = isSafeInternalPath(nextParam) ? nextParam! : null;
-
-    // 1) NOT signed in → always send to /login (with next=… if coming from a non-public page)
-    if (!user) {
-      if (!isPublic) {
-        redirected.current = true;
-        router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-        return;
-      }
-      // If they’re on "/" and not signed in, also push to /login
-      if (pathname === "/") {
-        redirected.current = true;
-        router.replace("/login");
-        return;
-      }
-      return; // already on a public route like /login, /signup, etc.
-    }
-
-    // 2) Signed in → if sitting on a public route (/, /login, /signup, /reset-password)
-    //    send them to next (if provided) else /home.
-    if (user && isPublic) {
-      redirected.current = true;
-      router.replace(safeNext || "/home");
-      return;
-    }
-  }, [ready, currentUser, pathname, searchParams, router]);
-
-  // Minimal splash to prevent flicker
+  // Minimal splash to prevent UI flicker before we know the auth state
   if (!ready) {
     return (
       <div className="flex h-dvh items-center justify-center">
