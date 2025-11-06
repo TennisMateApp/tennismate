@@ -65,11 +65,12 @@ const Chip = ({
       ? "bg-yellow-50 text-yellow-700 ring-yellow-200"
       : "bg-gray-100 text-gray-700 ring-gray-200";
   return (
-    <span className={`inline-flex items-center rounded-full text-[10px] px-2 py-[2px] ring-1 ${toneCls} ${className}`}>
+    <span className={`inline-flex items-center rounded-full text-[11px] leading-[1] px-2.5 py-[3px] ring-1 ${toneCls} ${className}`}>
       {children}
     </span>
   );
 };
+
 
 // --- Button helpers ---
 const btnBase =
@@ -165,41 +166,40 @@ const CourtBadge = ({
   const safeBooking = normalizeUrl(bookingUrl || undefined);
 
 
-  return (
-    <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 text-blue-800 ring-1 ring-blue-200 px-2.5 py-1 text-xs">
-      <span className="inline-flex items-center gap-1 font-medium">
-        <span aria-hidden>🏟️</span>
-        {name}
-      </span>
-      <span className="h-3 w-px bg-blue-200" aria-hidden />
-      <span className="inline-flex items-center gap-1">
-        <a
-          href={mapHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline decoration-blue-300 underline-offset-2 hover:decoration-blue-400"
-          title="Open in Google Maps"
-        >
-          Map
-        </a>
-       {safeBooking && (
-  <>
-    <span className="h-3 w-px bg-blue-200" aria-hidden />
-    <a
-      href={safeBooking}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="underline decoration-blue-300 underline-offset-2 hover:decoration-blue-400"
-      title="Open booking page"
-    >
-      Book
-    </a>
-  </>
-)}
-
-      </span>
+ return (
+  <span className="inline-flex items-center gap-2 rounded-full bg-gray-50 text-gray-800 ring-1 ring-gray-200 px-2.5 py-1 text-xs">
+    <span className="inline-flex items-center gap-1 font-medium">
+      <span aria-hidden>🏟️</span>
+      {name}
     </span>
-  );
+    <span className="h-3 w-px bg-gray-200" aria-hidden />
+    <span className="inline-flex items-center gap-2">
+      <a
+        href={mapHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline decoration-gray-300 underline-offset-2 hover:decoration-gray-400"
+        title="Open in Google Maps"
+      >
+        Map
+      </a>
+      {safeBooking && (
+        <>
+          <span className="h-3 w-px bg-gray-200" aria-hidden />
+          <a
+            href={safeBooking}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-gray-300 underline-offset-2 hover:decoration-gray-400"
+            title="Open booking page"
+          >
+            Book
+          </a>
+        </>
+      )}
+    </span>
+  </span>
+);
 };
 
 
@@ -222,13 +222,13 @@ const [matches, setMatches] = useState<Match[]>([]);
 const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
 const [queryText, setQueryText] = useState(searchParams.get("q") || "");
-const [startingId, setStartingId] = useState<string | null>(null);
 const [myPlayer, setMyPlayer] = useState<PlayerLite | null>(null);
   const [postcodeCoords, setPostcodeCoords] = useState<PCMap>({});
   const [oppCache, setOppCache] = useState<Record<string, PlayerLite | null>>({});
   const [loading, setLoading] = useState(true);
 const [acceptingId, setAcceptingId] = useState<string | null>(null);
 const [decliningId, setDecliningId] = useState<string | null>(null);
+const [startingId, setStartingId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"recent" | "oldest" | "distance">("recent");
 const [unreadOnly, setUnreadOnly] = useState(false);
 
@@ -786,266 +786,277 @@ const initials = (otherName || "?").trim().charAt(0).toUpperCase();
     // ignore; distanceKm stays null
   }
 
-  // 👇 THIS is the important part the parser was complaining about:
-  return (
-    <li
-      key={match.id}
-      className={
-        "relative w-full overflow-hidden pr-24 sm:pr-12 rounded-2xl bg-white ring-1 p-4 shadow-sm hover:shadow transition " +
-        (match.status === "unread" ? "ring-green-200" : "ring-black/5")
-      }
-    >
-      {/* left accent for unread */}
-      {match.status === "unread" && (
-        <div className="absolute inset-y-0 left-0 w-1 bg-green-400/70" />
-      )}
+// 👇 THIS is the important part the parser was complaining about:
+return (
+  <li
+  key={match.id}
+  className={
+    "relative w-full overflow-hidden rounded-2xl bg-white ring-1 p-4 shadow-sm hover:shadow-md transition " +
+    (match.status === "unread" ? "ring-green-200" : "ring-black/5")
+  }
+>
 
-      {/* Top-right overlay: Unread + delete */}
-      <div className="absolute top-2 right-2 z-10 flex items-center gap-2">
-        {match.status === "unread" && <Chip tone="warning">Unread</Chip>}
-        <button
-          onClick={() => deleteMatch(match.id)}
-          title="Delete request"
-          aria-label="Delete request"
-          className="p-1 rounded-md text-red-500/80 hover:text-red-600 hover:bg-red-50"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
+    {/* left accent for unread */}
+    {match.status === "unread" && (
+      <div className="absolute inset-y-0 left-0 w-1 bg-green-400/70" />
+    )}
 
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          {/* Header (opponent-first) */}
-          <div className="flex items-start gap-3">
-            {/* Avatar */}
-            <div className="h-9 w-9 rounded-full overflow-hidden bg-gray-100 ring-1 ring-black/5 shrink-0">
-              {avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatarUrl} alt={otherName} className="h-full w-full object-cover" />
+    {/* Top-right overlay: Unread + delete */}
+    <div className="absolute top-2 right-2 z-10 flex items-center gap-2">
+      {match.status === "unread" && <Chip tone="warning">Unread</Chip>}
+      <button
+        onClick={() => deleteMatch(match.id)}
+        title="Delete request"
+        aria-label="Delete request"
+        className="p-1 rounded-md text-red-500/80 hover:text-red-600 hover:bg-red-50"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
+
+    <div className="flex items-start gap-3">
+
+      <div className="min-w-0 flex-1">
+        {/* Header (opponent-first) */}
+        <div className="flex items-start gap-3 pr-24 sm:pr-12">
+          {/* Avatar */}
+          <div className="h-10 w-10 rounded-full overflow-hidden bg-gray-100 ring-1 ring-black/5 shrink-0">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt={otherName} className="h-full w-full object-cover" />
+            ) : (
+              <div className="h-full w-full grid place-items-center text-sm text-gray-600">
+                {initials}
+              </div>
+            )}
+          </div>
+
+          {/* Name + status */}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-2">
+              <span className="font-semibold text-gray-900 truncate">{otherName}</span>
+              <div className="ml-auto">
+                {inProgress ? (
+                  <Chip tone="brand">Game in progress</Chip>
+                ) : match.status === "accepted" ? (
+                  <Chip tone="success">Accepted</Chip>
+                ) : match.status !== "unread" ? (
+                  <Chip>{match.status}</Chip>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Subtle route line */}
+            <div className="mt-0.5 text-xs text-gray-500 truncate">
+              {isMine ? (
+                <>
+                  You{" "}
+                  <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> {otherName}
+                </>
               ) : (
-                <div className="h-full w-full grid place-items-center text-sm text-gray-600">
-                  {initials}
-                </div>
+                <>
+                  {otherName}{" "}
+                  <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> You
+                </>
               )}
             </div>
-
-            {/* Name + status */}
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-16 sm:pr-0">
-                <span className="font-semibold text-gray-900 truncate">{otherName}</span>
-                <span className="shrink-0 text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700 ring-1 ring-gray-200">
-                  {isMine ? "Outgoing" : "Incoming"}
-                </span>
-
-                <div className="ml-auto">
-                  {inProgress ? (
-                    <Chip tone="brand">Game in progress</Chip>
-                  ) : match.status === "accepted" ? (
-                    <Chip tone="success">Accepted</Chip>
-                  ) : match.status !== "unread" ? (
-                    <Chip>{match.status}</Chip>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="mt-0.5 text-xs text-gray-500 truncate">
-                {isMine ? (
-                  <>You <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> {otherName}</>
-                ) : (
-                  <>{otherName} <ArrowRight className="inline h-3 w-3 align-[-2px] text-gray-300" /> You</>
-                )}
-              </div>
-            </div>
           </div>
+        </div>
 
-          {/* Message */}
-          <p className="mt-2 text-sm text-gray-700 line-clamp-2">
-            {match.message || "No message"}
-          </p>
+        {/* Message */}
+        <p className="mt-2 text-sm text-gray-700 overflow-hidden text-ellipsis whitespace-nowrap block w-full">
+          {match.message || "No message"}
+        </p>
 
-          {/* Meta */}
-          <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-            <Clock className="h-3.5 w-3.5 opacity-60" />
-            {inProgress && startedAt ? (
-              <span title={startedAt.toLocaleString()}>Started {formatRelativeTime(startedAt)}</span>
-            ) : (
-              <span title={created ? created.toLocaleString() : undefined}>
-                {formatRelativeTime(created)}
-              </span>
-            )}
+        {/* Meta — line 1 */}
+        <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+          <Clock className="h-3.5 w-3.5 opacity-60" />
+          {inProgress && startedAt ? (
+            <span title={startedAt.toLocaleString()}>
+              Started {formatRelativeTime(startedAt)}
+            </span>
+          ) : (
+            <span title={created ? created.toLocaleString() : undefined}>
+              {match.status === "accepted"
+                ? "Accepted"
+                : match.status === "unread"
+                ? "Unread"
+                : match.status}{" "}
+              • {formatRelativeTime(created)}
+            </span>
+          )}
 
-            {typeof distanceKm === "number" && <Chip className="ml-1">~{distanceKm} km</Chip>}
+          {typeof distanceKm === "number" && <span className="ml-1">• ~{distanceKm} km</span>}
+        </div>
 
-<div className="ml-auto flex items-center gap-2">
-  {match.suggestedCourtName ? (
-    <CourtBadge
-      name={match.suggestedCourtName}
-      lat={match.suggestedCourtLat}
-      lng={match.suggestedCourtLng}
-      bookingUrl={match.status === "accepted" ? match.suggestedCourtBookingUrl : undefined}
-      address={match.suggestedCourtAddress}  
-    />
-  ) : (
-    <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      Finding court…
-    </span>
-  )}
-</div>
+        {/* Meta — line 2 (court chip) */}
+        <div className="mt-1 flex items-center justify-center w-full">
+          {match.suggestedCourtName ? (
+            <CourtBadge
+              name={match.suggestedCourtName}
+              lat={match.suggestedCourtLat}
+              lng={match.suggestedCourtLng}
+              bookingUrl={match.status === "accepted" ? match.suggestedCourtBookingUrl : undefined}
+              address={match.suggestedCourtAddress}
+            />
+          ) : (
+            <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Finding court…
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
 
+    {/* Actions */}
+    <div className="mt-3 pt-3 border-t border-gray-100 flex flex-col items-center justify-center sm:flex-row sm:flex-wrap sm:items-center sm:justify-center gap-2">
+      {match.status === "accepted" ? (
+        inProgress ? (
+          <>
+            <button
+              onClick={() => handleCompleteGame(match)}
+              aria-label="Complete game"
+              className={`w-full sm:w-auto min-w-[140px] ${BTN.brand}`}
+            >
+              <Check className="h-4 w-4" />
+              Complete Game
+            </button>
 
-          </div>
+            <button
+              onClick={() => {
+                const sortedIDs = [currentUserId!, other].sort().join("_");
+                router.push(`/messages/${sortedIDs}`);
+              }}
+              aria-label="Open chat"
+              className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+            >
+              <MessageCircle className="h-4 w-4" />
+              Chat
+            </button>
 
-          {/* Actions */}
-          <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap gap-2">
-            {match.status === "accepted" ? (
-              inProgress ? (
+            <Link
+              href={profileHref}
+              aria-label="View profile"
+              className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+            >
+              View profile
+            </Link>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => handleStartMatch(match)}
+              disabled={startingId === match.id}
+              aria-label="Start game"
+              className={`w-full sm:w-auto min-w-[130px] ${BTN.primary} ${
+                startingId === match.id ? "opacity-60 cursor-not-allowed" : ""
+              }`}
+            >
+              {startingId === match.id ? (
                 <>
-                  <button
-                    onClick={() => handleCompleteGame(match)}
-                    aria-label="Complete game"
-                    className={`w-full sm:w-auto min-w-[140px] ${BTN.brand}`}
-                  >
-                    <Check className="h-4 w-4" />
-                    Complete Game
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      const sortedIDs = [currentUserId!, other].sort().join("_");
-                      router.push(`/messages/${sortedIDs}`);
-                    }}
-                    aria-label="Open chat"
-                    className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-                  >
-                    <MessageCircle className="h-4 w-4" />
-                    Chat
-                  </button>
-
-                  <Link
-                    href={profileHref}
-                    aria-label="View profile"
-                    className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
-                  >
-                    View profile
-                  </Link>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Starting…
                 </>
               ) : (
                 <>
-                  <button
-                    onClick={() => handleStartMatch(match)}
-                    disabled={startingId === match.id}
-                    aria-label="Start game"
-                    className={`w-full sm:w-auto min-w-[130px] ${BTN.primary} ${startingId === match.id ? "opacity-60 cursor-not-allowed" : ""}`}
-                  >
-                    {startingId === match.id ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Starting…
-                      </>
-                    ) : (
-                      <>
-                        <Check className="h-4 w-4" />
-                        Start Game
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      const sortedIDs = [currentUserId!, other].sort().join("_");
-                      router.push(`/messages/${sortedIDs}`);
-                    }}
-                    aria-label="Open chat"
-                    className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-                  >
-                    <MessageCircle className="h-4 w-4" />
-                    Chat
-                  </button>
-
-                  <Link
-                    href={profileHref}
-                    aria-label="View profile"
-                    className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
-                  >
-                    View profile
-                  </Link>
+                  <Check className="h-4 w-4" />
+                  Start Game
                 </>
-              )
-            ) : (
-              <>
-                {match.opponentId === currentUserId ? (
-                  <>
-                    <button
-                      onClick={() => currentUserId && acceptMatch(match.id, currentUserId)}
-                      aria-label="Accept request"
-                      className={`w-full sm:w-auto min-w-[120px] ${BTN.primary}`}
-                    >
-                      <Check className="h-4 w-4" />
-                      Accept
-                    </button>
+              )}
+            </button>
 
-                    <button
-                      onClick={() => {
-                        const sortedIDs = [currentUserId!, other].sort().join("_");
-                        router.push(`/messages/${sortedIDs}`);
-                      }}
-                      aria-label="Open chat"
-                      className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-                    >
-                      <MessageCircle className="h-4 w-4" />
-                      Chat
-                    </button>
+            <button
+              onClick={() => {
+                const sortedIDs = [currentUserId!, other].sort().join("_");
+                router.push(`/messages/${sortedIDs}`);
+              }}
+              aria-label="Open chat"
+              className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+            >
+              <MessageCircle className="h-4 w-4" />
+              Chat
+            </button>
 
-                    <Link
-                      href={profileHref}
-                      aria-label="View profile"
-                      className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
-                    >
-                      View profile
-                    </Link>
+            <Link
+              href={profileHref}
+              aria-label="View profile"
+              className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+            >
+              View profile
+            </Link>
+          </>
+        )
+      ) : (
+        <>
+          {match.opponentId === currentUserId ? (
+            <>
+              <button
+                onClick={() => currentUserId && acceptMatch(match.id, currentUserId)}
+                aria-label="Accept request"
+                className={`w-full sm:w-auto min-w-[120px] ${BTN.primary}`}
+              >
+                <Check className="h-4 w-4" />
+                Accept
+              </button>
 
-                    <button
-                      onClick={() => deleteMatch(match.id)}
-                      aria-label="Decline request"
-                      className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-                    >
-                      <X className="h-4 w-4" />
-                      Decline
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => {
-                        const sortedIDs = [currentUserId!, other].sort().join("_");
-                        router.push(`/messages/${sortedIDs}`);
-                      }}
-                      aria-label="Open chat"
-                      className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
-                    >
-                      <MessageCircle className="h-4 w-4" />
-                      Chat
-                    </button>
+              <button
+                onClick={() => {
+                  const sortedIDs = [currentUserId!, other].sort().join("_");
+                  router.push(`/messages/${sortedIDs}`);
+                }}
+                aria-label="Open chat"
+                className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+              >
+                <MessageCircle className="h-4 w-4" />
+                Chat
+              </button>
 
-                    <Link
-                      href={profileHref}
-                      aria-label="View profile"
-                      className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
-                    >
-                      View profile
-                    </Link>
+              <Link
+                href={profileHref}
+                aria-label="View profile"
+                className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+              >
+                View profile
+              </Link>
 
-                    
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    </li>
-  );
+              <button
+                onClick={() => deleteMatch(match.id)}
+                aria-label="Decline request"
+                className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+              >
+                <X className="h-4 w-4" />
+                Decline
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  const sortedIDs = [currentUserId!, other].sort().join("_");
+                  router.push(`/messages/${sortedIDs}`);
+                }}
+                aria-label="Open chat"
+                className={`w-full sm:w-auto min-w-[110px] ${BTN.tertiary}`}
+              >
+                <MessageCircle className="h-4 w-4" />
+                Chat
+              </button>
+
+              <Link
+                href={profileHref}
+                aria-label="View profile"
+                className={`w-full sm:w-auto min-w-[120px] ${BTN.secondary}`}
+              >
+                View profile
+              </Link>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  </li>
+);
 }, [
   currentUserId,
   router,
