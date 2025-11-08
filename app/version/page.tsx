@@ -1,8 +1,5 @@
 // app/version/page.tsx
-import dynamic from "next/dynamic";
-
-// ✅ Lazy-load the client widget only on the client
-const ClientRuntime = dynamic(() => import("./ClientRuntime"), { ssr: false });
+import ClientRuntime from "./ClientRuntime";
 
 async function getBuildId(): Promise<string> {
   try {
@@ -33,6 +30,7 @@ export default async function VersionPage() {
         <div><span className="font-semibold">Deployment:</span> <code>{DEPLOYMENT}</code></div>
       </div>
 
+      {/* ✅ This part runs only on the client */}
       <ClientRuntime />
     </div>
   );
