@@ -90,11 +90,15 @@ useLayoutEffect(() => {
 :root {
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 }
 @supports (padding-top: constant(safe-area-inset-top)) {
   :root {
     --safe-top: constant(safe-area-inset-top);
     --safe-bottom: constant(safe-area-inset-bottom);
+    --safe-left: constant(safe-area-inset-left);
+    --safe-right: constant(safe-area-inset-right);
   }
 }`;
   document.head.appendChild(styleEl);
@@ -386,8 +390,16 @@ if (!bootDone) {
     <InstallPwaIosPrompt />
     <PushClientOnly />
       {!hideAllNav && (
-       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b pt-[var(--safe-top,0px)]">
-  <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
+       <header
+  className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b"
+  style={{
+    paddingTop: "var(--safe-top, 0px)",
+    paddingLeft: "max(16px, var(--safe-left, 0px))",
+    paddingRight: "max(16px, var(--safe-right, 0px))",
+  }}
+>
+  <div className="max-w-6xl mx-auto flex items-center justify-between py-3">
+
             <Link href="/" className="flex items-center">
               <img src="/logo.png" alt="TennisMate" className="w-[40px] h-[40px] rounded-full object-cover" />
             </Link>
