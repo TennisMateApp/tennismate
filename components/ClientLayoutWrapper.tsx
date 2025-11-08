@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   User, MessageCircle, Search, Settings, Home, CalendarDays, UsersRound
@@ -29,7 +29,6 @@ import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen'; //
-import { useLayoutEffect } from "react";
 
 function useAppBootLoader() {
   const [bootDone, setBootDone] = useState(false);
@@ -82,20 +81,12 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     initNativePush();
   }, []);
 
-    const bootDone = useAppBootLoader();
-
-    export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
-  useSystemTheme();
-  useEffect(() => {
-    initNativePush();
-  }, []);
-
   const bootDone = useAppBootLoader();
 
-  // ✅ Define CSS vars so pt-[var(--safe-top,0px)] works on first paint
-  useLayoutEffect(() => {
-    const styleEl = document.createElement("style");
-    styleEl.innerHTML = `
+  // Define CSS vars so pt-[var(--safe-top,0px)] works on first paint
+useLayoutEffect(() => {
+  const styleEl = document.createElement("style");
+  styleEl.innerHTML = `
 :root {
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -106,30 +97,31 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     --safe-bottom: constant(safe-area-inset-bottom);
   }
 }`;
-    document.head.appendChild(styleEl);
-    return () => {
-      try { document.head.removeChild(styleEl); } catch {}
-    };
-  }, []);
-
+  document.head.appendChild(styleEl);
+  return () => {
+    try { document.head.removeChild(styleEl); } catch {}
+  };
+}, []);
 
 
  // ✅ iOS uses overlay + CSS padding; Android unchanged
+// iOS uses overlay + CSS padding; Android unchanged
 useEffect(() => {
   if (!Capacitor.isNativePlatform()) return;
 
   if (Capacitor.getPlatform() === "ios") {
-    // Let content extend under the status bar; our header uses safe-area padding
+    // Content extends under status bar; header uses safe-area padding
     StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
-    // Dark text looks good on your light header; swap to Light if needed
+    // Dark text/icons for your light header; swap to Light if you invert colors
     StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
   } else {
-    // ANDROID: keep current behavior exactly the same
+    // ANDROID: keep existing behavior
     StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
     StatusBar.setBackgroundColor({ color: "#0B132B" }).catch(() => {});
     StatusBar.setStyle({ style: Style.Light }).catch(() => {});
   }
 }, []);
+
 
 
 
