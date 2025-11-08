@@ -29,6 +29,36 @@ import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen'; //
+import { useLayoutEffect } from "react";
+
+export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
+  useSystemTheme();
+  useEffect(() => {
+    initNativePush();
+  }, []);
+
+  const bootDone = useAppBootLoader();
+
+  // ✅ Safe-area setup (iOS only)
+  useLayoutEffect(() => {
+    if (Capacitor.getPlatform() !== "ios") return;
+    document.documentElement.style.setProperty(
+      "--safe-top",
+      "env(safe-area-inset-top, 0px)"
+    );
+    document.documentElement.style.setProperty(
+      "--safe-bottom",
+      "env(safe-area-inset-bottom, 0px)"
+    );
+  }, []);
+
+  // ✅ Preserve Android status bar logic
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    StatusBar.setOverlaysWebView({ overlay: false });
+    StatusBar.setBackgroundColor({ color: "#0B132B" });
+    StatusBar.setStyle({ style: Style.Light });
+  }, []);
 
 function useAppBootLoader() {
   const [bootDone, setBootDone] = useState(false);
@@ -358,7 +388,7 @@ if (!bootDone) {
     <InstallPwaIosPrompt />
     <PushClientOnly />
       {!hideAllNav && (
-       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b safe-top">
+       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b pt-[var(--safe-top,0px)]">
   <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center">
               <img src="/logo.png" alt="TennisMate" className="w-[40px] h-[40px] rounded-full object-cover" />
@@ -443,8 +473,9 @@ if (!bootDone) {
       )}
 
 <main
-  className={`max-w-5xl mx-auto px-4 ${hideAllNav ? "pb-0" : "pb-20"}`}
-  style={{ marginTop: "var(--safe-area-top)" }}
+  className={`max-w-5xl mx-auto px-4 ${
+    hideAllNav ? "pb-0" : "pb-[calc(5rem+var(--safe-bottom,0px))]"
+  }`}
 >
   {children}
 </main>
