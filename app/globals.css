@@ -1,13 +1,34 @@
 @import "tailwindcss";
 
+/* ---------- Theme + base colors ---------- */
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  /* safe areas */
-  --safe-area-top: env(safe-area-inset-top, 0px);
-  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* Modern safe-area vars */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Back-compat with your older names */
+  --safe-area-top: var(--safe-top);
+  --safe-area-bottom: var(--safe-bottom);
 }
 
+/* iOS 11 / legacy WebKit fallback */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  :root {
+    --safe-top: constant(safe-area-inset-top);
+    --safe-bottom: constant(safe-area-inset-bottom);
+    --safe-left: constant(safe-area-inset-left);
+    --safe-right: constant(safe-area-inset-right);
+
+    /* keep back-compat in sync */
+    --safe-area-top: var(--safe-top);
+    --safe-area-bottom: var(--safe-bottom);
+  }
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -27,7 +48,9 @@ body {
   @apply bg-gray-50 text-gray-900;
 }
 
-/* helpers */
-.safe-top { padding-top: var(--safe-area-top); }
-.safe-bottom { padding-bottom: var(--safe-area-bottom); }
+/* ---------- Helpers (now use the unified vars) ---------- */
+.safe-top    { padding-top: var(--safe-top); }
+.safe-bottom { padding-bottom: var(--safe-bottom); }
+
+/* Sticky elements that should respect the notch/status bar */
 .sticky-safe { position: sticky; top: var(--safe-top); }
