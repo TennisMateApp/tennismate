@@ -425,14 +425,6 @@ if (!bootDone) {
       What’s New
     </button>
 
-    <Link
-  href="/version"
-  className="block px-4 py-2 text-sm hover:bg-gray-100"
-  onClick={() => setShowSettings(false)}
->
-  Version
-</Link>
-
 
                         <button
                           onClick={handleLogout}
