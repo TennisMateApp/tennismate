@@ -107,28 +107,6 @@ useLayoutEffect(() => {
   };
 }, []);
 
-
- // ✅ iOS uses overlay + CSS padding; Android unchanged
-// iOS uses overlay + CSS padding; Android unchanged
-useEffect(() => {
-  if (!Capacitor.isNativePlatform()) return;
-
-  if (Capacitor.getPlatform() === "ios") {
-    // Content extends under status bar; header uses safe-area padding
-    StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
-    // Dark text/icons for your light header; swap to Light if you invert colors
-    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-  } else {
-    // ANDROID: keep existing behavior
-    StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
-    StatusBar.setBackgroundColor({ color: "#0B132B" }).catch(() => {});
-    StatusBar.setStyle({ style: Style.Light }).catch(() => {});
-  }
-}, []);
-
-
-
-
   const [user, setUser] = useState<any>(null);
   const [photoURL, setPhotoURL] = useState<string | null>(null);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
@@ -138,15 +116,6 @@ useEffect(() => {
   const settingsRef = useRef<HTMLDivElement>(null);
   const [userOnboardingSeen, setUserOnboardingSeen] = useState<number | null>(null);
 const [showTour, setShowTour] = useState(false);
-
-// ...inside a top-level useEffect that runs on mount:
-useEffect(() => {
-  if (!Capacitor.isNativePlatform()) return;
-
-  StatusBar.setOverlaysWebView({ overlay: false });
-  StatusBar.setBackgroundColor({ color: '#0B132B' }); // ✅ same color as splash
-  StatusBar.setStyle({ style: Style.Light });          // ✅ white icons
-}, []);
 
 
 // NEW:
@@ -390,10 +359,10 @@ if (!bootDone) {
     <InstallPwaIosPrompt />
     <PushClientOnly />
       {!hideAllNav && (
-       <header
-  className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b"
+<header
+  className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b pt-[var(--safe-area-top,0px)]"
   style={{
-    paddingTop: "var(--safe-top, 0px)",
+    paddingTop: "calc(var(--safe-top, 0px) + 6px)",     // bump +6px
     paddingLeft: "max(16px, var(--safe-left, 0px))",
     paddingRight: "max(16px, var(--safe-right, 0px))",
   }}
@@ -484,9 +453,10 @@ if (!bootDone) {
       )}
 
 <main
-  className={`max-w-5xl mx-auto px-4 ${
-    hideAllNav ? "pb-0" : "pb-[calc(5rem+var(--safe-bottom,0px))]"
-  }`}
+className={`max-w-5xl mx-auto px-4 ${
+  hideAllNav ? "pb-0" : "pb-[calc(5rem+var(--safe-area-bottom,0px))]"
+}`}
+
 >
   {children}
 </main>

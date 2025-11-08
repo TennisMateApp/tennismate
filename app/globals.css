@@ -11,7 +11,7 @@
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
 
-  /* Back-compat with your older names */
+  /* Back-compat with older names */
   --safe-area-top: var(--safe-top);
   --safe-area-bottom: var(--safe-bottom);
 }
@@ -24,7 +24,6 @@
     --safe-left: constant(safe-area-inset-left);
     --safe-right: constant(safe-area-inset-right);
 
-    /* keep back-compat in sync */
     --safe-area-top: var(--safe-top);
     --safe-area-bottom: var(--safe-bottom);
   }
@@ -44,13 +43,31 @@
   }
 }
 
+/* ---------- Base ---------- */
+html, body {
+  height: 100%;
+}
 body {
   @apply bg-gray-50 text-gray-900;
 }
 
-/* ---------- Helpers (now use the unified vars) ---------- */
+/* ---------- Safe-area helpers ---------- */
 .safe-top    { padding-top: var(--safe-top); }
 .safe-bottom { padding-bottom: var(--safe-bottom); }
 
+/* When you need left/right inset awareness (rare, but handy for full-bleed bars) */
+.safe-x      { padding-left: var(--safe-left); padding-right: var(--safe-right); }
+
 /* Sticky elements that should respect the notch/status bar */
 .sticky-safe { position: sticky; top: var(--safe-top); }
+
+/* Footer that sits above the iOS home pill (inner container gets the padding) */
+.footer-safe-inner { padding-bottom: var(--safe-bottom); }
+
+/* Main content that must clear a fixed footer (5rem tab bar + safe bottom) */
+.pb-safe-20 { padding-bottom: calc(5rem + var(--safe-bottom)); }
+
+/* Optional: header min-height to ensure a nice tappable area below the status bar */
+.header-safe-min {
+  min-height: calc(56px + var(--safe-top)); /* tweak 56px to your header height */
+}
