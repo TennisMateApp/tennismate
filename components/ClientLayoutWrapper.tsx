@@ -84,18 +84,53 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
     const bootDone = useAppBootLoader();
 
+    export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
+  useSystemTheme();
+  useEffect(() => {
+    initNativePush();
+  }, []);
 
-  // ✅ Keep native splash visible briefly, then hide (prevents white flash)
+  const bootDone = useAppBootLoader();
+
+  // ✅ Define CSS vars so pt-[var(--safe-top,0px)] works on first paint
+  useLayoutEffect(() => {
+    const styleEl = document.createElement("style");
+    styleEl.innerHTML = `
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+@supports (padding-top: constant(safe-area-inset-top)) {
+  :root {
+    --safe-top: constant(safe-area-inset-top);
+    --safe-bottom: constant(safe-area-inset-bottom);
+  }
+}`;
+    document.head.appendChild(styleEl);
+    return () => {
+      try { document.head.removeChild(styleEl); } catch {}
+    };
+  }, []);
+
+
+
+ // ✅ iOS uses overlay + CSS padding; Android unchanged
 useEffect(() => {
   if (!Capacitor.isNativePlatform()) return;
 
-  // give the WebView time to paint before hiding splash
-  const t = setTimeout(() => {
-    SplashScreen.hide().catch(() => {});
-  }, 400);
-
-  return () => clearTimeout(t);
+  if (Capacitor.getPlatform() === "ios") {
+    // Let content extend under the status bar; our header uses safe-area padding
+    StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
+    // Dark text looks good on your light header; swap to Light if needed
+    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+  } else {
+    // ANDROID: keep current behavior exactly the same
+    StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+    StatusBar.setBackgroundColor({ color: "#0B132B" }).catch(() => {});
+    StatusBar.setStyle({ style: Style.Light }).catch(() => {});
+  }
 }, []);
+
 
 
   const [user, setUser] = useState<any>(null);
