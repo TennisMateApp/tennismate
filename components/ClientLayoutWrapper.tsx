@@ -83,30 +83,6 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
   const bootDone = useAppBootLoader();
 
-  // Define CSS vars so pt-[var(--safe-top,0px)] works on first paint
-useLayoutEffect(() => {
-  const styleEl = document.createElement("style");
-  styleEl.innerHTML = `
-:root {
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-}
-@supports (padding-top: constant(safe-area-inset-top)) {
-  :root {
-    --safe-top: constant(safe-area-inset-top);
-    --safe-bottom: constant(safe-area-inset-bottom);
-    --safe-left: constant(safe-area-inset-left);
-    --safe-right: constant(safe-area-inset-right);
-  }
-}`;
-  document.head.appendChild(styleEl);
-  return () => {
-    try { document.head.removeChild(styleEl); } catch {}
-  };
-}, []);
-
   const [user, setUser] = useState<any>(null);
   const [photoURL, setPhotoURL] = useState<string | null>(null);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
@@ -354,20 +330,14 @@ if (!bootDone) {
 
 
   return (
- <div className={`min-h-screen text-gray-900 ${hideAllNav ? "" : "bg-gray-100"} ${hideAllNav ? "" : "pb-20"}`}>
+<div className={`min-h-screen text-gray-900 ${hideAllNav ? "" : "bg-gray-100"}`}>
     <InstallPwaAndroidPrompt />
     <InstallPwaIosPrompt />
     <PushClientOnly />
       {!hideAllNav && (
-<header
-  className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b pt-[var(--safe-area-top,0px)]"
-  style={{
-    paddingTop: "calc(var(--safe-top, 0px) + 6px)",     // bump +6px
-    paddingLeft: "max(16px, var(--safe-left, 0px))",
-    paddingRight: "max(16px, var(--safe-right, 0px))",
-  }}
->
+<header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b pt-[calc(var(--safe-top,0px)+6px)] safe-x">
   <div className="max-w-6xl mx-auto flex items-center justify-between py-3">
+
 
             <Link href="/" className="flex items-center">
               <img src="/logo.png" alt="TennisMate" className="w-[40px] h-[40px] rounded-full object-cover" />
@@ -453,16 +423,17 @@ if (!bootDone) {
       )}
 
 <main
-className={`max-w-5xl mx-auto px-4 ${
-  hideAllNav ? "pb-0" : "pb-[calc(5rem+var(--safe-area-bottom,0px))]"
-}`}
-
+  className={`max-w-5xl mx-auto px-4 ${
+    hideAllNav ? "pb-0" : "pb-[calc(5rem+var(--safe-bottom,0px))]"
+  }`}
 >
+
   {children}
 </main>
 {user && !hideAllNav && (
   <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
-    <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm">
+  <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm footer-safe-inner">
+
 
       {/* 🏠 Home */}
       {footerTabs.includes("home") && (

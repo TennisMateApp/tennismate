@@ -21,30 +21,21 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <meta name="theme-color" content="#2563eb" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
+
+        {/* ✅ Required for iOS safe-area insets */}
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1, viewport-fit=cover"
         />
+
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="format-detection" content="telephone=no" />
 
-        {/* Safe-area CSS variables (iOS), harmless on Android/PWA */}
-        <style>{`
-          :root {
-            --safe-top: env(safe-area-inset-top, 0px);
-            --safe-bottom: env(safe-area-inset-bottom, 0px);
-          }
-          @supports (padding-top: constant(safe-area-inset-top)) {
-            :root {
-              --safe-top: constant(safe-area-inset-top);
-              --safe-bottom: constant(safe-area-inset-bottom);
-            }
-          }
-        `}</style>
+        {/* ❌ Removed: do not inject --safe-top/bottom here.
+            Safe-area vars + body padding live in globals.css now. */}
       </head>
 
-      {/* Do NOT add global padding here to avoid double-spacing on Android.
-          Let ClientLayoutWrapper/Header/Nav use var(--safe-top/bottom) locally. */}
+      {/* Keep body simple; globals.css applies safe-area padding app-wide */}
       <body className="m-0 min-h-[100dvh] overflow-x-hidden">
         <AuthGate>
           <ClientLayoutWrapper>{children}</ClientLayoutWrapper>

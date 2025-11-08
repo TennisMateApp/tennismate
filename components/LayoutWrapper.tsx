@@ -64,9 +64,9 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   };
 
   return (
-    <div className="bg-gray-100 min-h-screen text-gray-900 pb-20">
+    <div className="bg-gray-100 min-h-screen text-gray-900">
       {/* Header */}
-      <header className="bg-white border-b p-4 mb-6 shadow-sm">
+      <header className="sticky top-0 z-40 bg-white border-b shadow-sm p-4 pt-[var(--safe-top,0px)]">
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           <Link href="/" className="flex items-center">
             <img src="/logo.png" alt="TennisMate" className="w-[40px] h-[40px] rounded-full object-cover" />
@@ -138,12 +138,12 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       </header>
 
       {/* Page Content */}
-      <main className="max-w-5xl mx-auto px-4 pb-20">{children}</main>
+      <main className="max-w-5xl mx-auto px-4 pb-safe-20">{children}</main>
 
       {/* Footer */}
       {user && (
-        <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
-          <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm">
+       <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
+  <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm footer-safe-inner">
             <Link href="/match" className="flex flex-col items-center text-green-600 hover:text-green-800">
               <GiTennisCourt className="w-6 h-6 mb-1" />
               <span>Match Me</span>
