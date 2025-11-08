@@ -31,35 +31,6 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen'; //
 import { useLayoutEffect } from "react";
 
-export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
-  useSystemTheme();
-  useEffect(() => {
-    initNativePush();
-  }, []);
-
-  const bootDone = useAppBootLoader();
-
-  // ✅ Safe-area setup (iOS only)
-  useLayoutEffect(() => {
-    if (Capacitor.getPlatform() !== "ios") return;
-    document.documentElement.style.setProperty(
-      "--safe-top",
-      "env(safe-area-inset-top, 0px)"
-    );
-    document.documentElement.style.setProperty(
-      "--safe-bottom",
-      "env(safe-area-inset-bottom, 0px)"
-    );
-  }, []);
-
-  // ✅ Preserve Android status bar logic
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-    StatusBar.setOverlaysWebView({ overlay: false });
-    StatusBar.setBackgroundColor({ color: "#0B132B" });
-    StatusBar.setStyle({ style: Style.Light });
-  }, []);
-
 function useAppBootLoader() {
   const [bootDone, setBootDone] = useState(false);
   useEffect(() => {
