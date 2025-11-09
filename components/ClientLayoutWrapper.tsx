@@ -29,6 +29,8 @@ import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen'; //
+import { SafeAreaTop, SafeAreaBottom } from "@/components/SafeArea";
+
 
 function useAppBootLoader() {
   const [bootDone, setBootDone] = useState(false);
@@ -343,17 +345,14 @@ if (!bootDone) {
     <InstallPwaAndroidPrompt />
     <InstallPwaIosPrompt />
     <PushClientOnly />
-     {!hideAllNav && (
-  <div
-    // Push the sticky header *below* the status bar / Dynamic Island
-    style={{
-      paddingTop: "calc(env(safe-area-inset-top, 0px) + 6px)",
-      paddingLeft: "max(16px, env(safe-area-inset-left, 0px))",
-      paddingRight: "max(16px, env(safe-area-inset-right, 0px))",
-    }}
-  >
+{!hideAllNav && (
+  <>
+    {/* Reserve Dynamic Island / status bar space */}
+    <SafeAreaTop />
+
     <header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
-      <div className="max-w-6xl mx-auto flex items-center justify-between py-3">
+      <div className="max-w-6xl mx-auto flex items-center justify-between py-3 px-4">
+
 
 
             <Link href="/" className="flex items-center">
@@ -437,24 +436,23 @@ if (!bootDone) {
             </nav>
           </div>
         </header>
-        </div>
+        </>
       )}
 
 <main
-  className={`max-w-5xl mx-auto px-4 ${
-    hideAllNav ? "pb-0" : ""
-  }`}
+  className={`max-w-5xl mx-auto px-4 ${hideAllNav ? "pb-0" : ""}`}
   style={hideAllNav ? undefined : { paddingBottom: "calc(5rem + env(safe-area-inset-bottom, 0px))" }}
 >
   {children}
 </main>
 
+
 {user && !hideAllNav && (
   <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
-  <div
-    className="max-w-5xl mx-auto flex justify-around text-sm"
-    style={{ paddingTop: 8, paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))" }}
-  >
+    <div
+      className="max-w-5xl mx-auto flex justify-around text-sm px-4"
+      style={{ paddingTop: 8 }}
+    >
 
 
 
@@ -534,6 +532,7 @@ if (!bootDone) {
 
 
     </div>
+    <SafeAreaBottom extra={8} />
   </footer>
 )}
 
