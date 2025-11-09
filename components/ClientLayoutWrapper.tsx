@@ -83,6 +83,15 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
   const bootDone = useAppBootLoader();
 
+  // iOS: do NOT overlay the status bar (so content starts below it)
+useEffect(() => {
+  if (Capacitor.getPlatform && Capacitor.getPlatform() === "ios") {
+    StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+  }
+}, []);
+
+
   const [user, setUser] = useState<any>(null);
   const [photoURL, setPhotoURL] = useState<string | null>(null);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
@@ -335,7 +344,8 @@ if (!bootDone) {
     <InstallPwaIosPrompt />
     <PushClientOnly />
       {!hideAllNav && (
-<header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b pt-[calc(var(--safe-top,0px)+6px)] safe-x">
+<header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
+
   <div className="max-w-6xl mx-auto flex items-center justify-between py-3">
 
 
@@ -424,7 +434,7 @@ if (!bootDone) {
 
 <main
   className={`max-w-5xl mx-auto px-4 ${
-    hideAllNav ? "pb-0" : "pb-[calc(5rem+var(--safe-bottom,0px))]"
+    hideAllNav ? "pb-0" : "pb-20"
   }`}
 >
 
@@ -432,7 +442,8 @@ if (!bootDone) {
 </main>
 {user && !hideAllNav && (
   <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
-  <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm footer-safe-inner">
+  <div className="max-w-5xl mx-auto flex justify-around py-2 text-sm">
+
 
 
       {/* 🏠 Home */}
