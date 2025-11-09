@@ -347,11 +347,17 @@ if (!bootDone) {
     <PushClientOnly />
 {!hideAllNav && (
   <>
-    {/* Reserve Dynamic Island / status bar space */}
-    <SafeAreaTop />
-
-    <header className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
+    <header
+      className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b"
+      style={{
+        // push header content below the status bar / Dynamic Island
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 6px)",
+        paddingLeft: "max(16px, env(safe-area-inset-left, 0px))",
+        paddingRight: "max(16px, env(safe-area-inset-right, 0px))",
+      }}
+    >
       <div className="max-w-6xl mx-auto flex items-center justify-between py-3 px-4">
+
 
 
 
