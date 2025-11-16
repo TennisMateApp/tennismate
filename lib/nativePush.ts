@@ -12,6 +12,8 @@ export async function initNativePush() {
     return;
   }
 
+  const platform = Capacitor.getPlatform(); // <- NEW: detect 'ios' or 'android'
+
   const { PushNotifications } = await import('@capacitor/push-notifications');
   const { auth, db } = await import('@/lib/firebaseConfig');
   const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
@@ -28,13 +30,17 @@ export async function initNativePush() {
         localStorage.setItem('tm_fcm_token', token);
       } catch {}
 
-      console.log('[Push] registration token:', token);
+      console.log('[Push] registration token:', token, 'platform:', platform);
 
       // Write to a flat debug collection so we can verify E2E even if user isn't ready
       try {
         await setDoc(
           doc(db, 'device_tokens', token),
-          { fcmToken: token, platform: 'android', seenAt: serverTimestamp() },
+          {
+            fcmToken: token,
+            platform, // <- CHANGED: use actual platform
+            seenAt: serverTimestamp(),
+          },
           { merge: true }
         );
         console.log('[Push] token saved to /device_tokens (debug)');
@@ -48,7 +54,12 @@ export async function initNativePush() {
         try {
           await setDoc(
             doc(db, 'users', user.uid, 'devices', token),
-            { fcmToken: token, platform: 'android', lastSeen: serverTimestamp(), prefersNativePush: true },
+            {
+              fcmToken: token,
+              platform, // <- CHANGED: use actual platform
+              lastSeen: serverTimestamp(),
+              prefersNativePush: true,
+            },
             { merge: true }
           );
           console.log('[Push] token saved to users/*/devices/*');
@@ -77,19 +88,22 @@ export async function initNativePush() {
     });
   }
 
-  // Create channel (safe to call more than once)
-  try {
-    await PushNotifications.createChannel({
-  id: 'messages',
-  name: 'Messages',
-  description: 'New messages and match updates',
-  importance: 5,              // IMPORTANCE_HIGH
-  sound: 'tennis_ball_hit',          // use default sound
-  vibration: true,
-  lights: true,
-});
-
-  } catch {}
+  // Create channel (Android only; iOS ignores channels)
+  if (platform === 'android') {
+    try {
+      await PushNotifications.createChannel({
+        id: 'messages',
+        name: 'Messages',
+        description: 'New messages and match updates',
+        importance: 5,              // IMPORTANCE_HIGH
+        sound: 'tennis_ball_hit',   // Android custom sound (must exist in res/raw)
+        vibration: true,
+        lights: true,
+      });
+    } catch (e) {
+      console.warn('[Push] createChannel failed (Android only)', e);
+    }
+  }
 
   // Check/request permission, then register
   const perm = await PushNotifications.checkPermissions();
@@ -97,6 +111,10 @@ export async function initNativePush() {
   if (perm.receive !== 'granted') {
     const req = await PushNotifications.requestPermissions();
     console.log('[Push] requestPermissions:', req);
+    if (req.receive !== 'granted') {
+      console.log('[Push] permission not granted, aborting register()');
+      return;
+    }
   }
 
   await PushNotifications.register();
@@ -113,6 +131,7 @@ export async function bindTokenToUserIfAvailable() {
   const { Capacitor } = await import('@capacitor/core');
   if (!Capacitor.isNativePlatform()) return;
 
+  const platform = Capacitor.getPlatform(); // <- NEW for consistency
   const { auth, db } = await import('@/lib/firebaseConfig');
   const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
 
@@ -126,7 +145,12 @@ export async function bindTokenToUserIfAvailable() {
   try {
     await setDoc(
       doc(db, 'users', user.uid, 'devices', token),
-      { fcmToken: token, platform: 'android', lastSeen: serverTimestamp(), prefersNativePush: true },
+      {
+        fcmToken: token,
+        platform, // <- CHANGED: 'ios' or 'android'
+        lastSeen: serverTimestamp(),
+        prefersNativePush: true,
+      },
       { merge: true }
     );
     console.log('[Push] (bind) token saved to users/*/devices/*');
