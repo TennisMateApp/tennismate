@@ -8,7 +8,7 @@ import { auth } from "@/lib/firebase"; // or "@/lib/firebaseConfig"
 const PUBLIC_ROUTES = new Set<string>([
   "/login",
   "/signup",
-  "/reset-password",
+  "/forgot-password",
   "/privacy",
   "/terms",
 ]);
