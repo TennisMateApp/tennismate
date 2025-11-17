@@ -112,9 +112,17 @@ const tourShownThisSession = useRef(false);
 
 const router = useRouter();
 const pathname = usePathname() || "";
+
+// 👇 routes that should be full-bleed (no grey background, no boxed layout)
+const fullBleedRoutes = ["/login", "/signup"];
+const isFullBleed = fullBleedRoutes.some((r) => pathname.startsWith(r));
+
 const isActive = (href: string) =>
-pathname === href || pathname.startsWith(href + "/");  
+  pathname === href || pathname.startsWith(href + "/");  
+
 const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
+
+
 
 // Show "Matches" instead of "Events" when the user is in the match flow
 const inMatchFlow =
@@ -340,8 +348,12 @@ if (!bootDone) {
 }
 
 
-  return (
-<div className={`min-h-screen text-gray-900 ${hideAllNav ? "" : "bg-gray-100"}`}>
+return (
+  <div
+    className={`min-h-screen text-gray-900 ${
+      hideAllNav || isFullBleed ? "" : "bg-gray-100"
+    }`}
+  >
     <InstallPwaAndroidPrompt />
     <InstallPwaIosPrompt />
     <PushClientOnly />
@@ -444,11 +456,19 @@ if (!bootDone) {
       )}
 
 <main
-  className={`max-w-5xl mx-auto px-4 ${hideAllNav ? "pb-0" : ""}`}
-  style={hideAllNav ? undefined : { paddingBottom: "calc(5rem + env(safe-area-inset-bottom, 0px))" }}
+  className={`${
+    isFullBleed ? "w-full" : "max-w-5xl mx-auto px-4"
+  } ${hideAllNav ? "pb-0" : ""}`}
+  style={
+    hideAllNav
+      ? undefined
+      : { paddingBottom: "calc(5rem + env(safe-area-inset-bottom, 0px))" }
+  }
 >
   {children}
 </main>
+
+
 
 
 {user && !hideAllNav && (
