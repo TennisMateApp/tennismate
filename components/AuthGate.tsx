@@ -11,6 +11,7 @@ const PUBLIC_ROUTES = new Set<string>([
   "/forgot-password",
   "/privacy",
   "/terms",
+  "/verify-email", // 👈 treat verify page as public
 ]);
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
@@ -24,7 +25,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       setCurrentUser(u);
       setReady(true);
 
-      // If not signed in, force to /login unless already on a public route
+      // 🔓 1) Not signed in → force to /login unless already on a public route
       if (!u) {
         if (!PUBLIC_ROUTES.has(pathname)) {
           const next = pathname === "/" ? "/home" : pathname; // where to go after login
@@ -33,11 +34,25 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // If signed in, avoid staying on login/signup; go to /home (or keep deep link)
-      if (u && (pathname === "/" || pathname === "/login" || pathname === "/signup")) {
+      // 🔐 2) Signed in but NOT email-verified → always send to /verify-email
+      // (matches your LayoutWrapper logic so unverified users never see /home)
+      if (!u.emailVerified) {
+        if (pathname !== "/verify-email") {
+          router.replace("/verify-email");
+        }
+        return;
+      }
+
+      // ✅ 3) Signed in + verified:
+      // If they're on auth screens, send to /home instead
+      const isAuthScreen =
+        pathname === "/" || pathname === "/login" || pathname === "/signup";
+
+      if (isAuthScreen) {
         router.replace("/home");
       }
     });
+
     return () => unsub();
   }, [pathname, router]);
 
