@@ -338,22 +338,40 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
   }
 
   // Show lightweight splash until boot timer completes (runs AFTER all hooks)
-if (!bootDone) {
+  // Show lightweight splash until boot timer completes (runs AFTER all hooks)
+  if (!bootDone) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-white">
+        <img src="/logo.png" alt="TennisMate" className="w-28 h-28 animate-bounce" />
+        <div className="mt-4 text-green-700 font-semibold">Loading TennisMate...</div>
+      </div>
+    );
+  }
+
+  // 🔐 Gate unverified users so they don't see Home first
+  const shouldGateToVerify =
+    !!user &&
+    showVerify &&
+    !pathname.startsWith("/verify-email");
+
+  if (shouldGateToVerify) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-white">
+        <img src="/logo.png" alt="TennisMate" className="w-28 h-28" />
+        <div className="mt-4 text-green-700 font-semibold">
+          One last step… check your email to verify your account.
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-white">
-      <img src="/logo.png" alt="TennisMate" className="w-28 h-28 animate-bounce" />
-      <div className="mt-4 text-green-700 font-semibold">Loading TennisMate...</div>
-    </div>
-  );
-}
+    <div
+      className={`min-h-screen text-gray-900 ${
+        hideAllNav || isFullBleed ? "" : "bg-gray-100"
+      }`}
+    >
 
-
-return (
-  <div
-    className={`min-h-screen text-gray-900 ${
-      hideAllNav || isFullBleed ? "" : "bg-gray-100"
-    }`}
-  >
     <InstallPwaAndroidPrompt />
     <InstallPwaIosPrompt />
     <PushClientOnly />
