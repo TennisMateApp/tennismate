@@ -12,8 +12,6 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import InstallPwaAndroidPrompt from "@/components/InstallPwaAndroidPrompt";
-import InstallPwaIosPrompt from "@/components/InstallPwaIosPrompt";
 import dynamic from "next/dynamic";
 const OnboardingTour = dynamic(
   () => import("@/components/OnboardingTour").then((m) => m.default),
@@ -372,8 +370,6 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
       }`}
     >
 
-    <InstallPwaAndroidPrompt />
-    <InstallPwaIosPrompt />
     <PushClientOnly />
 {!hideAllNav && (
   <>
