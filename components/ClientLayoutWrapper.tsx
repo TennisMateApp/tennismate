@@ -77,9 +77,15 @@ const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   useSystemTheme(); // <-- Call the hook at the top of your component
-    useEffect(() => {
-    initNativePush();
+
+  // 🔔 Kick off native push once on app boot (Android + iOS native only)
+  useEffect(() => {
+    console.log("[LayoutWrapper] calling initNativePush()");
+    initNativePush().catch((err) => {
+      console.error("[LayoutWrapper] initNativePush failed:", err);
+    });
   }, []);
+
 
   const bootDone = useAppBootLoader();
 
@@ -169,11 +175,6 @@ const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFe
       await u.reload();
       setUser(auth.currentUser);
           // ✅ Initialize native push for Android app runtime
-    try {
-      await initNativePush();
-    } catch (e) {
-      console.warn("initNativePush skipped/non-native or failed:", e);
-    }
 
 
       const userDocSnap = await getDoc(doc(db, "users", u.uid));

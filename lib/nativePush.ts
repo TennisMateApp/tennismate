@@ -12,11 +12,13 @@ export async function initNativePush() {
     return;
   }
 
-  const platform = Capacitor.getPlatform(); // <- NEW: detect 'ios' or 'android'
+  const platform = Capacitor.getPlatform(); // <- detect 'ios' or 'android'
+  console.log('[Push] initNativePush on platform:', platform); // 👈 ADD THIS LINE
 
   const { PushNotifications } = await import('@capacitor/push-notifications');
   const { auth, db } = await import('@/lib/firebaseConfig');
   const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+
 
   // --- Attach listeners ONCE, immediately (before any register happens) ---
   if (!setupDone) {
