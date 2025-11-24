@@ -509,15 +509,14 @@ export default function SignupPage() {
                     <Camera className="h-4 w-4" />
                     Choose Photo
                   </label>
-                  <input
-                    id="upload"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="hidden"
-                    // On mobile, this hints to open camera (supported browsers):
-                    capture="user"
-                  />
+               <input
+  id="upload"
+  type="file"
+  accept="image/*"
+  onChange={handleImageChange}
+  className="hidden"
+/>
+
                 </div>
 
                 {errors.photo && <p className="text-sm text-red-600">{errors.photo}</p>}
