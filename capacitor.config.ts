@@ -16,10 +16,6 @@ const config: CapacitorConfig = {
     allowMixedContent: false,
   },
 
-    ios: {
-    appBoundDomains: ['tennismate-s7vk.vercel.app'],
-  },
-  
   plugins: {
     SplashScreen: {
       launchShowDuration: 1200,
@@ -29,7 +25,7 @@ const config: CapacitorConfig = {
       showSpinner: false,
     },
     StatusBar: {
-      overlaysWebView: false, // 👈 this is the key line
+      overlaysWebView: false,
       style: 'DARK',
     },
   },
