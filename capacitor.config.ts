@@ -5,13 +5,6 @@ const config: CapacitorConfig = {
   appName: 'TennisMate',
   webDir: 'out',
 
-  server: {
-    // ✅ point to your deployed PWA URL — no trailing slash
-    url: 'https://tennismate-s7vk.vercel.app',
-    cleartext: false,
-    allowNavigation: ['tennismate-s7vk.vercel.app'],
-  },
-
   android: {
     allowMixedContent: false,
   },
