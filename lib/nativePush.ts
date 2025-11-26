@@ -7,18 +7,20 @@ export async function initNativePush() {
   if (typeof window === 'undefined') return;
 
   const { Capacitor } = await import('@capacitor/core');
-  if (!Capacitor.isNativePlatform()) {
-    console.log('[Push] skip: web platform');
+
+  // 🔍 Use getPlatform so we can see what Capacitor thinks we are
+  const platform = Capacitor.getPlatform ? Capacitor.getPlatform() : 'unknown';
+  console.log('[Push] initNativePush detected platform:', platform);
+
+  // Only continue for real native platforms
+  if (platform !== 'ios' && platform !== 'android') {
+    console.log('[Push] skip: non-native platform', platform);
     return;
   }
-
-  const platform = Capacitor.getPlatform(); // <- detect 'ios' or 'android'
-  console.log('[Push] initNativePush on platform:', platform); // 👈 ADD THIS LINE
 
   const { PushNotifications } = await import('@capacitor/push-notifications');
   const { auth, db } = await import('@/lib/firebaseConfig');
   const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
-
 
   // --- Attach listeners ONCE, immediately (before any register happens) ---
   if (!setupDone) {
@@ -40,7 +42,7 @@ export async function initNativePush() {
           doc(db, 'device_tokens', token),
           {
             fcmToken: token,
-            platform, // <- CHANGED: use actual platform
+            platform, // <- actual platform string
             seenAt: serverTimestamp(),
           },
           { merge: true }
@@ -58,7 +60,7 @@ export async function initNativePush() {
             doc(db, 'users', user.uid, 'devices', token),
             {
               fcmToken: token,
-              platform, // <- CHANGED: use actual platform
+              platform,
               lastSeen: serverTimestamp(),
               prefersNativePush: true,
             },
@@ -109,14 +111,17 @@ export async function initNativePush() {
 
   // Check/request permission, then register
   const perm = await PushNotifications.checkPermissions();
-  console.log('[Push] checkPermissions:', perm);
+  console.log('[Push] checkPermissions result:', JSON.stringify(perm));
+
   if (perm.receive !== 'granted') {
     const req = await PushNotifications.requestPermissions();
-    console.log('[Push] requestPermissions:', req);
+    console.log('[Push] requestPermissions result:', JSON.stringify(req));
     if (req.receive !== 'granted') {
       console.log('[Push] permission not granted, aborting register()');
       return;
     }
+  } else {
+    console.log('[Push] permission already granted, calling register()');
   }
 
   await PushNotifications.register();
@@ -131,9 +136,14 @@ export async function bindTokenToUserIfAvailable() {
   if (typeof window === 'undefined') return;
 
   const { Capacitor } = await import('@capacitor/core');
-  if (!Capacitor.isNativePlatform()) return;
+  const platform = Capacitor.getPlatform ? Capacitor.getPlatform() : 'unknown';
 
-  const platform = Capacitor.getPlatform(); // <- NEW for consistency
+  // Only bind for native platforms
+  if (platform !== 'ios' && platform !== 'android') {
+    console.log('[Push] (bind) skip: non-native platform', platform);
+    return;
+  }
+
   const { auth, db } = await import('@/lib/firebaseConfig');
   const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
 
@@ -149,7 +159,7 @@ export async function bindTokenToUserIfAvailable() {
       doc(db, 'users', user.uid, 'devices', token),
       {
         fcmToken: token,
-        platform, // <- CHANGED: 'ios' or 'android'
+        platform, // 'ios' or 'android'
         lastSeen: serverTimestamp(),
         prefersNativePush: true,
       },
