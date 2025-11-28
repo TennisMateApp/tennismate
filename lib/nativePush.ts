@@ -9,157 +9,163 @@ export async function initNativePush() {
   const { Capacitor } = await import("@capacitor/core");
   const platform = Capacitor.getPlatform ? Capacitor.getPlatform() : "unknown";
 
-  console.log("[Push] initNativePush detected platform:", platform);
-  console.log("[Push] window.Capacitor present:", !!(window as any).Capacitor);
-
-  // 🔍 Try to load the plugin no matter what platform says, but bail if it truly doesn't exist
-  let PushNotifications: any;
-  try {
-    const mod = await import("@capacitor/push-notifications");
-    PushNotifications = mod.PushNotifications;
-    if (!PushNotifications) {
-      console.log("[Push] PushNotifications plugin missing, aborting.");
-      return;
-    }
-  } catch (e) {
-    console.log("[Push] Failed to import @capacitor/push-notifications, aborting.", e);
+  // Only run inside a native Capacitor shell (iOS / Android app)
+  if (!Capacitor.isNativePlatform?.()) {
+    console.log("[Push] initNativePush: skip, non-native platform:", platform);
     return;
   }
 
+  console.log("[Push] initNativePush on native platform:", platform);
+  console.log("[Push] window.Capacitor present:", !!(window as any).Capacitor);
+
+  // Capacitor plugins
+  const { PushNotifications } = await import("@capacitor/push-notifications");
+  const { FirebaseMessaging } = await import("@capacitor-firebase/messaging");
+
+  // Firebase
   const { auth, db } = await import("@/lib/firebaseConfig");
   const { doc, setDoc, serverTimestamp } = await import("firebase/firestore");
 
-  // --- Attach listeners ONCE, immediately (before any register happens) ---
+  // ---- Attach listeners once ----
   if (!setupDone) {
     setupDone = true;
 
-    // 1) Registration success (token). Cache it and try to write.
-    PushNotifications.addListener("registration", async ({ value }: { value: string }) => {
-      const token = value;
-      lastFcmToken = token;
-      try {
-        localStorage.setItem("tm_fcm_token", token);
-      } catch {}
-
-      console.log("[Push] registration token:", token, "platform:", platform);
-
-      // Write to a flat debug collection so we can verify E2E even if user isn't ready
-      try {
-        await setDoc(
-          doc(db, "device_tokens", token),
-          {
-            fcmToken: token,
-            platform,
-            seenAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-        console.log("[Push] token saved to /device_tokens (debug)");
-      } catch (e) {
-        console.error("[Push] debug write failed", e);
-      }
-
-      // If user is available now, also write under users/*/devices/*
-      const user = auth.currentUser;
-      if (user) {
-        try {
-          await setDoc(
-            doc(db, "users", user.uid, "devices", token),
-            {
-              fcmToken: token,
-              platform,
-              lastSeen: serverTimestamp(),
-              prefersNativePush: true,
-            },
-            { merge: true }
-          );
-          console.log("[Push] token saved to users/*/devices/*");
-        } catch (e) {
-          console.error("[Push] user devices write failed", e);
-        }
-      } else {
-        console.log("[Push] user not ready; will write under users/* after login");
-      }
+    // Registration from Capacitor (APNs token on iOS, FCM on Android) – we just log it
+    PushNotifications.addListener("registration", (info: any) => {
+      console.log("[Push] native registration value (APNs/FCM):", info?.value);
+      // NOTE: We do NOT treat this as the FCM token on iOS.
+      // Real FCM token comes from FirebaseMessaging.getToken().
     });
 
-    // 2) Registration error
     PushNotifications.addListener("registrationError", (err: any) => {
       console.error("[Push] registrationError:", err);
     });
 
-    // 3) Foreground handler (optional)
     PushNotifications.addListener("pushNotificationReceived", (n: any) => {
       console.log("[Push] foreground notification:", n);
     });
 
-    // 4) Tap handler (optional deep link)
-    PushNotifications.addListener("pushNotificationActionPerformed", (a: any) => {
-      const route = (a.notification?.data as any)?.route as string | undefined;
-      if (route) window.location.href = route;
-    });
+    PushNotifications.addListener(
+      "pushNotificationActionPerformed",
+      (a: any) => {
+        const route = (a.notification?.data as any)?.route as
+          | string
+          | undefined;
+        if (route) window.location.href = route;
+      }
+    );
   }
 
-  // Android channel (safe to keep; iOS just ignores it internally if not supported)
-  if (platform === "android") {
-    try {
-      await PushNotifications.createChannel({
-        id: "messages",
-        name: "Messages",
-        description: "New messages and match updates",
-        importance: 5, // IMPORTANCE_HIGH
-        sound: "tennis_ball_hit", // Android custom sound (must exist in res/raw)
-        vibration: true,
-        lights: true,
-      });
-    } catch (e) {
-      console.warn("[Push] createChannel failed (Android only)", e);
-    }
-  }
-
-  // Check/request permission, then register — all behind try/catch so web can't explode
   try {
+    // Android: create channel (iOS ignores)
+    if (platform === "android") {
+      try {
+        await PushNotifications.createChannel({
+          id: "messages",
+          name: "Messages",
+          description: "New messages and match updates",
+          importance: 5, // IMPORTANCE_HIGH
+          sound: "tennis_ball_hit", // must exist in res/raw on Android
+          vibration: true,
+          lights: true,
+        });
+      } catch (e) {
+        console.warn("[Push] createChannel failed (Android only)", e);
+      }
+    }
+
+    // 1) Permission
     const perm = await PushNotifications.checkPermissions();
-    console.log("[Push] checkPermissions result:", JSON.stringify(perm));
+    console.log("[Push] checkPermissions:", perm);
 
     if (perm.receive !== "granted") {
       const req = await PushNotifications.requestPermissions();
-      console.log("[Push] requestPermissions result:", JSON.stringify(req));
+      console.log("[Push] requestPermissions:", req);
       if (req.receive !== "granted") {
-        console.log("[Push] permission not granted, aborting register()");
+        console.log("[Push] permission not granted, aborting");
         return;
       }
     } else {
-      console.log("[Push] permission already granted, calling register()");
+      console.log("[Push] permission already granted");
     }
 
+    // 2) Register with APNs / FCM at native level
     await PushNotifications.register();
     console.log("[Push] register() called");
+
+    // 3) Ask Firebase Messaging for an FCM token (the one we actually use)
+    const tokenResult: any = await FirebaseMessaging.getToken();
+    const token: string | undefined = tokenResult?.token;
+
+    if (!token) {
+      console.warn("[Push] FirebaseMessaging.getToken() returned no token");
+      return;
+    }
+
+    console.log("[Push] FCM token:", token, "platform:", platform);
+    lastFcmToken = token;
+
+    try {
+      localStorage.setItem("tm_fcm_token", token);
+    } catch {
+      // ignore storage errors
+    }
+
+    const user = auth.currentUser;
+    if (user) {
+      try {
+        await setDoc(
+          doc(db, "users", user.uid, "devices", token),
+          {
+            fcmToken: token,
+            platform,
+            lastSeen: serverTimestamp(),
+            prefersNativePush: true,
+          },
+          { merge: true }
+        );
+        console.log("[Push] FCM token saved to users/*/devices/*");
+      } catch (e) {
+        console.error(
+          "[Push] error saving FCM token under users/*/devices/*",
+          e
+        );
+      }
+    } else {
+      console.log("[Push] user not ready; will bind token after login");
+    }
   } catch (e) {
-    console.error("[Push] error during checkPermissions/register:", e);
+    console.error("[Push] error during initNativePush:", e);
   }
 }
 
 /**
  * Call this after the user logs in (or auth state changes) to ensure
- * any already-received token is written under users/{uid}/devices/{token}.
+ * any already-received FCM token is written under users/{uid}/devices/{token}.
  */
 export async function bindTokenToUserIfAvailable() {
   if (typeof window === "undefined") return;
 
   const { Capacitor } = await import("@capacitor/core");
   const platform = Capacitor.getPlatform ? Capacitor.getPlatform() : "unknown";
-  console.log("[Push] (bind) detected platform:", platform);
+
+  if (!Capacitor.isNativePlatform?.()) {
+    console.log("[Push] (bind) skip, non-native platform:", platform);
+    return;
+  }
 
   const { auth, db } = await import("@/lib/firebaseConfig");
   const { doc, setDoc, serverTimestamp } = await import("firebase/firestore");
 
   const user = auth.currentUser;
-  if (!user) return;
+  if (!user) {
+    console.log("[Push] (bind) no user, skipping");
+    return;
+  }
 
-  // prefer in-memory, fallback to localStorage
   const token = lastFcmToken || localStorage.getItem("tm_fcm_token");
   if (!token) {
-    console.log("[Push] (bind) no token available to bind");
+    console.log("[Push] (bind) no FCM token available to bind");
     return;
   }
 
@@ -174,8 +180,8 @@ export async function bindTokenToUserIfAvailable() {
       },
       { merge: true }
     );
-    console.log("[Push] (bind) token saved to users/*/devices/*");
+    console.log("[Push] (bind) FCM token saved to users/*/devices/*");
   } catch (e) {
-    console.error("[Push] (bind) write failed", e);
+    console.error("[Push] (bind) error saving FCM token", e);
   }
 }
