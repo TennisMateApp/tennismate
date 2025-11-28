@@ -5,15 +5,11 @@ const config: CapacitorConfig = {
   appName: 'TennisMate',
   webDir: 'out',
 
-  server: {
+    server: {
+    // ✅ point to your deployed PWA URL — no trailing slash
     url: 'https://tennismate-s7vk.vercel.app',
     cleartext: false,
     allowNavigation: ['tennismate-s7vk.vercel.app'],
-  },
-
-  ios: {
-    // 👇 This tells Capacitor to actually use App-Bound Domains for this WKWebView
-    limitsNavigationsToAppBoundDomains: true,
   },
 
   android: {
