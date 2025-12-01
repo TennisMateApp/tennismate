@@ -48,7 +48,7 @@ function MessagesHome() {
 
   // UI state: search + tab
   const [queryText, setQueryText] = useState("");
-  const [tab, setTab] = useState<"all" | "unread">("all");
+  const [tab, setTab] = useState<"all" | "unread" | "read">("all");
 
   // Swipe state
   const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
@@ -56,11 +56,16 @@ function MessagesHome() {
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [dragDX, setDragDX] = useState<number>(0);
 
-  const filteredConversations = useMemo(() => {
+const filteredConversations = useMemo(() => {
   const q = queryText.trim().toLowerCase();
 
   const filtered = conversations
-    .filter((c) => (tab === "all" ? true : c.isUnread))
+    .filter((c) => {
+      if (tab === "all") return true;
+      if (tab === "unread") return c.isUnread;
+      if (tab === "read") return !c.isUnread;
+      return true;
+    })
     .filter((c) => {
       if (!q) return true;
       const name = c.displayName?.toLowerCase?.() || "";
@@ -340,34 +345,59 @@ function MessagesHome() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="mt-3 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setTab("all")}
-            className={`rounded-full border px-3 py-1.5 text-sm ${
-              tab === "all" ? "border-green-600 bg-green-50 font-semibold" : "hover:bg-gray-50"
-            }`}
-          >
-            All
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("unread")}
-            className={`rounded-full border px-3 py-1.5 text-sm ${
-              tab === "unread" ? "border-green-600 bg-green-50 font-semibold" : "hover:bg-gray-50"
-            }`}
-          >
-            Unread
-          </button>
-        </div>
+        {/* Filter pills: All / Unread / Read */}
+<div className="mt-3 flex gap-2">
+  <button
+    type="button"
+    onClick={() => setTab("all")}
+    className={`rounded-full border px-3 py-1.5 text-sm ${
+      tab === "all"
+        ? "border-green-600 bg-green-50 font-semibold"
+        : "hover:bg-gray-50"
+    }`}
+  >
+    All
+  </button>
+
+  <button
+    type="button"
+    onClick={() => setTab("unread")}
+    className={`rounded-full border px-3 py-1.5 text-sm ${
+      tab === "unread"
+        ? "border-green-600 bg-green-50 font-semibold"
+        : "hover:bg-gray-50"
+    }`}
+  >
+    Unread
+  </button>
+
+  <button
+    type="button"
+    onClick={() => setTab("read")}
+    className={`rounded-full border px-3 py-1.5 text-sm ${
+      tab === "read"
+        ? "border-green-600 bg-green-50 font-semibold"
+        : "hover:bg-gray-50"
+    }`}
+  >
+    Read
+  </button>
+</div>
+
       </div>
 
-      {filteredConversations.length === 0 ? (
-        <p className="text-gray-600 mt-6 text-center">
-          {queryText ? "No conversations match your search." : "You have no conversations yet."}
-        </p>
-      ) : (
+    {filteredConversations.length === 0 ? (
+  <p className="text-gray-600 mt-6 text-center">
+    {queryText
+      ? "No conversations match your search."
+      : tab === "unread"
+      ? "No unread conversations."
+      : tab === "read"
+      ? "No read conversations yet."
+      : "You have no conversations yet."}
+  </p>
+) : (
+
         <ul className="mt-2 space-y-2">
           {filteredConversations.map((convo) => {
             const isDragging = dragId === convo.id && touchStartX !== null;
