@@ -39,6 +39,7 @@ function formatRelative(ts?: any): string {
 }
 
 function MessagesHome() {
+  
   const [conversations, setConversations] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
   const router = useRouter();
@@ -49,6 +50,9 @@ function MessagesHome() {
   // UI state: search + tab
   const [queryText, setQueryText] = useState("");
   const [tab, setTab] = useState<"all" | "unread" | "read">("all");
+
+  // NEW: loading state
+const [loading, setLoading] = useState<boolean>(true);
 
   // Swipe state
   const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
@@ -81,8 +85,7 @@ const filteredConversations = useMemo(() => {
 }, [conversations, tab, queryText]);
 
 
-
- useEffect(() => {
+useEffect(() => {
   let convoUnsub: (() => void) | null = null;
 
   const stopAllMsgListeners = () => {
@@ -91,192 +94,225 @@ const filteredConversations = useMemo(() => {
   };
 
   const unsubAuth = onAuthStateChanged(auth, async (u) => {
-    if (!u) return;
+    if (!u) {
+      setUser(null);
+      setConversations([]);
+      setLoading(false); // no user, nothing to load
+      return;
+    }
+
     setUser(u);
+    setLoading(true); // start loading when we know we have a user
 
     const convoQuery = query(
       collection(db, "conversations"),
       where("participants", "array-contains", u.uid)
     );
 
-    convoUnsub = onSnapshot(convoQuery, async (convoSnap) => {
-      // ---------- Build base rows from conversation docs ----------
-      const bases = await Promise.all(
-        convoSnap.docs.map(async (docSnap) => {
-          const convoData = docSnap.data() as any;
-          const convoId = docSnap.id;
+    convoUnsub = onSnapshot(
+      convoQuery,
+      async (convoSnap) => {
+        // ---------- Build base rows from conversation docs ----------
+        const bases = await Promise.all(
+          convoSnap.docs.map(async (docSnap) => {
+            const convoData = docSnap.data() as any;
+            const convoId = docSnap.id;
 
-          // Detect event chats
-          const ctx = convoData.context || {};
-          const isEvent = ctx.type === "event";
+            // Detect event chats
+            const ctx = convoData.context || {};
+            const isEvent = ctx.type === "event";
 
-          let displayName = "Unknown";
-          let photoURL: string | null = null; // only for 1:1
-          let otherUserId: string | null = null; // only for 1:1
-          let lastReadOtherMillis: number | null = null; // only for 1:1
+            let displayName = "Unknown";
+            let photoURL: string | null = null; // only for 1:1
+            let otherUserId: string | null = null; // only for 1:1
+            let lastReadOtherMillis: number | null = null; // only for 1:1
 
-          if (isEvent) {
-            // Event: use event title; we render a 📅 avatar in the UI
-            displayName = ctx.title || "Event Chat";
-            lastReadOtherMillis = null; // no ✓✓ for group/event
-          } else {
-            // 1:1 chat (existing behavior)
-            otherUserId =
-              (convoData.participants as string[]).find((id) => id !== u.uid) || null;
+            if (isEvent) {
+              // Event: use event title; we render a 📅 avatar in the UI
+              displayName = ctx.title || "Event Chat";
+              lastReadOtherMillis = null; // no ✓✓ for group/event
+            } else {
+              // 1:1 chat (existing behavior)
+              otherUserId =
+                (convoData.participants as string[]).find(
+                  (id) => id !== u.uid
+                ) || null;
 
-            try {
-              if (otherUserId) {
-                const playerSnap = await getDoc(doc(db, "players", otherUserId));
-                if (playerSnap.exists()) {
-                  const playerData = playerSnap.data() as any;
-                  displayName = playerData.name || "Unknown";
-                  photoURL = playerData.photoURL || null;
+              try {
+                if (otherUserId) {
+                  const playerSnap = await getDoc(
+                    doc(db, "players", otherUserId)
+                  );
+                  if (playerSnap.exists()) {
+                    const playerData = playerSnap.data() as any;
+                    displayName = playerData.name || "Unknown";
+                    photoURL = playerData.photoURL || null;
+                  }
                 }
+              } catch (err) {
+                console.warn("Error fetching player profile", err);
               }
-            } catch (err) {
-              console.warn("Error fetching player profile", err);
+
+              // keep “seen by other” only for 1:1
+              const lastReadOther = otherUserId
+                ? convoData.lastRead?.[otherUserId] || null
+                : null;
+              lastReadOtherMillis = lastReadOther?.toMillis
+                ? lastReadOther.toMillis()
+                : null;
             }
 
-            // keep “seen by other” only for 1:1
-            const lastReadOther = otherUserId
-              ? convoData.lastRead?.[otherUserId] || null
-              : null;
-            lastReadOtherMillis = lastReadOther?.toMillis
-              ? lastReadOther.toMillis()
-              : null;
-          }
+            const lastReadMe = convoData.lastRead?.[u.uid] || null;
 
-          const lastReadMe = convoData.lastRead?.[u.uid] || null;
+            return {
+              id: convoId,
+              isEvent,
+              displayName,
+              photoURL,
+              otherUserId,
+              lastReadMeMillis: lastReadMe?.toMillis
+                ? lastReadMe.toMillis()
+                : null,
+              lastReadOtherMillis, // null for events
+            };
+          })
+        );
 
-          return {
-            id: convoId,
-            isEvent,
-            displayName,
-            photoURL,
-            otherUserId,
-            lastReadMeMillis: lastReadMe?.toMillis ? lastReadMe.toMillis() : null,
-            lastReadOtherMillis, // null for events
-          };
-        })
-      );
+        // ---------- Seed/merge with previous (prevents flicker) ----------
+        setConversations((prev) => {
+          const prevById = new Map(prev.map((c) => [c.id, c]));
 
-      // ---------- Seed/merge with previous (prevents flicker) ----------
-      setConversations((prev) => {
-        const prevById = new Map(prev.map((c) => [c.id, c]));
+          const seeded = bases.map((b) => {
+            const prevRow = prevById.get(b.id);
+            const latestMessage = prevRow?.latestMessage || null;
 
-        const seeded = bases.map((b) => {
-          const prevRow = prevById.get(b.id);
-          const latestMessage = prevRow?.latestMessage || null;
+            const iSentLast = latestMessage?.senderId === u.uid;
 
-          const iSentLast = latestMessage?.senderId === u.uid;
+            // Read receipts: only for 1:1
+            const seenByOther =
+              !b.isEvent &&
+              iSentLast &&
+              b.lastReadOtherMillis &&
+              latestMessage?.timestamp?.toMillis &&
+              b.lastReadOtherMillis >=
+                latestMessage.timestamp.toMillis();
 
-          // Read receipts: only for 1:1
-          const seenByOther =
-            !b.isEvent &&
-            iSentLast &&
-            b.lastReadOtherMillis &&
-            latestMessage?.timestamp?.toMillis &&
-            b.lastReadOtherMillis >= latestMessage.timestamp.toMillis();
+            const readBadge: "none" | "sent" | "seen" = b.isEvent
+              ? "none"
+              : iSentLast
+              ? seenByOther
+                ? "seen"
+                : "sent"
+              : "none";
 
-          const readBadge: "none" | "sent" | "seen" = b.isEvent
-            ? "none"
-            : iSentLast
-            ? (seenByOther ? "seen" : "sent")
-            : "none";
+            const isUnread =
+              latestMessage?.timestamp?.toMillis &&
+              (!b.lastReadMeMillis ||
+                latestMessage.timestamp.toMillis() >
+                  b.lastReadMeMillis);
 
-          const isUnread =
-            latestMessage?.timestamp?.toMillis &&
-            (!b.lastReadMeMillis ||
-              latestMessage.timestamp.toMillis() > b.lastReadMeMillis);
+            const timestampStr = latestMessage?.timestamp
+              ? formatRelative(latestMessage.timestamp)
+              : "";
 
-          const timestampStr = latestMessage?.timestamp
-            ? formatRelative(latestMessage.timestamp)
-            : "";
+            return {
+              id: b.id,
+              isEvent: b.isEvent,
+              displayName: b.displayName,
+              photoURL: b.photoURL,
+              otherUserId: b.otherUserId,
+              lastReadMeMillis: b.lastReadMeMillis,
+              lastReadOtherMillis: b.lastReadOtherMillis,
+              latestMessage,
+              iSentLast,
+              readBadge,
+              isUnread,
+              timestampStr,
+            };
+          });
 
-          return {
-            id: b.id,
-            isEvent: b.isEvent,
-            displayName: b.displayName,
-            photoURL: b.photoURL,
-            otherUserId: b.otherUserId,
-            lastReadMeMillis: b.lastReadMeMillis,
-            lastReadOtherMillis: b.lastReadOtherMillis,
-            latestMessage,
-            iSentLast,
-            readBadge,
-            isUnread,
-            timestampStr,
-          };
+          return seeded;
         });
 
-        return seeded;
-      });
+        // ✅ First snapshot received (even if empty) – stop loading
+        setLoading(false);
 
-      // ---------- Sync per-convo "latest message" listeners ----------
-      const liveIds = new Set(bases.map((b) => b.id));
+        // ---------- Sync per-convo "latest message" listeners ----------
+        const liveIds = new Set(bases.map((b) => b.id));
 
-      // Remove old listeners
-      Object.keys(msgUnsubsRef.current).forEach((id) => {
-        if (!liveIds.has(id)) {
-          msgUnsubsRef.current[id]?.();
-          delete msgUnsubsRef.current[id];
-        }
-      });
-
-      // Add listeners for current convos
-      for (const b of bases) {
-        if (msgUnsubsRef.current[b.id]) continue;
-
-        msgUnsubsRef.current[b.id] = onSnapshot(
-          query(
-            collection(db, "conversations", b.id, "messages"),
-            orderBy("timestamp", "desc"),
-            limit(1)
-          ),
-          (msgSnap) => {
-            const latestMessage = msgSnap.docs[0]?.data() || null;
-
-            setConversations((prev) =>
-              prev.map((c) => {
-                if (c.id !== b.id) return c;
-
-                const iSentLast = latestMessage?.senderId === u.uid;
-
-                // Read receipts: only for 1:1
-                const seenByOther =
-                  !c.isEvent &&
-                  iSentLast &&
-                  c.lastReadOtherMillis &&
-                  latestMessage?.timestamp?.toMillis &&
-                  c.lastReadOtherMillis >= latestMessage.timestamp.toMillis();
-
-                const readBadge: "none" | "sent" | "seen" = c.isEvent
-                  ? "none"
-                  : iSentLast
-                  ? (seenByOther ? "seen" : "sent")
-                  : "none";
-
-                const isUnread =
-                  latestMessage?.timestamp?.toMillis &&
-                  (!c.lastReadMeMillis ||
-                    latestMessage.timestamp.toMillis() > c.lastReadMeMillis);
-
-                return {
-                  ...c,
-                  latestMessage,
-                  iSentLast,
-                  readBadge,
-                  isUnread,
-                  timestampStr: latestMessage?.timestamp
-                    ? formatRelative(latestMessage.timestamp)
-                    : "",
-                };
-              })
-            );
+        // Remove old listeners
+        Object.keys(msgUnsubsRef.current).forEach((id) => {
+          if (!liveIds.has(id)) {
+            msgUnsubsRef.current[id]?.();
+            delete msgUnsubsRef.current[id];
           }
-        );
+        });
+
+        // Add listeners for current convos
+        for (const b of bases) {
+          if (msgUnsubsRef.current[b.id]) continue;
+
+          msgUnsubsRef.current[b.id] = onSnapshot(
+            query(
+              collection(db, "conversations", b.id, "messages"),
+              orderBy("timestamp", "desc"),
+              limit(1)
+            ),
+            (msgSnap) => {
+              const latestMessage =
+                msgSnap.docs[0]?.data() || null;
+
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== b.id) return c;
+
+                  const iSentLast = latestMessage?.senderId === u.uid;
+
+                  // Read receipts: only for 1:1
+                  const seenByOther =
+                    !c.isEvent &&
+                    iSentLast &&
+                    c.lastReadOtherMillis &&
+                    latestMessage?.timestamp?.toMillis &&
+                    c.lastReadOtherMillis >=
+                      latestMessage.timestamp.toMillis();
+
+                  const readBadge: "none" | "sent" | "seen" =
+                    c.isEvent
+                      ? "none"
+                      : iSentLast
+                      ? seenByOther
+                        ? "seen"
+                        : "sent"
+                      : "none";
+
+                  const isUnread =
+                    latestMessage?.timestamp?.toMillis &&
+                    (!c.lastReadMeMillis ||
+                      latestMessage.timestamp.toMillis() >
+                        c.lastReadMeMillis);
+
+                  return {
+                    ...c,
+                    latestMessage,
+                    iSentLast,
+                    readBadge,
+                    isUnread,
+                    timestampStr: latestMessage?.timestamp
+                      ? formatRelative(latestMessage.timestamp)
+                      : "",
+                  };
+                })
+              );
+            }
+          );
+        }
+      },
+      (error) => {
+        console.error("Conversations onSnapshot error:", error);
+        setLoading(false);
       }
-    });
+    );
   });
 
   return () => {
@@ -285,6 +321,7 @@ const filteredConversations = useMemo(() => {
     stopAllMsgListeners();
   };
 }, []);
+
 
 
   const handleDeleteConversation = async (convoId: string) => {
@@ -386,7 +423,18 @@ const filteredConversations = useMemo(() => {
 
       </div>
 
-    {filteredConversations.length === 0 ? (
+{loading ? (
+  // 🔄 Loading spinner
+  <div className="flex flex-col items-center justify-center mt-8">
+    <div
+      className="h-10 w-10 rounded-full border-4 border-green-500 border-t-transparent animate-spin"
+      aria-label="Loading conversations"
+      role="status"
+    />
+    <p className="mt-3 text-sm text-gray-600">Loading your conversations...</p>
+  </div>
+) : filteredConversations.length === 0 ? (
+  // 📴 Empty state (only shown after loading finishes)
   <p className="text-gray-600 mt-6 text-center">
     {queryText
       ? "No conversations match your search."
@@ -397,9 +445,9 @@ const filteredConversations = useMemo(() => {
       : "You have no conversations yet."}
   </p>
 ) : (
-
-        <ul className="mt-2 space-y-2">
-          {filteredConversations.map((convo) => {
+  // ✅ Conversations list
+  <ul className="mt-2 space-y-2">
+    {filteredConversations.map((convo) => {
             const isDragging = dragId === convo.id && touchStartX !== null;
             const translateX = isDragging
               ? Math.max(-80, Math.min(0, dragDX))
