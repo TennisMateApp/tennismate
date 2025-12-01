@@ -418,12 +418,18 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
   )}
 </Link>
 
-<NotificationBell />
+<div className="relative flex items-center justify-center top-[2px]">
+  <NotificationBell />
+</div>
 
                   <div className="relative" ref={settingsRef}>
-                    <button onClick={() => setShowSettings(!showSettings)} title="Settings">
-                      <Settings className="w-6 h-6 text-green-600 hover:text-green-800" />
-                    </button>
+                      <button
+    onClick={() => setShowSettings(!showSettings)}
+    title="Settings"
+    className="flex items-center justify-center mt-[1px]"
+  >
+    <Settings className="w-6 h-6 text-green-600 hover:text-green-800" />
+  </button>
                     {showSettings && (
                       <div className="absolute right-0 mt-2 w-48 bg-white border rounded shadow z-50">
                         <Link

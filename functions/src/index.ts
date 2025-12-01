@@ -29,20 +29,25 @@ function toRoute(input?: unknown): string {
 // ---------- PUSH HELPERS (native first, web fallback) ----------
 // Use fcmToken field when present; fall back to doc id.
 async function getAndroidTokensForUser(uid: string): Promise<string[]> {
+  // 👇 still named "Android", but now returns ALL native (android + ios) tokens
   const snap = await db.collection("users").doc(uid).collection("devices").get();
   const tokens: string[] = [];
 
   snap.forEach((d) => {
     const platform = (d.get("platform") as string) || "web";
-    if (platform !== "android") return;
+
+    // ✅ include both android AND ios, skip web / other
+    if (platform !== "android" && platform !== "ios") return;
 
     const tokenInDoc = d.get("fcmToken") as string | undefined;
-    const token = tokenInDoc || d.id; // our client writes both; be resilient
+    const token = tokenInDoc || d.id;
     if (token) tokens.push(token);
   });
 
+  console.log("[PushFn] native tokens for user", uid, tokens);
   return tokens;
 }
+
 
 /**
  * True if user has at least one Android device doc with a valid token and push not disabled.
@@ -54,24 +59,40 @@ async function getAndroidTokensForUser(uid: string): Promise<string[]> {
  *   revoked?: boolean
  */
 async function hasActiveAndroidPush(uid: string): Promise<boolean> {
+  // 👇 now really "hasActiveNativePush": android OR ios
   const snap = await db
     .collection("users")
     .doc(uid)
     .collection("devices")
-    .where("platform", "==", "android")
     .get();
 
   if (snap.empty) return false;
 
   for (const d of snap.docs) {
-    const disabled = d.get("notificationsEnabled") === false || d.get("pushOptOut") === true;
+    const platform = (d.get("platform") as string) || "web";
+
+    // ✅ only treat android + ios as "native push"
+    if (platform !== "android" && platform !== "ios") continue;
+
+    const disabled =
+      d.get("notificationsEnabled") === false || d.get("pushOptOut") === true;
     const revoked = d.get("revoked") === true;
     const tokenInDoc = d.get("fcmToken") as string | undefined;
     const token = tokenInDoc || d.id;
-    if (token && !disabled && !revoked) return true;
+
+    if (token && !disabled && !revoked) {
+      console.log("[PushFn] hasActiveNativePush = true for", uid, {
+        platform,
+        deviceId: d.id,
+      });
+      return true;
+    }
   }
+
+  console.log("[PushFn] hasActiveNativePush = false for", uid);
   return false;
 }
+
 
 /** Convenience: returns true only if we SHOULD send email. */
 async function shouldEmailUser(uid: string): Promise<boolean> {
@@ -112,7 +133,14 @@ android: {
   },
 },
 
-
+ apns: {
+      payload: {
+        aps: {
+          sound: "tennis_ball_hit.wav", // 👈 EXACT filename in Xcode
+          // badge, alert, etc. can also go here if you want later
+        },
+      },
+    },
   };
 
   const res = await admin.messaging().sendEachForMulticast(message);
