@@ -802,6 +802,13 @@ export const sendPushNotification = onDocumentCreated(
     const notifData = n;
     if (!notifData) return;
 
+       if (notifData.type === "message") {
+      console.log(
+        `[MR_BELL_CONSUMER] skipping push for message notif ${notifId} (handled by notifyOnNewMessage).`
+      );
+      return;
+    }
+
     if (notifData.recipientId && notifData.fromUserId && notifData.recipientId === notifData.fromUserId) {
       console.log("🛑 Ignoring self-targeted notification doc.");
       return;
