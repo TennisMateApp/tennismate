@@ -14,6 +14,7 @@ import {
   writeBatch,
   doc,
   updateDoc,
+  getDoc,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { Bell } from "lucide-react";
@@ -74,11 +75,33 @@ export default function NotificationBell() {
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const debug = useViewportDebug();
+  const [debugEnabled, setDebugEnabled] = useState(false);
 
   // auth -> userId
+   // auth -> userId + debug flag from users/{uid}.debugNotifications
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => setUserId(u ? u.uid : null));
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (!u) {
+        setUserId(null);
+        setDebugEnabled(false);
+        return;
+      }
+
+      setUserId(u.uid);
+
+      try {
+        const snap = await getDoc(doc(db, "users", u.uid));
+        const data = snap.data() as any;
+        setDebugEnabled(!!data?.debugNotifications);
+      } catch (e) {
+        console.warn("[Bell] failed to load debug flag", e);
+        setDebugEnabled(false);
+      }
+    });
+
+    return () => unsub();
   }, []);
+
 
   // live unread feed
   useEffect(() => {
@@ -285,8 +308,8 @@ export default function NotificationBell() {
               </ul>
             )}
 
-            {/* Debug footer – dev only, safe for prod */}
-            {process.env.NODE_ENV === "development" && debug && (
+                       {/* Debug footer – only for users with debugNotifications: true */}
+            {debugEnabled && debug && (
               <div className="border-t border-gray-200 text-[10px] leading-tight p-2 break-all bg-gray-50">
                 <div>
                   inner: {debug.innerWidth} × {debug.innerHeight}
@@ -298,6 +321,7 @@ export default function NotificationBell() {
                 <div className="mt-1">UA: {debug.userAgent}</div>
               </div>
             )}
+
           </div>
         </div>
       )}
