@@ -251,21 +251,18 @@ export default function NotificationBell() {
         )}
       </button>
 
-      {open && (
+           {open && (
         <div
           className="
             absolute top-full right-0 mt-2 z-50
             w-[min(20rem,calc(100vw-1rem))]
             origin-top-right
           "
-          // NEW: dvh-aware outer cap so it can’t extend beyond the viewport
-          style={{ maxHeight: "calc(100dvh - 80px)" }}
         >
-          {/* NEW: inner flex container with single scroll area */}
           <div
             className="
               bg-white border border-gray-200 shadow-lg rounded-md
-              max-h-[70vh]
+              max-h-[60vh]           /* hard cap: 60% of viewport height */
               flex flex-col
               overflow-hidden
             "
@@ -280,7 +277,7 @@ export default function NotificationBell() {
                 No notifications
               </div>
             ) : (
-              <ul className="divide-y divide-gray-100 overflow-y-auto text-sm">
+              <ul className="divide-y divide-gray-100 overflow-y-auto overscroll-contain text-sm">
                 {items.map((n) => (
                   <li
                     key={n.id}
@@ -308,7 +305,7 @@ export default function NotificationBell() {
               </ul>
             )}
 
-                       {/* Debug footer – only for users with debugNotifications: true */}
+            {/* Debug footer – only for users with debugNotifications: true */}
             {debugEnabled && debug && (
               <div className="border-t border-gray-200 text-[10px] leading-tight p-2 break-all bg-gray-50">
                 <div>
@@ -321,10 +318,10 @@ export default function NotificationBell() {
                 <div className="mt-1">UA: {debug.userAgent}</div>
               </div>
             )}
-
           </div>
         </div>
       )}
+
     </div>
   );
 }
