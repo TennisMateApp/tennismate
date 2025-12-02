@@ -251,76 +251,81 @@ export default function NotificationBell() {
         )}
       </button>
 
-           {open && (
-        <div
-          className="
-            absolute top-full right-0 mt-2 z-50
-            w-[min(20rem,calc(100vw-1rem))]
-            origin-top-right
-          "
-        >
-          <div
-            className="
-              bg-white border border-gray-200 shadow-lg rounded-md
-              max-h-[60vh]           /* hard cap: 60% of viewport height */
-              flex flex-col
-              overflow-hidden
-            "
-          >
-            <div className="flex items-center justify-between px-3 py-2 text-sm text-gray-700 font-semibold bg-gray-50 border-b border-gray-200">
-              <span>Notifications</span>
-              {headerRight}
-            </div>
+{open && (
+  <div
+    className="
+      fixed z-50
+      top-[64px]
+      right-2
+      left-2 sm:left-auto
+      origin-top-right
+    "
+  >
+    <div
+      className="
+        ml-auto
+        w-full sm:w-[20rem]
+        bg-white border border-gray-200 shadow-lg rounded-md
+        max-h-[60vh]
+        flex flex-col
+        overflow-hidden
+      "
+    >
+      <div className="flex items-center justify-between px-3 py-2 text-sm text-gray-700 font-semibold bg-gray-50 border-b border-gray-200">
+        <span>Notifications</span>
+        {headerRight}
+      </div>
 
-            {items.length === 0 ? (
-              <div className="p-4 text-sm text-gray-500 flex-1">
-                No notifications
-              </div>
-            ) : (
-              <ul className="divide-y divide-gray-100 overflow-y-auto overscroll-contain text-sm">
-                {items.map((n) => (
-                  <li
-                    key={n.id}
-                    className="p-3 hover:bg-gray-100 cursor-pointer"
-                    onClick={() => handleItemClick(n)}
-                  >
-                    <p className="font-semibold text-gray-800">
-                      {n.title || "Notification"}
-                    </p>
-                    <p className="text-gray-600 text-sm">
-                      {n.body || n.message}
-                    </p>
-                    <p className="text-[11px] text-gray-400 mt-1">
-                      {[
-                        typeLabel[n.type ?? ""] || "Notification",
-                        n.timestamp?.toDate?.()
-                          ? timeAgo(n.timestamp.toDate())
-                          : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
+      {items.length === 0 ? (
+        <div className="p-4 text-sm text-gray-500 flex-1">
+          No notifications
+        </div>
+      ) : (
+        <ul className="divide-y divide-gray-100 overflow-y-auto overscroll-contain text-sm">
+          {items.map((n) => (
+            <li
+              key={n.id}
+              className="p-3 hover:bg-gray-100 cursor-pointer"
+              onClick={() => handleItemClick(n)}
+            >
+              <p className="font-semibold text-gray-800 break-words">
+                {n.title || "Notification"}
+              </p>
+              <p className="text-gray-600 text-sm break-words">
+                {n.body || n.message}
+              </p>
+              <p className="text-[11px] text-gray-400 mt-1">
+                {[
+                  typeLabel[n.type ?? ""] || "Notification",
+                  n.timestamp?.toDate?.()
+                    ? timeAgo(n.timestamp.toDate())
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
 
-            {/* Debug footer – only for users with debugNotifications: true */}
-            {debugEnabled && debug && (
-              <div className="border-t border-gray-200 text-[10px] leading-tight p-2 break-all bg-gray-50">
-                <div>
-                  inner: {debug.innerWidth} × {debug.innerHeight}
-                </div>
-                <div>
-                  client: {debug.clientWidth} × {debug.clientHeight}
-                </div>
-                <div>dpr: {debug.devicePixelRatio}</div>
-                <div className="mt-1">UA: {debug.userAgent}</div>
-              </div>
-            )}
+      {debugEnabled && debug && (
+        <div className="border-t border-gray-200 text-[10px] leading-tight p-2 break-all bg-gray-50">
+          <div>
+            inner: {debug.innerWidth} × {debug.innerHeight}
           </div>
+          <div>
+            client: {debug.clientWidth} × {debug.clientHeight}
+          </div>
+          <div>dpr: {debug.devicePixelRatio}</div>
+          <div className="mt-1">UA: {debug.userAgent}</div>
         </div>
       )}
+    </div>
+  </div>
+)}
+
+
 
     </div>
   );
