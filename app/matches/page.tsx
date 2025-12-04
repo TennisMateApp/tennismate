@@ -17,7 +17,8 @@ import {
   QuerySnapshot,
   arrayUnion,
   setDoc,
-  limit,              
+  limit,  
+  increment,            
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -125,16 +126,50 @@ function getDistanceFromLatLonInKm(
 }
 
 // --- URL & court fetch helpers ---
+// --- URL & court fetch helpers ---
 const normalizeUrl = (u?: string | null): string | undefined => {
   if (!u) return undefined;
   const s = String(u).trim();
   if (!s) return undefined;
   const href = /^https?:\/\//i.test(s) ? s : `https://${s}`;
-  try { return new URL(href).toString(); } catch { return undefined; }
+  try {
+    return new URL(href).toString();
+  } catch {
+    return undefined;
+  }
+};
+
+// 🔢 Log court clicks (map / booking) per user + court
+const logCourtClick = async (
+  userId: string | null,
+  courtId: string | null | undefined,
+  type: "map" | "booking"
+) => {
+  if (!userId || !courtId) return; // nothing to log without both
+
+  try {
+    const ref = doc(db, "court_clicks", `${userId}_${courtId}`);
+    await setDoc(
+      ref,
+      {
+        userId,
+        courtId,
+        updatedAt: serverTimestamp(),
+        totalClicks: increment(1),
+        ...(type === "map"
+          ? { mapClicks: increment(1) }
+          : { bookingClicks: increment(1) }),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    console.error("Failed to log court click", e);
+  }
 };
 
 // Try multiple collections because some courts live in `booking` not `courts`
 async function fetchCourtDocById(dbRef: typeof db, id: string) {
+
   const cols = ["courts", "booking"]; // add more if needed later
   for (const col of cols) {
     const snap = await getDoc(doc(dbRef, col, id));
@@ -150,17 +185,41 @@ const CourtBadge = ({
   lng,
   bookingUrl,
   address,
+  courtId,
 }: {
   name: string;
   lat?: number | null;
   lng?: number | null;
   bookingUrl?: string | null;
   address?: string | null;
+  courtId?: string | null;
 }) => {
-  // Build a search query. If address is present, use "Name, Address".
   const q = address?.trim() ? `${name}, ${address}` : name;
-  const mapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+  const mapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    q
+  )}`;
   const safeBooking = normalizeUrl(bookingUrl || undefined);
+
+  // 🔹 local click logger - reuse same collection
+  const handleClick = async (type: "map" | "booking") => {
+    const user = auth.currentUser;
+    if (!user || !courtId) return;
+
+    const ref = doc(db, "court_clicks", `${user.uid}_${courtId}`);
+    await setDoc(
+      ref,
+      {
+        userId: user.uid,
+        courtId,
+        updatedAt: serverTimestamp(),
+        totalClicks: increment(1),
+        ...(type === "map"
+          ? { mapClicks: increment(1) }
+          : { bookingClicks: increment(1) }),
+      },
+      { merge: true }
+    );
+  };
 
   return (
     <div className="w-full max-w-[520px]">
@@ -169,12 +228,8 @@ const CourtBadge = ({
         Suggested court
       </div>
 
-      {/* prominent banner */}
       <div className="mt-1 rounded-xl bg-green-50 ring-1 ring-green-200/80 shadow-sm px-3 py-2.5">
         <div className="flex items-center gap-3">
-
-
-          {/* name + address */}
           <div className="min-w-0 flex-1">
             <div className="font-semibold text-green-900 truncate">{name}</div>
             {address && (
@@ -182,12 +237,12 @@ const CourtBadge = ({
             )}
           </div>
 
-          {/* actions */}
           <div className="flex items-center gap-1.5">
             <a
               href={mapHref}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => handleClick("map")}
               className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-green-800 ring-1 ring-green-200 hover:bg-green-100"
               title="Open in Google Maps"
             >
@@ -199,6 +254,7 @@ const CourtBadge = ({
                 href={safeBooking}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => handleClick("booking")}
                 className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
                 title="Open booking page"
               >
@@ -211,6 +267,7 @@ const CourtBadge = ({
     </div>
   );
 };
+
 
 
 
@@ -882,13 +939,19 @@ return (
 {/* Meta — line 2 (court chip) */}
 <div className="mt-4 flex items-center justify-center w-full">
   {match.suggestedCourtName ? (
-    <CourtBadge
-      name={match.suggestedCourtName}
-      lat={match.suggestedCourtLat}
-      lng={match.suggestedCourtLng}
-      bookingUrl={match.status === "accepted" ? match.suggestedCourtBookingUrl : undefined}
-      address={match.suggestedCourtAddress}
-    />
+<CourtBadge
+  name={match.suggestedCourtName}
+  lat={match.suggestedCourtLat}
+  lng={match.suggestedCourtLng}
+  bookingUrl={
+    match.status === "accepted"
+      ? match.suggestedCourtBookingUrl
+      : undefined
+  }
+  address={match.suggestedCourtAddress}
+  courtId={match.suggestedCourtId}
+/>
+
   ) : (
     <span className="inline-flex items-center gap-1 text-xs text-gray-500">
       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -896,6 +959,7 @@ return (
     </span>
   )}
 </div>
+
 
       </div>
     </div>
