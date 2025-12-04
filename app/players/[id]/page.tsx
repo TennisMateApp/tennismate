@@ -9,18 +9,76 @@ import withAuth from "@/components/withAuth";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { CalendarDays, CheckCircle2, Trophy } from "lucide-react";
+import type { SkillBand } from "@/lib/skills";
+import { SKILL_OPTIONS, skillFromUTR } from "@/lib/skills";
+
+const SKILL_OPTIONS_SAFE =
+  Array.isArray(SKILL_OPTIONS) && SKILL_OPTIONS.length > 0
+    ? SKILL_OPTIONS
+    : ([
+        { value: "beginner", label: "Beginner" },
+        { value: "intermediate", label: "Intermediate" },
+        { value: "advanced", label: "Advanced" },
+      ] as Array<{ value: SkillBand; label: string }>);
+
+const toSkillLabel = (opts: {
+  skillBand?: string | null;
+  skillBandLabel?: string | null;
+  skillLevel?: string | null;
+  rating?: number | null;
+}): string => {
+  const { skillBandLabel, skillBand, skillLevel, rating } = opts;
+
+  // 1) If you’ve already stored a label, use it
+  if (typeof skillBandLabel === "string" && skillBandLabel.trim()) {
+    return skillBandLabel.trim();
+  }
+
+  // 2) Use the band value + SKILL_OPTIONS
+  if (typeof skillBand === "string" && skillBand.trim()) {
+    const band = skillBand.trim() as SkillBand;
+
+    const fromOptions = SKILL_OPTIONS_SAFE.find((o) => o.value === band)?.label;
+    if (fromOptions) return fromOptions;
+
+    // fallback: lower_beginner -> Lower Beginner
+    if (band.includes("_")) {
+      return band
+        .split("_")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+    }
+    return band.charAt(0).toUpperCase() + band.slice(1);
+  }
+
+  // 3) Try deriving from rating if present
+  if (typeof rating === "number") {
+    const fromRating = skillFromUTR(rating);
+    if (fromRating) return fromRating;
+  }
+
+  // 4) Last resort: legacy skillLevel string
+  if (typeof skillLevel === "string" && skillLevel.trim()) {
+    return skillLevel.trim();
+  }
+
+  return "";
+};
 
 type Player = {
   name: string;
   postcode: string;
-  skillLevel: string;
+  skillLevel: string;        // human-readable label we’ll show
   availability: string[];
   bio: string;
   photoURL?: string;
   // New canonical + legacy support
   skillRating?: number | null;
   utr?: number | null;
+  skillBand?: string | null;
+  skillBandLabel?: string | null;
 };
+
 
 const RATING_LABEL = "TennisMate Rating (TMR)";
 
@@ -43,28 +101,40 @@ function PublicProfilePage() {
         const playerRef = doc(db, "players", id as string);
         const playerSnap = await getDoc(playerRef);
 
-        if (playerSnap.exists()) {
-          const d = playerSnap.data() as any;
+   if (playerSnap.exists()) {
+  const d = playerSnap.data() as any;
 
-          // Prefer new field, fall back to legacy "utr"
-          const ratingNumber: number | null =
-            typeof d.skillRating === "number" ? d.skillRating :
-            typeof d.utr === "number" ? d.utr :
-            null;
+  // Prefer new field, fall back to legacy "utr"
+  const ratingNumber: number | null =
+    typeof d.skillRating === "number"
+      ? d.skillRating
+      : typeof d.utr === "number"
+      ? d.utr
+      : null;
 
-          setPlayer({
-            name: d.name,
-            postcode: d.postcode,
-            skillLevel: d.skillLevel,
-            availability: d.availability || [],
-            bio: d.bio || "",
-            photoURL: d.photoURL,
-            skillRating: ratingNumber,
-            utr: d.utr ?? null, // keep for backward display if needed
-          });
-        } else {
-          console.warn("Player not found in Firestore.");
-        }
+  const skillLabel = toSkillLabel({
+    skillBand: d.skillBand,
+    skillBandLabel: d.skillBandLabel,
+    skillLevel: d.skillLevel,
+    rating: ratingNumber,
+  });
+
+  setPlayer({
+    name: d.name,
+    postcode: d.postcode,
+    skillLevel: skillLabel,          // 👈 now always the computed label
+    availability: d.availability || [],
+    bio: d.bio || "",
+    photoURL: d.photoURL,
+    skillRating: ratingNumber,
+    utr: d.utr ?? null,
+    skillBand: d.skillBand ?? null,
+    skillBandLabel: d.skillBandLabel ?? null,
+  });
+} else {
+  console.warn("Player not found in Firestore.");
+}
+
 
         const matchQuery = query(
           collection(db, "match_history"),

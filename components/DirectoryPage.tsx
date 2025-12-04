@@ -18,7 +18,8 @@ import { db } from "@/lib/firebaseConfig";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { GiTennisBall } from "react-icons/gi";
-import { skillFromUTR } from "@/lib/skills"; // assumes this returns a label like "Upper Beginner"
+import { skillFromUTR, SKILL_OPTIONS } from "@/lib/skills";
+ // assumes this returns a label like "Upper Beginner"
 
 interface Player {
   id: string;
@@ -36,29 +37,58 @@ interface Player {
 const PAGE_SIZE = 20;
 
 function getSkillLabel(v: DocumentData): string {
-  // common alternate field names
+  // 1) New schema: explicit human-readable label from signup
+  if (typeof v.skillBandLabel === "string" && v.skillBandLabel.trim()) {
+    return v.skillBandLabel;
+  }
+
+  // 2) Canonical band value (snake_case) → try SKILL_OPTIONS, then Title Case
+  if (typeof v.skillBand === "string" && v.skillBand.trim()) {
+    const val = v.skillBand.trim();
+
+    // Prefer official label from SKILL_OPTIONS
+    const fromOptions = SKILL_OPTIONS.find((s) => s.value === val)?.label;
+    if (fromOptions) return fromOptions;
+
+    // Fallback: lower_beginner → Lower Beginner
+    if (val.includes("_")) {
+      return val
+        .split("_")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+    }
+
+    return val;
+  }
+
+  // 3) Older fields that may already be human-readable
   const direct =
-    v.skillLevel ||
-    v.skill ||
-    v.skill_label ||
-    v.skillBand ||
-    v.skill_band;
+    (typeof v.skillLevel === "string" && v.skillLevel) ||
+    (typeof v.skill === "string" && v.skill) ||
+    (typeof v.skill_label === "string" && v.skill_label) ||
+    (typeof v.skill_band === "string" && v.skill_band);
 
-  if (direct && typeof direct === "string") return direct;
+  if (direct) return direct as string;
 
-  // derive from ratings if present (adjust keys to your schema)
+  // 4) Derive from numeric rating if present
   const utr = typeof v.utr === "number" ? v.utr : undefined;
-  const trm = typeof v.tmr === "number" ? v.tmr : undefined;
-  const rating = utr ?? trm;
+  const tmr = typeof v.tmr === "number" ? v.tmr : undefined;
+  const rating = utr ?? tmr;
   if (typeof rating === "number") {
     try {
-      const label = skillFromUTR(rating); // e.g., "Upper Beginner"
-      if (label) return label;
-    } catch {}
+      const bandValue = skillFromUTR(rating); // likely returns something like "lower_beginner"
+      if (bandValue) {
+        const fromOptions = SKILL_OPTIONS.find((s) => s.value === bandValue)?.label;
+        return fromOptions ?? bandValue;
+      }
+    } catch {
+      // ignore
+    }
   }
 
   return ""; // show "—" in UI when blank
 }
+
 
 export default function DirectoryPage() {
   // ----- browse mode state (no search) -----

@@ -42,9 +42,30 @@ const coarseFromBand = (b?: SkillBand | "") =>
   b.includes("intermediate") ? "Intermediate" :
   "Advanced";
 
-const getSkillLabel = (band: SkillBand | "" | undefined) => {
-  return SKILL_OPTIONS_SAFE.find(o => o.value === band)?.label ?? "—";
+// Canonical band -> human-readable label
+const toSkillLabel = (band: SkillBand | "" | undefined): string | null => {
+  if (!band) return null;
+
+  // Prefer official label from SKILL_OPTIONS_SAFE
+  const fromOptions = SKILL_OPTIONS_SAFE.find(o => o.value === band)?.label;
+  if (fromOptions) return fromOptions;
+
+  // Fallback: lower_beginner -> Lower Beginner
+  const raw = String(band);
+  if (raw.includes("_")) {
+    return raw
+      .split("_")
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  }
+
+  // Simple capitalisation fallback
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
 };
+
+const getSkillLabel = (band: SkillBand | "" | undefined) =>
+  toSkillLabel(band) ?? "—";
+
 
 
 const legacyToBand = (level?: string): SkillBand | "" => {
@@ -94,7 +115,11 @@ const hasPhoto = useMemo(
   [previewURL, formData.photoURL, croppedImage]
 );
 
-  const [matchStats, setMatchStats] = useState({ matches: 0, completed: 0, wins: 0 });
+const [matchStats, setMatchStats] = useState({ matches: 0, completed: 0, wins: 0 });
+
+// 🔐 Always coerce badges to an array before using .includes
+const safeBadges = Array.isArray(formData.badges) ? formData.badges : [];
+
 
   useEffect(() => {
   const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -125,9 +150,10 @@ setFormData({
   availability: data.availability || [],
   bio: data.bio || "",
   photoURL: data.photoURL || "",
-  badges: data.badges || [],
+  badges: Array.isArray(data.badges) ? data.badges : [],
   timestamp: data.timestamp || null,
 });
+
 
     if (data.photoURL) setPreviewURL(data.photoURL);
 
@@ -270,12 +296,16 @@ await setDoc(
   doc(db, "players", user.uid),
   (() => {
     const { rating, ...rest } = formData; // ← strip UI-only field
+    const badges = Array.isArray(formData.badges) ? formData.badges : [];
+
     return {
       ...rest,
+      badges,
       // canonical fields:
       skillBand: formData.skillBand || null,
-      skillRating: formData.rating === "" ? null : formData.rating, // new canonical
-      utr: formData.rating === "" ? null : formData.rating,         // TEMP mirror
+      skillBandLabel: toSkillLabel(formData.skillBand),
+      skillRating: formData.rating === "" ? null : formData.rating,
+      utr: formData.rating === "" ? null : formData.rating, // TEMP mirror
       skillLevel: coarseFromBand(formData.skillBand),
       photoURL,
       nameLower: (formData.name || "").toLowerCase(),
@@ -286,6 +316,7 @@ await setDoc(
   })(),
   { merge: true }
 );
+
 
 
       setStatus("✅ Profile saved successfully!");
@@ -454,7 +485,7 @@ await setDoc(
             )}
           </section>
 
-          {/* BADGES */}
+{/* BADGES */}
 <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm" aria-labelledby="badges-heading">
   <h2 id="badges-heading" className="text-lg font-semibold">Badges</h2>
   <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
@@ -465,38 +496,39 @@ await setDoc(
 
     <div className="rounded-xl border border-gray-200 bg-white p-3 hover:bg-gray-50" title="Complete your first match">
       <img
-        src={formData.badges.includes("firstMatch") ? "/badges/first-match.svg" : "/badges/first-match-locked.svg"}
+        src={safeBadges.includes("firstMatch") ? "/badges/first-match.svg" : "/badges/first-match-locked.svg"}
         alt="First Match"
         width={64}
         height={64}
-        className={`mx-auto ${formData.badges.includes("firstMatch") ? "" : "opacity-40"}`}
+        className={`mx-auto ${safeBadges.includes("firstMatch") ? "" : "opacity-40"}`}
       />
       <span className="text-xs mt-1 block">First Match</span>
     </div>
 
     <div className="rounded-xl border border-gray-200 bg-white p-3 hover:bg-gray-50" title="Finish your first completed match">
       <img
-        src={formData.badges.includes("firstMatchComplete") ? "/badges/first-match-complete.svg" : "/badges/first-match-complete-locked.svg"}
+        src={safeBadges.includes("firstMatchComplete") ? "/badges/first-match-complete.svg" : "/badges/first-match-complete-locked.svg"}
         alt="First Match Complete"
         width={64}
         height={64}
-        className={`mx-auto ${formData.badges.includes("firstMatchComplete") ? "" : "opacity-40"}`}
+        className={`mx-auto ${safeBadges.includes("firstMatchComplete") ? "" : "opacity-40"}`}
       />
       <span className="text-xs mt-1 block">First Match Complete</span>
     </div>
 
     <div className="rounded-xl border border-gray-200 bg-white p-3 hover:bg-gray-50" title="Win your first match">
       <img
-        src={formData.badges.includes("firstWin") ? "/badges/first-win.svg" : "/badges/first-win-locked.svg"}
+        src={safeBadges.includes("firstWin") ? "/badges/first-win.svg" : "/badges/first-win-locked.svg"}
         alt="First Win"
         width={64}
         height={64}
-        className={`mx-auto ${formData.badges.includes("firstWin") ? "" : "opacity-40"}`}
+        className={`mx-auto ${safeBadges.includes("firstWin") ? "" : "opacity-40"}`}
       />
       <span className="text-xs mt-1 block">First Win</span>
     </div>
   </div>
 </section>
+
 
         </>
       ) : (

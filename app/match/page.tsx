@@ -21,6 +21,7 @@ interface Player {
   postcode: string;
   skillLevel?: string;           // legacy (optional)
   skillBand?: SkillBand | "";    // new
+  skillBandLabel?: string | null;
   utr?: number | null;           // new
   skillRating?: number | null;
   availability: string[];
@@ -70,10 +71,17 @@ function legacyToBand(level?: string): SkillBand | null {
   return null;
 }
 // Pretty label for chips
-function labelForBand(b?: SkillBand | "" | null) {
+function labelForBand(
+  b?: SkillBand | "" | null,
+  explicitLabel?: string | null | undefined
+) {
+  // If Firestore gave us a nice label, use that first
+  if (explicitLabel) return explicitLabel;
+
   if (!b) return "Unknown";
-  return SKILL_OPTIONS.find(x => x.value === b)?.label ?? "Unknown";
+  return SKILL_OPTIONS.find((x) => x.value === b)?.label ?? "Unknown";
 }
+
 // Points tables
 function bandPoints(dist:number){
   if (dist === 0) return 4;
@@ -759,13 +767,15 @@ if (loading) {
           <>
             {/* Mobile (limited) */}
             <div className="mt-1 flex flex-wrap gap-1.5 sm:hidden">
-              <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                Skill: {labelForBand(
-                  match.skillBand ||
-                  skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
-                  legacyToBand(match.skillLevel)
-                  )}
-              </span>
+            <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+  Skill: {labelForBand(
+    match.skillBand ||
+      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
+      legacyToBand(match.skillLevel),
+    match.skillBandLabel // 👈 prefer pretty label from Firestore
+  )}
+</span>
+
            {typeof (match.skillRating ?? match.utr) === "number" && (
             <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
               TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
@@ -800,12 +810,14 @@ if (loading) {
             {/* Desktop (full) */}
             <div className="mt-1 hidden sm:flex flex-wrap gap-1.5">
               <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                Skill: {labelForBand(
-                  match.skillBand ||
-                  skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
-                  legacyToBand(match.skillLevel)
-                  )} 
-              </span>
+  Skill: {labelForBand(
+    match.skillBand ||
+      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
+      legacyToBand(match.skillLevel),
+    match.skillBandLabel // 👈 prefer pretty label from Firestore
+  )}
+</span>
+
          {typeof (match.skillRating ?? match.utr) === "number" && (
           <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
           TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
