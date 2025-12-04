@@ -1277,7 +1277,7 @@ return (
 </div>
 
 
-        {/* Sticky toolbar */}
+         {/* Sticky toolbar */}
     <div className="sticky top-[56px] z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 mb-3 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         {/* Centered tabs with big green buttons + counts */}
@@ -1359,17 +1359,6 @@ return (
             <option value="distance">Closest</option>
           </select>
 
-          {/* Unread only */}
-          <label className="inline-flex items-center gap-2 text-sm text-gray-700 flex-none">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-green-600"
-              checked={unreadOnly}
-              onChange={(e) => setUnreadOnly(e.target.checked)}
-            />
-            Unread only
-          </label>
-
           {/* Search */}
           <input
             type="text"
@@ -1382,6 +1371,7 @@ return (
         </div>
       </div>
     </div>
+
 
 
 
