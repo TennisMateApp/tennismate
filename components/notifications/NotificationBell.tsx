@@ -34,7 +34,6 @@ type Notification = {
   recipientId?: string;
 };
 
-// 🔍 optional: viewport debug for Honor testing (non-breaking)
 type ViewportDebugInfo = {
   innerWidth: number;
   innerHeight: number;
@@ -77,8 +76,17 @@ export default function NotificationBell() {
   const debug = useViewportDebug();
   const [debugEnabled, setDebugEnabled] = useState(false);
 
-  // auth -> userId
-   // auth -> userId + debug flag from users/{uid}.debugNotifications
+  // 🔹 NEW: ref for the bell button
+  const bellButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // 🔹 NEW: dropdown position so it sits just under the bell
+  const [dropdownPos, setDropdownPos] = useState<{
+    top: number;
+    right: number;
+    fullWidth: boolean;
+  } | null>(null);
+
+  // auth -> userId + debug flag from users/{uid}.debugNotifications
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
@@ -101,7 +109,6 @@ export default function NotificationBell() {
 
     return () => unsub();
   }, []);
-
 
   // live unread feed
   useEffect(() => {
@@ -142,6 +149,42 @@ export default function NotificationBell() {
     return () => unsub();
   }, [userId]);
 
+  // 🔹 NEW: when the dropdown opens (or window resizes), position it under the bell
+  useEffect(() => {
+    if (!open) return;
+    if (typeof window === "undefined") return;
+
+    const updatePosition = () => {
+      const btn = bellButtonRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const vw = window.innerWidth;
+
+      const gap = 8; // px gap between icons and dropdown
+
+      if (vw < 640) {
+        // mobile: full width with margin
+        setDropdownPos({
+          top: rect.bottom + gap,
+          right: 8,
+          fullWidth: true,
+        });
+      } else {
+        // desktop: anchor to the right of the bell
+        const right = Math.max(vw - rect.right - 8, 8);
+        setDropdownPos({
+          top: rect.bottom + gap,
+          right,
+          fullWidth: false,
+        });
+      }
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    return () => window.removeEventListener("resize", updatePosition);
+  }, [open]);
+
   // close when clicking outside / Escape
   useEffect(() => {
     if (!open) return;
@@ -149,7 +192,9 @@ export default function NotificationBell() {
     const onPointer = (e: MouseEvent | TouchEvent) => {
       const el = containerRef.current;
       if (!el) return;
-      if (!el.contains(e.target as Node)) setOpen(false);
+      if (!el.contains(e.target as Node) && !bellButtonRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+      }
     };
 
     const onKey = (e: KeyboardEvent) => {
@@ -234,11 +279,9 @@ export default function NotificationBell() {
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="relative inline-block shrink-0 align-top"
-    >
+    <div className="relative inline-block shrink-0 align-top">
       <button
+        ref={bellButtonRef} // 🔹 NEW: attach ref here
         onClick={() => setOpen((v) => !v)}
         className="relative"
         aria-label="Notifications"
@@ -251,82 +294,82 @@ export default function NotificationBell() {
         )}
       </button>
 
-{open && (
-  <div
-    className="
-      fixed z-50
-      top-[64px]
-      right-2
-      left-2 sm:left-auto
-      origin-top-right
-    "
-  >
-    <div
-      className="
-        ml-auto
-        w-full sm:w-[20rem]
-        bg-white border border-gray-200 shadow-lg rounded-md
-        max-h-[60vh]
-        flex flex-col
-        overflow-hidden
-      "
-    >
-      <div className="flex items-center justify-between px-3 py-2 text-sm text-gray-700 font-semibold bg-gray-50 border-b border-gray-200">
-        <span>Notifications</span>
-        {headerRight}
-      </div>
+      {open && dropdownPos && (
+        <div
+          className="
+            fixed z-50
+            origin-top-right
+          "
+          style={{
+            top: dropdownPos.top,
+            right: dropdownPos.fullWidth ? dropdownPos.right : dropdownPos.right,
+            left: dropdownPos.fullWidth ? 8 : "auto", // full width on mobile
+          }}
+        >
+          <div
+            ref={containerRef}
+            className="
+              ml-auto
+              w-[calc(100vw-1rem)] sm:w-[20rem]
+              bg-white border border-gray-200 shadow-lg rounded-md
+              max-h-[60vh]
+              flex flex-col
+              overflow-hidden
+            "
+          >
+            <div className="flex items-center justify-between px-3 py-2 text-sm text-gray-700 font-semibold bg-gray-50 border-b border-gray-200">
+              <span>Notifications</span>
+              {headerRight}
+            </div>
 
-      {items.length === 0 ? (
-        <div className="p-4 text-sm text-gray-500 flex-1">
-          No notifications
-        </div>
-      ) : (
-        <ul className="divide-y divide-gray-100 overflow-y-auto overscroll-contain text-sm">
-          {items.map((n) => (
-            <li
-              key={n.id}
-              className="p-3 hover:bg-gray-100 cursor-pointer"
-              onClick={() => handleItemClick(n)}
-            >
-              <p className="font-semibold text-gray-800 break-words">
-                {n.title || "Notification"}
-              </p>
-              <p className="text-gray-600 text-sm break-words">
-                {n.body || n.message}
-              </p>
-              <p className="text-[11px] text-gray-400 mt-1">
-                {[
-                  typeLabel[n.type ?? ""] || "Notification",
-                  n.timestamp?.toDate?.()
-                    ? timeAgo(n.timestamp.toDate())
-                    : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
+            {items.length === 0 ? (
+              <div className="p-4 text-sm text-gray-500 flex-1">
+                No notifications
+              </div>
+            ) : (
+              <ul className="divide-y divide-gray-100 overflow-y-auto overscroll-contain text-sm">
+                {items.map((n) => (
+                  <li
+                    key={n.id}
+                    className="p-3 hover:bg-gray-100 cursor-pointer"
+                    onClick={() => handleItemClick(n)}
+                  >
+                    <p className="font-semibold text-gray-800 break-words">
+                      {n.title || "Notification"}
+                    </p>
+                    <p className="text-gray-600 text-sm break-words">
+                      {n.body || n.message}
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      {[
+                        typeLabel[n.type ?? ""] || "Notification",
+                        n.timestamp?.toDate?.()
+                          ? timeAgo(n.timestamp.toDate())
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-      {debugEnabled && debug && (
-        <div className="border-t border-gray-200 text-[10px] leading-tight p-2 break-all bg-gray-50">
-          <div>
-            inner: {debug.innerWidth} × {debug.innerHeight}
+            {debugEnabled && debug && (
+              <div className="border-t border-gray-200 text-[10px] leading-tight p-2 break-all bg-gray-50">
+                <div>
+                  inner: {debug.innerWidth} × {debug.innerHeight}
+                </div>
+                <div>
+                  client: {debug.clientWidth} × {debug.clientHeight}
+                </div>
+                <div>dpr: {debug.devicePixelRatio}</div>
+                <div className="mt-1">UA: {debug.userAgent}</div>
+              </div>
+            )}
           </div>
-          <div>
-            client: {debug.clientWidth} × {debug.clientHeight}
-          </div>
-          <div>dpr: {debug.devicePixelRatio}</div>
-          <div className="mt-1">UA: {debug.userAgent}</div>
         </div>
       )}
-    </div>
-  </div>
-)}
-
-
-
     </div>
   );
 }
