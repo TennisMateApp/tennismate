@@ -28,7 +28,7 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen'; //
 import { SafeAreaTop, SafeAreaBottom } from "@/components/SafeArea";
-
+import BackButtonHandler from "@/components/BackButtonHandler";
 
 function useAppBootLoader() {
   const [bootDone, setBootDone] = useState(false);
@@ -353,16 +353,17 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
     showVerify &&
     !pathname.startsWith("/verify-email");
 
-  if (shouldGateToVerify) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-white">
-        <img src="/logo.png" alt="TennisMate" className="w-28 h-28" />
-        <div className="mt-4 text-green-700 font-semibold">
-          One last step… check your email to verify your account.
-        </div>
+if (shouldGateToVerify) {
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-white">
+      <BackButtonHandler />
+      <img src="/logo.png" alt="TennisMate" className="w-28 h-28" />
+      <div className="mt-4 text-green-700 font-semibold">
+        One last step… check your email to verify your account.
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   return (
     <div
@@ -370,6 +371,7 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
         hideAllNav || isFullBleed ? "" : "bg-gray-100"
       }`}
     >
+      <BackButtonHandler />
 
     <PushClientOnly />
 {!hideAllNav && (
