@@ -1277,90 +1277,114 @@ return (
 </div>
 
 
-    {/* Sticky toolbar */}
+        {/* Sticky toolbar */}
     <div className="sticky top-[56px] z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 mb-3 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
-      <div className="flex flex-wrap items-center gap-3">
-        {/* Tabs */}
-        <div className="inline-flex rounded-lg p-0.5 bg-gray-100">
-          <button
-            onClick={() => setTab("pending")}
-            className={`px-3 py-1.5 rounded-md text-sm ${
-              tab === "pending" ? "bg-blue-600 text-white" : "text-gray-800 hover:bg-white"
-            }`}
-          >
-            Pending
-          </button>
-          <button
-            onClick={() => setTab("accepted")}
-            className={`px-3 py-1.5 rounded-md text-sm ${
-              tab === "accepted" ? "bg-blue-600 text-white" : "text-gray-800 hover:bg-white"
-            }`}
-          >
-            Accepted
-          </button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        {/* Centered tabs with big green buttons + counts */}
+        <div className="w-full flex justify-center">
+          <div className="inline-flex w-full max-w-md rounded-2xl bg-green-50 p-1 shadow-sm ring-1 ring-green-200">
+            <button
+              onClick={() => setTab("pending")}
+              className={`relative flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition
+                ${
+                  tab === "pending"
+                    ? "bg-green-600 text-white shadow-sm"
+                    : "text-green-800 hover:bg-white"
+                }`}
+            >
+              <span>Pending</span>
+              <span
+                className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold
+                  ${
+                    tab === "pending"
+                      ? "bg-white/20"
+                      : "bg-green-100 text-green-900"
+                  }`}
+              >
+                {pendingCount}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setTab("accepted")}
+              className={`relative flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition
+                ${
+                  tab === "accepted"
+                    ? "bg-green-600 text-white shadow-sm"
+                    : "text-green-800 hover:bg-white"
+                }`}
+            >
+              <span>Accepted</span>
+              <span
+                className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold
+                  ${
+                    tab === "accepted"
+                      ? "bg-white/20"
+                      : "bg-green-100 text-green-900"
+                  }`}
+              >
+                {acceptedCount}
+              </span>
+            </button>
+          </div>
         </div>
 
-        {/* Counts */}
-        <span className="text-sm text-gray-600">
-          {tab === "pending" ? pendingCount : acceptedCount} result
-          {(tab === "pending" ? pendingCount : acceptedCount) === 1 ? "" : "s"}
-        </span>
+        {/* Filters */}
+        <div className="w-full sm:w-auto sm:ml-auto flex flex-wrap items-center gap-3">
+          {/* Direction */}
+          <select
+            value={direction}
+            onChange={(e) =>
+              setDirection(e.target.value as "all" | "received" | "sent")
+            }
+            className="text-sm border rounded-lg px-2 py-1 flex-none w-[120px] sm:w-auto"
+            title="Filter direction"
+          >
+            <option value="all">All</option>
+            <option value="received">Received</option>
+            <option value="sent">Sent</option>
+          </select>
 
-        <span className="text-xs text-gray-500">
-  Incoming: {incomingPendingCount} • Outgoing: {outgoingPendingCount}
-</span>
+          {/* Sort */}
+          <select
+            value={sortBy}
+            onChange={(e) =>
+              setSortBy(e.target.value as "recent" | "oldest" | "distance")
+            }
+            className="text-sm border rounded-lg px-2 py-1 flex-none w-[130px]"
+            title="Sort"
+          >
+            <option value="recent">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="distance">Closest</option>
+          </select>
 
-{/* Filters */}
-<div className="w-full sm:w-auto sm:ml-auto flex flex-wrap items-center gap-3">
-  {/* Direction */}
-  <select
-    value={direction}
-    onChange={(e) => setDirection(e.target.value as "all" | "received" | "sent")}
-    className="text-sm border rounded-lg px-2 py-1 flex-none w-[120px] sm:w-auto"
-    title="Filter direction"
-  >
-    <option value="all">All</option>
-    <option value="received">Received</option>
-    <option value="sent">Sent</option>
-  </select>
+          {/* Unread only */}
+          <label className="inline-flex items-center gap-2 text-sm text-gray-700 flex-none">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-green-600"
+              checked={unreadOnly}
+              onChange={(e) => setUnreadOnly(e.target.checked)}
+            />
+            Unread only
+          </label>
 
-  {/* Sort */}
-  <select
-    value={sortBy}
-    onChange={(e) => setSortBy(e.target.value as "recent" | "oldest" | "distance")}
-    className="text-sm border rounded-lg px-2 py-1 flex-none w-[130px]"
-    title="Sort"
-  >
-    <option value="recent">Newest</option>
-    <option value="oldest">Oldest</option>
-    <option value="distance">Closest</option>
-  </select>
-
-  {/* Unread only */}
-  <label className="inline-flex items-center gap-2 text-sm text-gray-700 flex-none">
-    <input
-      type="checkbox"
-      className="h-4 w-4 accent-green-600"
-      checked={unreadOnly}
-      onChange={(e) => setUnreadOnly(e.target.checked)}
-    />
-    Unread only
-  </label>
-
-  {/* Search */}
-  <input
-    type="text"
-    value={queryText}
-    onChange={(e) => setQueryText(e.target.value)}
-    placeholder="Search names…"
-    aria-label="Search requests by name"
-    className="text-sm border rounded-lg px-2 py-1 min-w-0 w-full sm:w-48 max-w-full flex-1"
-  />
-</div>
-
-
+          {/* Search */}
+          <input
+            type="text"
+            value={queryText}
+            onChange={(e) => setQueryText(e.target.value)}
+            placeholder="Search names…"
+            aria-label="Search requests by name"
+            className="text-sm border rounded-lg px-2 py-1 min-w-0 w-full sm:w-48 max-w-full flex-1"
+          />
+        </div>
       </div>
     </div>
+
+
+
 
 {/* List / Loading / Empty */}
 {loading ? (
