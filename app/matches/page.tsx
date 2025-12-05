@@ -297,6 +297,12 @@ const [myPlayer, setMyPlayer] = useState<PlayerLite | null>(null);
 const [acceptingId, setAcceptingId] = useState<string | null>(null);
 const [decliningId, setDecliningId] = useState<string | null>(null);
 const [startingId, setStartingId] = useState<string | null>(null);
+const [chatPrompt, setChatPrompt] = useState<{
+  matchId: string;
+  otherUserId: string;
+  otherName: string;
+} | null>(null);
+
   const [sortBy, setSortBy] = useState<"recent" | "oldest" | "distance">("recent");
 const [unreadOnly, setUnreadOnly] = useState(false);
 
@@ -624,7 +630,7 @@ useEffect(() => {
 }, [matches, currentUserId]); // ← do NOT include oppCache here to avoid loops
 
 
-  // Accept a match and award badge
+// Accept a match and award badge + prompt to chat
 const acceptMatch = async (matchId: string, currentUserId: string) => {
   // Snapshot of previous status (for revert)
   const prevStatus = matches.find((m) => m.id === matchId)?.status;
@@ -650,9 +656,39 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
     });
 
     await Promise.all([
-      setDoc(doc(db, "players", toUserId), { badges: arrayUnion("firstMatch") }, { merge: true }),
-      setDoc(doc(db, "players", fromUserId), { badges: arrayUnion("firstMatch") }, { merge: true }),
+      setDoc(
+        doc(db, "players", toUserId),
+        { badges: arrayUnion("firstMatch") },
+        { merge: true }
+      ),
+      setDoc(
+        doc(db, "players", fromUserId),
+        { badges: arrayUnion("firstMatch") },
+        { merge: true }
+      ),
     ]);
+
+    // ⭐ After success – set up the tennis-y chat prompt modal
+    const localMatch = matches.find((m) => m.id === matchId);
+    if (localMatch) {
+      const isMine = localMatch.playerId === currentUserId;
+      const otherUserId = isMine ? localMatch.opponentId : localMatch.playerId;
+
+      if (otherUserId) {
+        const cached = oppCache[otherUserId];
+        const fallbackName = isMine
+          ? localMatch.toName || "your opponent"
+          : localMatch.fromName || "your opponent";
+
+        const otherName = cached?.name || fallbackName;
+
+        setChatPrompt({
+          matchId,
+          otherUserId,
+          otherName,
+        });
+      }
+    }
   } catch (err) {
     console.error("❌ Error accepting match:", err);
     // Revert optimistic flip
@@ -666,6 +702,7 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
     setAcceptingId(null);
   }
 };
+
 
 
   // Start match logic
@@ -1373,9 +1410,6 @@ return (
     </div>
 
 
-
-
-
 {/* List / Loading / Empty */}
 {loading ? (
   // Skeleton grid
@@ -1408,8 +1442,54 @@ return (
   </ul>
 )}
 
+{/* 🎾 Post-accept chat prompt modal */}
+{chatPrompt && currentUserId && (
+  <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+    <div className="relative w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+      {/* Close X button */}
+      <button
+        onClick={() => setChatPrompt(null)}
+        aria-label="Close"
+        className="absolute right-3 top-3 rounded-full p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+      >
+        <X className="h-4 w-4" />
+      </button>
+
+      <div className="text-center">
+        <p className="text-[11px] font-semibold tracking-[0.16em] text-green-700 uppercase">
+          Match accepted
+        </p>
+        <h2 className="mt-1 text-lg font-bold text-gray-900">
+          Rally ready with {chatPrompt.otherName}! 🎾
+        </h2>
+        <p className="mt-2 text-sm text-gray-600">
+          Send a quick message to lock in the time, day, and court.
+        </p>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+        <button
+          onClick={() => {
+            const sortedIDs = [currentUserId!, chatPrompt.otherUserId]
+              .sort()
+              .join("_");
+            setChatPrompt(null);
+            router.push(`/messages/${sortedIDs}`);
+          }}
+          className={`w-full sm:w-auto ${BTN.brand}`}
+        >
+          <MessageCircle className="h-4 w-4" />
+          Send a message
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+
   </div>
 );
+
 
               // end return
 }                // ← ADD THIS: closes MatchesPage component

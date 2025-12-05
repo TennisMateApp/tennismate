@@ -572,10 +572,14 @@ useEffect(() => {
         }}
       >
         <div className="flex items-end gap-2">
-          <textarea
+<textarea
   ref={inputRef}
   rows={1}
-  className="flex-1 max-h-40 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
+  className="
+    flex-1 max-h-40 resize-none rounded-lg border px-3 py-2
+    text-[16px] md:text-sm    /* 👈 key change */
+    outline-none focus:ring-2 focus:ring-green-600
+  "
   placeholder="Type a message…"
   value={input}
   onChange={(e) => {
@@ -590,6 +594,7 @@ useEffect(() => {
   }}
   onBlur={() => updateTypingStatus(false)}
 />
+
 
           <button
             onClick={sendMessage}

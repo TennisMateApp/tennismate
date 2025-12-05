@@ -19,6 +19,20 @@ import { clampUTR, SKILL_OPTIONS, skillFromUTR, type SkillBand } from "../../lib
 const DEFAULT_AVATAR = "/images/default-avatar.jpg";
 const RATING_LABEL = "TennisMate Rating (TMR)";
 
+function toSkillLabel(value: string | null | undefined) {
+  if (!value) return null;
+  // Try to use SKILL_OPTIONS first (source of truth)
+  const fromOptions = SKILL_OPTIONS.find((s) => s.value === value)?.label;
+  if (fromOptions) return fromOptions;
+
+  // Fallback: transform snake_case → Title Case
+  return value
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+
 export default function SignupPage() {
   const [showEmailExistsModal, setShowEmailExistsModal] = useState(false);
   const router = useRouter();
@@ -216,23 +230,33 @@ export default function SignupPage() {
         { merge: true }
       );
 
-      if (isVictorian) {
-        // 4) players/{uid} — canonical: skillRating; mirror: utr (temporary)
-        const ratingOrNull = formData.rating === "" ? null : formData.rating;
-        await setDoc(doc(db, "players", user.uid), {
-          name: formData.name,
-          nameLower: (formData.name || "").toLowerCase(),
-          email: formData.email,
-          postcode: formData.postcode,
-          skillRating: ratingOrNull,
-          utr: ratingOrNull, // TEMP
-          skillBand: formData.skillBand || null,
-          availability: formData.availability,
-          bio: formData.bio,
-          photoURL, // guaranteed real image
-          profileComplete: true,
-          timestamp: serverTimestamp(),
-        });
+    if (isVictorian) {
+  // 4) players/{uid} — canonical: skillRating; mirror: utr (temporary)
+  const ratingOrNull = formData.rating === "" ? null : formData.rating;
+
+  const skillBandValue = formData.skillBand || null;
+  const skillBandLabel = toSkillLabel(skillBandValue);
+
+  await setDoc(doc(db, "players", user.uid), {
+    name: formData.name,
+    nameLower: (formData.name || "").toLowerCase(),
+    email: formData.email,
+    postcode: formData.postcode,
+    skillRating: ratingOrNull,
+    utr: ratingOrNull, // TEMP
+
+    // Keep canonical value for logic
+    skillBand: skillBandValue,
+    // NEW: human-readable version for display
+    skillBandLabel,
+
+    availability: formData.availability,
+    bio: formData.bio,
+    photoURL, // guaranteed real image
+    profileComplete: true,
+    timestamp: serverTimestamp(),
+  });
+
 
         setStatus("");
         router.replace("/verify-email");

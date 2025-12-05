@@ -101,40 +101,28 @@ function PublicProfilePage() {
         const playerRef = doc(db, "players", id as string);
         const playerSnap = await getDoc(playerRef);
 
-   if (playerSnap.exists()) {
-  const d = playerSnap.data() as any;
+        if (playerSnap.exists()) {
+          const d = playerSnap.data() as any;
 
-  // Prefer new field, fall back to legacy "utr"
-  const ratingNumber: number | null =
-    typeof d.skillRating === "number"
-      ? d.skillRating
-      : typeof d.utr === "number"
-      ? d.utr
-      : null;
+          // Prefer new field, fall back to legacy "utr"
+          const ratingNumber: number | null =
+            typeof d.skillRating === "number" ? d.skillRating :
+            typeof d.utr === "number" ? d.utr :
+            null;
 
-  const skillLabel = toSkillLabel({
-    skillBand: d.skillBand,
-    skillBandLabel: d.skillBandLabel,
-    skillLevel: d.skillLevel,
-    rating: ratingNumber,
-  });
-
-  setPlayer({
-    name: d.name,
-    postcode: d.postcode,
-    skillLevel: skillLabel,          // 👈 now always the computed label
-    availability: d.availability || [],
-    bio: d.bio || "",
-    photoURL: d.photoURL,
-    skillRating: ratingNumber,
-    utr: d.utr ?? null,
-    skillBand: d.skillBand ?? null,
-    skillBandLabel: d.skillBandLabel ?? null,
-  });
-} else {
-  console.warn("Player not found in Firestore.");
-}
-
+          setPlayer({
+            name: d.name,
+            postcode: d.postcode,
+            skillLevel: d.skillLevel,
+            availability: d.availability || [],
+            bio: d.bio || "",
+            photoURL: d.photoURL,
+            skillRating: ratingNumber,
+            utr: d.utr ?? null, // keep for backward display if needed
+          });
+        } else {
+          console.warn("Player not found in Firestore.");
+        }
 
         const matchQuery = query(
           collection(db, "match_history"),
