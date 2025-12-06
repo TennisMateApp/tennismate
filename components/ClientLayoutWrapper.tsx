@@ -29,6 +29,7 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen'; //
 import { SafeAreaTop, SafeAreaBottom } from "@/components/SafeArea";
 import BackButtonHandler from "@/components/BackButtonHandler";
+import GetTheAppPrompt from "@/components/growth/GetTheAppPrompt";
 
 function useAppBootLoader() {
   const [bootDone, setBootDone] = useState(false);
@@ -586,11 +587,16 @@ if (shouldGateToVerify) {
 
 
      {user && !hideAllNav && !hideFeedback && <FloatingFeedbackButton />}
-<OnboardingTour
-  open={!!user && showTour && !PUBLIC_ROUTES.has(pathname || "") && !hideAllNav}
-  onClose={completeOnboardingTour}
-  onComplete={completeOnboardingTour}
-/>
+
+     {/* 🔔 Suggest native app for mobile web users after 20s of being logged in */}
+     {user && !hideAllNav && <GetTheAppPrompt />}
+
+     <OnboardingTour
+       open={!!user && showTour && !PUBLIC_ROUTES.has(pathname || "") && !hideAllNav}
+       onClose={completeOnboardingTour}
+       onComplete={completeOnboardingTour}
+     />
+
 
 
 
