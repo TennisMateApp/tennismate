@@ -65,10 +65,9 @@ async function logCourtClick(
   );
 }
 
-
 const PAGE_SIZE = 20;
 
-// 🔗 Normalise external URLs (same idea as Matches page)
+// 🔗 Normalise external URLs
 const normalizeUrl = (u?: string | null): string | null => {
   if (!u) return null;
   const s = String(u).trim();
@@ -128,7 +127,7 @@ const mapCourtDoc = (d: QueryDocumentSnapshot<DocumentData>): Court => {
       ? v.streetAddress
       : undefined;
 
-  // Use name + address for Maps query (like CourtBadge)
+  // Use name + address for Maps query
   const q = address ? `${name}, ${address}` : name;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
     q
@@ -161,28 +160,32 @@ const mapCourtDoc = (d: QueryDocumentSnapshot<DocumentData>): Court => {
   };
 };
 
-
 function CourtsPage() {
   const [courts, setCourts] = useState<Court[]>([]);
-  const [allCourts, setAllCourts] = useState<Court[] | null>(null); // 🆕 full list for global search
+  const [allCourts, setAllCourts] = useState<Court[] | null>(null); // full list
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false); // 🆕
-  const [searchLoading, setSearchLoading] = useState(false); // 🆕
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [userPostcode, setUserPostcode] = useState<string | null>(null);
-const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const [lastDoc, setLastDoc] =
-    useState<QueryDocumentSnapshot<DocumentData> | null>(null); // 🆕
-  const [hasMore, setHasMore] = useState(true); // 🆕
+    useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(true);
 
   // 0 = no distance filter (show any distance)
   const [maxDistanceKm, setMaxDistanceKm] = useState<number>(0);
 
-  // 1️⃣ Load user postcode + coords from postcodes collection
+  // VIC/NSW state filter
+  const [stateFilter, setStateFilter] = useState<"VIC" | "NSW">("VIC");
+
+  const qStr = searchTerm.trim().toLowerCase();
+
+  // 1️⃣ Load user postcode + coords and default stateFilter
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
@@ -200,7 +203,15 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
         const pc = pdata?.postcode;
         if (!pc) return;
 
-        setUserPostcode(String(pc));
+        const pcStr = String(pc).trim();
+        setUserPostcode(pcStr);
+
+        const firstDigit = pcStr.charAt(0);
+        if (firstDigit === "2") {
+          setStateFilter("NSW");
+        } else if (firstDigit === "3") {
+          setStateFilter("VIC");
+        }
 
         // Lookup lat/lng from postcodes collection
         const pcRef = doc(db, "postcodes", String(pc));
@@ -255,7 +266,27 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     loadFirstPage();
   }, []);
 
-  // 3️⃣ Load more when user hits “Load more” (only paginated list)
+  // 3️⃣ Load ALL courts once for global filtering (state + search)
+  useEffect(() => {
+    const loadAllCourts = async () => {
+      if (allCourts !== null) return;
+      try {
+        setSearchLoading(true);
+        const qy = query(collection(db, "courts"), orderBy("name"));
+        const snap = await getDocs(qy);
+        const items = snap.docs.map(mapCourtDoc);
+        setAllCourts(items);
+      } catch (e) {
+        console.error("Error loading all courts:", e);
+      } finally {
+        setSearchLoading(false);
+      }
+    };
+
+    loadAllCourts();
+  }, [allCourts]);
+
+  // 4️⃣ Load more paginated courts (used mainly for initial experience, but filters use allCourts once loaded)
   const loadMore = async () => {
     if (!hasMore || !lastDoc || loadingMore) return;
 
@@ -280,13 +311,12 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
       }
     } catch (err) {
       console.error("Error loading more courts:", err);
-      // leave hasMore as-is so they can retry
     } finally {
       setLoadingMore(false);
     }
   };
 
-  // 🆕 Helper: add distance to any list of courts
+  // Helper: add distance
   const withDistances = (list: Court[], coords: LatLng | null): Court[] => {
     if (!coords) {
       return list.map((c) => ({ ...c, distanceKm: null }));
@@ -309,31 +339,6 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     });
   };
 
-  // 🆕 When the user types a search term (2+ chars), lazily load ALL courts once
-  const qStr = searchTerm.trim().toLowerCase();
-
-  useEffect(() => {
-    const runFullSearchLoad = async () => {
-      if (!qStr || qStr.length < 2) return; // small search just uses the current page
-      if (allCourts !== null) return; // already loaded
-
-      try {
-        setSearchLoading(true);
-        const qy = query(collection(db, "courts"), orderBy("name"));
-        const snap = await getDocs(qy);
-        const items = snap.docs.map(mapCourtDoc);
-        setAllCourts(items);
-      } catch (e) {
-        console.error("Error loading courts for full search:", e);
-      } finally {
-        setSearchLoading(false);
-      }
-    };
-
-    runFullSearchLoad();
-  }, [qStr, allCourts]);
-
-  // 4️⃣ Compute distances for paginated list + full list
   const pagedWithDistance = useMemo(
     () => withDistances(courts, userCoords),
     [courts, userCoords]
@@ -344,18 +349,22 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     [allCourts, userCoords]
   );
 
-  // 5️⃣ Apply search + distance filter
+  // 5️⃣ Apply state filter + search + distance filter
   const filteredCourts = useMemo(() => {
-    // If user is searching AND we have the full list, search against full list.
-    // Otherwise, use the paginated list.
-    const source =
-      qStr && allWithDistance && qStr.length >= 2
-        ? allWithDistance
-        : pagedWithDistance;
+    // Once allCourts is loaded, always use it as the source; otherwise fall back to paged list
+    const source = allWithDistance ?? pagedWithDistance;
 
-    let list = source;
+    // State filter (NSW: postcodes starting with 2, VIC: 3)
+    let list = source.filter((c) => {
+      const pc = (c.postcode || "").toString().trim();
+      if (!pc) return false; // no postcode → can't place state
+      const first = pc.charAt(0);
+      if (stateFilter === "NSW") return first === "2";
+      if (stateFilter === "VIC") return first === "3";
+      return true;
+    });
 
-    // 🔎 Text search
+    // Text search
     if (qStr) {
       list = list.filter((c) => {
         const haystack = [
@@ -372,7 +381,7 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
       });
     }
 
-    // 📏 Distance filter (0 = any distance)
+    // Distance filter (0 = any distance)
     if (userCoords && maxDistanceKm > 0) {
       list = list.filter(
         (c) => typeof c.distanceKm === "number" && c.distanceKm <= maxDistanceKm
@@ -380,7 +389,7 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     }
 
     return list;
-  }, [pagedWithDistance, allWithDistance, qStr, userCoords, maxDistanceKm]);
+  }, [pagedWithDistance, allWithDistance, qStr, userCoords, maxDistanceKm, stateFilter]);
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
@@ -397,8 +406,8 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
           </p>
         </div>
 
-        {/* Search bar */}
-        <div className="mb-4 rounded-xl border bg-white px-3 py-2.5 flex items-center gap-3">
+        {/* Search + State filter */}
+        <div className="mb-3 rounded-xl border bg-white px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <div className="relative flex-1">
             <input
               type="text"
@@ -412,13 +421,35 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
               aria-hidden="true"
             />
           </div>
+
+          {/* State filter */}
+          <div className="flex items-center gap-2">
+            <label
+              className="text-xs font-medium text-gray-700"
+              htmlFor="state-filter"
+            >
+              State
+            </label>
+            <select
+              id="state-filter"
+              value={stateFilter}
+              onChange={(e) =>
+                setStateFilter(e.target.value as "NSW" | "VIC")
+              }
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="VIC">VIC</option>
+              <option value="NSW">NSW</option>
+            </select>
+          </div>
+
           <span className="hidden sm:inline text-xs text-gray-500 min-w-[80px] text-right">
             {filteredCourts.length} court
             {filteredCourts.length === 1 ? "" : "s"}
           </span>
         </div>
 
-        {/* Distance slider (only if we know userCoords) */}
+        {/* Distance slider */}
         {userCoords && (
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-gray-600">
@@ -444,13 +475,12 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
           </div>
         )}
 
-        {searchLoading && qStr.length >= 2 && !allCourts && (
+        {searchLoading && !allCourts && (
           <p className="mb-2 text-xs text-gray-500">
-            Searching all courts in the system…
+            Loading courts…
           </p>
         )}
 
-        {/* States */}
         {loading ? (
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -494,8 +524,8 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
                 return (
                   <article key={court.id} className="w-full">
-                    {/* mini-header like CourtBadge label area */}
-                    <div className="flex items-center justify-between text-[11px] font-semibold tracking-wide text-green-800/80 uppercase px-1">
+                    {/* mini-header */}
+                    <div className="flex items-center justify_between text-[11px] font-semibold tracking-wide text-green-800/80 uppercase px-1">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <MapPin className="h-3.5 w-3.5" />
                         <span className="truncate">{locationLabel}</span>
@@ -507,10 +537,9 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
                       )}
                     </div>
 
-                    {/* green banner styled like CourtBadge */}
+                    {/* card */}
                     <div className="mt-1 rounded-xl bg-green-50 ring-1 ring-green-200/80 shadow-sm px-3 py-2.5">
                       <div className="flex items-start gap-3">
-                        {/* name + address + chips */}
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-green-900 truncate">
                             {court.name}
@@ -534,42 +563,40 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
                               </span>
                             )}
                             {typeof court.indoor === "boolean" && (
-                              <span className="rounded-full bg-white/70 px-2 py-0.5">
+                              <span className="rounded-full bg_white/70 px-2 py-0.5">
                                 {court.indoor ? "Indoor" : "Outdoor"}
                               </span>
                             )}
                           </div>
                         </div>
 
-                        {/* action buttons styled like matches CourtBadge */}
-<div className="flex flex-row items-center gap-1.5">
-  {court.mapsUrl && (
-    <a
-      href={court.mapsUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={() => logCourtClick(court.id, "map")}
-      className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-green-800 ring-1 ring-green-200 hover:bg-green-100"
-      title="Open in Google Maps"
-    >
-      Map
-    </a>
-  )}
+                        <div className="flex flex-row items-center gap-1.5">
+                          {court.mapsUrl && (
+                            <a
+                              href={court.mapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => logCourtClick(court.id, "map")}
+                              className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-green-800 ring-1 ring-green-200 hover:bg-green-100"
+                              title="Open in Google Maps"
+                            >
+                              Map
+                            </a>
+                          )}
 
-  {court.bookingUrl && (
-    <a
-      href={court.bookingUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={() => logCourtClick(court.id, "booking")}
-      className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
-      title="Open booking page"
-    >
-      Book <ExternalLink className="h-3.5 w-3.5" />
-    </a>
-  )}
-</div>
-
+                          {court.bookingUrl && (
+                            <a
+                              href={court.bookingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => logCourtClick(court.id, "booking")}
+                              className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
+                              title="Open booking page"
+                            >
+                              Book <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </article>
@@ -577,7 +604,7 @@ const [currentUserId, setCurrentUserId] = useState<string | null>(null);
               })}
             </div>
 
-            {/* 🆕 Load more button (only when not searching full list & more pages exist) */}
+            {/* Load more (still useful if you want paging for initial render, but not needed for filters once allCourts is loaded) */}
             {!qStr && hasMore && (
               <div className="mt-6 flex justify-center">
                 <button

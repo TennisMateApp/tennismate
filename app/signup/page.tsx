@@ -196,7 +196,8 @@ export default function SignupPage() {
 
     setStatus("Submitting...");
 
-    const isVictorian = formData.postcode.trim().startsWith("3");
+    const firstDigit = formData.postcode.trim().charAt(0);
+const isSupportedRegion = firstDigit === "3" || firstDigit === "2";
 
     try {
       // 1) Create Auth user
@@ -230,7 +231,7 @@ export default function SignupPage() {
         { merge: true }
       );
 
-    if (isVictorian) {
+    if (isSupportedRegion) {
   // 4) players/{uid} — canonical: skillRating; mirror: utr (temporary)
   const ratingOrNull = formData.rating === "" ? null : formData.rating;
 
@@ -616,9 +617,9 @@ export default function SignupPage() {
               <div className="bg-white rounded-xl shadow-lg p-6 max-w-md text-center space-y-4">
                 <h2 className="text-xl font-semibold">Thanks for signing up!</h2>
                 <p className="text-gray-700 text-sm">
-                  📍 TennisMate is currently only available in Victoria.<br />
-                  We’ve saved your interest and will notify you when we launch
-                  in your area.
+                 📍 TennisMate is currently only available in Victoria and New South Wales.<br />
+We’ve saved your interest and will notify you when we launch
+in your area.
                 </p>
                 <button
                   onClick={() => setShowWaitlistModal(false)}

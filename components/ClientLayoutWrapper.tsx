@@ -4,9 +4,17 @@ import Link from "next/link";
 import { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  User, MessageCircle, Search, Settings, Home, CalendarDays, UsersRound
+  User,
+  MessageCircle,
+  Search,
+  Settings,
+  Home,
+  CalendarDays,
+  UsersRound,
+  Swords, // 🆕 for Match Me
 } from "lucide-react";
 import { GiTennisCourt, GiTennisBall, GiTennisRacket } from "react-icons/gi";
+
 import {
   collection, query, where, onSnapshot, getDoc, doc, updateDoc, writeBatch, serverTimestamp
 } from "firebase/firestore";
@@ -139,11 +147,11 @@ const inMatchFlow =
   pathname.startsWith("/events") ||
   pathname.startsWith("/calendar");
 
+// Show "Matches" in the footer by default instead of "Events"
 const footerTabs = inEventsFlow
-  ? ["home", "calendar", "events"]
-  : inMatchFlow
-  ? ["home", "match", "matches"]
-  : ["home", "match", "events"];
+  ? ["home", "calendar", "events"]        // still show Events + Calendar when you're in the events flow
+  : ["home", "match", "matches"];        // default (Home, Match Me, Matches)
+
 
 
 // Existing hides
@@ -393,46 +401,72 @@ if (shouldGateToVerify) {
               <img src="/logo.png" alt="TennisMate" className="w-[40px] h-[40px] rounded-full object-cover" />
             </Link>
 
-            <nav className="flex items-center space-x-6 text-sm">
+                    <nav className="flex items-center space-x-6 text-sm">
               {user ? (
                 <>
                   <Link href="/profile" title="Profile">
                     {photoURL ? (
-                      <img src={photoURL} alt="Profile" className="w-8 h-8 rounded-full object-cover border border-green-600" />
+                      <img
+                        src={photoURL}
+                        alt="Profile"
+                        className="w-8 h-8 rounded-full object-cover border border-green-600"
+                      />
                     ) : (
                       <User className="w-6 h-6 text-blue-600 hover:text-blue-800" />
                     )}
                   </Link>
+
+                  {/* Directory */}
                   <Link href="/directory" title="Directory">
                     <Search className="w-6 h-6 text-green-600 hover:text-blue-800" />
                   </Link>
+
+                  {/* 🟢 Courts shortcut */}
+                  <Link href="/courts" title="Courts">
+                    <GiTennisCourt
+                      className={`w-6 h-6 ${
+                        isActive("/courts")
+                          ? "text-blue-700"
+                          : "text-green-600 hover:text-blue-800"
+                      }`}
+                    />
+                  </Link>
+
                   {/* Calendar */}
-<Link href="/calendar" title="Calendar">
-  <CalendarDays
-    className={`w-6 h-6 ${isActive("/calendar") ? "text-blue-700" : "text-green-600 hover:text-blue-800"}`}
-  />
-</Link>
-        <Link href="/messages" title="Messages" className="relative">
-  <MessageCircle className="w-6 h-6 text-green-600 hover:text-blue-800" />
-  {totalMessages > 0 && (
-    <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
-      {totalMessages > 9 ? "9+" : totalMessages}
-    </span>
-  )}
-</Link>
+                  <Link href="/calendar" title="Calendar">
+                    <CalendarDays
+                      className={`w-6 h-6 ${
+                        isActive("/calendar")
+                          ? "text-blue-700"
+                          : "text-green-600 hover:text-blue-800"
+                      }`}
+                    />
+                  </Link>
 
-<div className="relative flex items-center justify-center top-[2px]">
-  <NotificationBell />
-</div>
+                  {/* Messages */}
+                  <Link href="/messages" title="Messages" className="relative">
+                    <MessageCircle className="w-6 h-6 text-green-600 hover:text-blue-800" />
+                    {totalMessages > 0 && (
+                      <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+                        {totalMessages > 9 ? "9+" : totalMessages}
+                      </span>
+                    )}
+                  </Link>
 
+                  {/* Notifications */}
+                  <div className="relative flex items-center justify-center top-[2px]">
+                    <NotificationBell />
+                  </div>
+
+                  {/* Settings dropdown */}
                   <div className="relative" ref={settingsRef}>
-                      <button
-    onClick={() => setShowSettings(!showSettings)}
-    title="Settings"
-    className="flex items-center justify-center mt-[1px]"
-  >
-    <Settings className="w-6 h-6 text-green-600 hover:text-green-800" />
-  </button>
+                    <button
+                      onClick={() => setShowSettings(!showSettings)}
+                      title="Settings"
+                      className="flex items-center justify-center mt-[1px]"
+                    >
+                      <Settings className="w-6 h-6 text-green-600 hover:text-green-800" />
+                    </button>
                     {showSettings && (
                       <div className="absolute right-0 mt-2 w-48 bg-white border rounded shadow z-50">
                         <Link
@@ -449,17 +483,15 @@ if (shouldGateToVerify) {
                         >
                           Support
                         </Link>
-                            <button
-      onClick={() => {
-        setShowSettings(false);
-        setShowTour(true); // 👈 Reopen onboarding tour
-      }}
-      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-    >
-      What’s New
-    </button>
-
-
+                        <button
+                          onClick={() => {
+                            setShowSettings(false);
+                            setShowTour(true); // 👈 Reopen onboarding tour
+                          }}
+                          className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                        >
+                          What’s New
+                        </button>
                         <button
                           onClick={handleLogout}
                           className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
@@ -471,9 +503,12 @@ if (shouldGateToVerify) {
                   </div>
                 </>
               ) : (
-                <Link href="/login" className="text-blue-600 hover:underline">Login / Sign Up</Link>
+                <Link href="/login" className="text-blue-600 hover:underline">
+                  Login / Sign Up
+                </Link>
               )}
             </nav>
+
           </div>
         </header>
         </>
@@ -519,18 +554,19 @@ if (shouldGateToVerify) {
       )}
 
       {/* 🎯 Match Me */}
-      {footerTabs.includes("match") && (
-        <Link
-          href="/match"
-          aria-label="Match Me"
-          className={`flex flex-col items-center ${
-            isActive("/match") ? "text-blue-700" : "text-green-600 hover:text-green-800"
-          }`}
-        >
-          <GiTennisCourt className="w-6 h-6 mb-1" />
-          <span>Match Me</span>
-        </Link>
-      )}
+{footerTabs.includes("match") && (
+  <Link
+    href="/match"
+    aria-label="Match Me"
+    className={`flex flex-col items-center ${
+      isActive("/match") ? "text-blue-700" : "text-green-600 hover:text-green-800"
+    }`}
+  >
+    <GiTennisRacket className="w-6 h-6 mb-1" />
+    <span>Match Me</span>
+  </Link>
+)}
+
 
       {/* 👥 Events (shown when NOT in match flow) */}
       {footerTabs.includes("events") && (

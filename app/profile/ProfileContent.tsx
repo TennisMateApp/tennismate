@@ -276,9 +276,19 @@ if (!formData.skillBand) {
   setStatus("Please choose a skill level.");
   return;
 }
-// AU postcode (4 digits). Adjust if your regions differ.
-if (!/^\d{4}$/.test(formData.postcode.trim())) {
+// AU postcode (4 digits), VIC + NSW only for now
+const trimmedPostcode = formData.postcode.trim();
+
+if (!/^\d{4}$/.test(trimmedPostcode)) {
   setStatus("Enter a valid 4-digit postcode.");
+  return;
+}
+
+const firstDigit = trimmedPostcode.charAt(0);
+if (firstDigit !== "2" && firstDigit !== "3") {
+  setStatus(
+    "For now TennisMate is only available in VIC and NSW (postcodes starting with 2 or 3)."
+  );
   return;
 }
 
@@ -565,7 +575,10 @@ await setDoc(
       onChange={handleChange}
       className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600 bg-white"
     />
-    <p className="mt-1 text-xs text-gray-500">Australian 4-digit format (e.g. 3000).</p>
+    <p className="mt-1 text-xs text-gray-500">
+  Australian 4-digit format (e.g. 3000). We currently support VIC &amp; NSW (postcodes starting with 2 or 3).
+</p>
+
   </div>
 
   {/* Skill level */}

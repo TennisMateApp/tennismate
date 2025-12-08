@@ -311,24 +311,36 @@ const content = (
           {description}
         </p>
 
-        <div className="mt-4 flex items-center gap-2">
-          {isSoon ? (
-            <Button disabled aria-disabled className={cn(imageSrc ? 'bg-white/70 text-foreground' : 'bg-muted text-foreground')}>
-              <Construction className="h-4 w-4" /> {actionLabel}
-            </Button>
-          ) : (
-            <Button className={cn(imageSrc ? '' : '')}>{actionLabel}</Button>
-          )}
-
+           <div className="mt-4 flex items-center gap-2 min-h-[40px]">
           {isSoon && (
-            <span className={cn(
-              'inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium',
-              imageSrc ? 'bg-white/80 text-amber-800' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'
-            )}>
-              <CircleAlert className="h-3.5 w-3.5" /> Under construction
-            </span>
+            <>
+              <Button
+                disabled
+                aria-disabled
+                className={cn(
+                  imageSrc
+                    ? "bg-white/70 text-foreground"
+                    : "bg-muted text-foreground"
+                )}
+              >
+                <Construction className="h-4 w-4" /> {actionLabel}
+              </Button>
+
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium",
+                  imageSrc
+                    ? "bg-white/80 text-amber-800"
+                    : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+                )}
+              >
+                <CircleAlert className="h-3.5 w-3.5" /> Under construction
+              </span>
+            </>
           )}
         </div>
+
+
       </div>
     </div>
   </Card>
