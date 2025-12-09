@@ -11,23 +11,17 @@ import { Mail, ShieldCheck, Loader2 } from "lucide-react";
 const APP_ORIGIN =
   process.env.NEXT_PUBLIC_APP_ORIGIN || "https://tennismate-s7vk.vercel.app";
 
+const VERIFY_COMPLETE_PATH = "/verify-complete";
+
+const buildVerifyUrl = () => {
+  return `${APP_ORIGIN}${VERIFY_COMPLETE_PATH}`;
+};
+
 export default function VerifyEmailPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [sending, setSending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
-
-  const CONTINUE_TO = "/home";
-
-  const buildLoginRedirect = (email?: string) => {
-    const params = new URLSearchParams({
-      verified: "1",
-      continue: CONTINUE_TO,
-    });
-    if (email) params.set("email", email);
-    // Absolute URL (must be on an Authorized Domain)
-    return `${APP_ORIGIN}/login?${params.toString()}`;
-  };
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -35,15 +29,18 @@ export default function VerifyEmailPage() {
         router.replace("/login");
         return;
       }
+
       await u.reload();
 
+      // If already verified, just send them into the app
       if (u.emailVerified) {
-        // If same-origin, router.replace works; otherwise Next will do a full navigation
-        router.replace(buildLoginRedirect(u.email || ""));
+        router.replace("/home"); // or your main screen
         return;
       }
+
       setReady(true);
     });
+
     return () => unsub();
   }, [router]);
 
@@ -57,16 +54,30 @@ export default function VerifyEmailPage() {
     if (!auth.currentUser || cooldown > 0) return;
     setSending(true);
     try {
-      const loginUrl = buildLoginRedirect(auth.currentUser.email || "");
+      const verifyUrl = buildVerifyUrl();
+
       await sendEmailVerification(auth.currentUser, {
-        url: loginUrl,
-        handleCodeInApp: false, // use Firebase hosted action page
+        url: verifyUrl,
+        handleCodeInApp: true, // use your own /verify-complete handler
+
+        // 🔽 These enable deep-linking into the native apps
+        iOS: {
+          bundleId: "au.com.tennismatch.tennismate",
+        },
+        android: {
+          packageName: "au.com.tennismatch.tennismate",
+          installApp: true,
+          minimumVersion: "1",
+        },
+        // Set this up in Firebase console (Dynamic Links)
+        dynamicLinkDomain:
+          process.env.NEXT_PUBLIC_DYNAMIC_LINK_DOMAIN || "tennismate.page.link",
       });
+
       setCooldown(60);
       alert("Verification email sent. Check your inbox.");
     } catch (e: any) {
       console.error("sendEmailVerification failed:", e);
-      // surface the exact Firebase error to help debugging on mobile
       const code = e?.code || "unknown";
       const message = e?.message || "Unknown error";
       alert(`Could not send verification email. (${code}) ${message}`);
@@ -140,15 +151,23 @@ export default function VerifyEmailPage() {
                 disabled={sending || cooldown > 0}
                 className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-                {sending ? "Sending…" : cooldown ? `Resend in ${cooldown}s` : "Send verification email"}
+                {sending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Mail className="h-4 w-4" />
+                )}
+                {sending
+                  ? "Sending…"
+                  : cooldown
+                  ? `Resend in ${cooldown}s`
+                  : "Send verification email"}
               </button>
             </div>
 
             <div className="mt-6 space-y-2 text-sm text-gray-700 dark:text-gray-300">
               <p className="leading-relaxed">
-                We’ll email you a link. Click it, then tap <em>Continue</em>. You’ll return to the
-                login screen with your email pre-filled — sign in and we’ll take you to the Directory.
+                We’ll email you a link. Tap it on this device to go straight back into TennisMate.
+                If you open it on another device, just sign in there with the same email.
               </p>
               <div className="flex flex-wrap gap-2">
                 <a
