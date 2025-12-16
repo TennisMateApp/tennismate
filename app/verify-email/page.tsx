@@ -11,11 +11,8 @@ import { Mail, ShieldCheck, Loader2 } from "lucide-react";
 const APP_ORIGIN =
   process.env.NEXT_PUBLIC_APP_ORIGIN || "https://tennismate-s7vk.vercel.app";
 
-const VERIFY_COMPLETE_PATH = "/verify-complete";
-
-const buildVerifyUrl = () => {
-  return `${APP_ORIGIN}${VERIFY_COMPLETE_PATH}`;
-};
+// After verification, Firebase will redirect the user here
+const buildVerifyReturnUrl = () => `${APP_ORIGIN}/home?verified=1`;
 
 export default function VerifyEmailPage() {
   const router = useRouter();
@@ -34,7 +31,7 @@ export default function VerifyEmailPage() {
 
       // If already verified, just send them into the app
       if (u.emailVerified) {
-        router.replace("/home"); // or your main screen
+        router.replace("/home");
         return;
       }
 
@@ -53,23 +50,21 @@ export default function VerifyEmailPage() {
   async function sendEmail() {
     if (!auth.currentUser || cooldown > 0) return;
     setSending(true);
+
     try {
-      const verifyUrl = buildVerifyUrl();
+      const returnUrl = buildVerifyReturnUrl();
 
       await sendEmailVerification(auth.currentUser, {
-        url: verifyUrl,
-        handleCodeInApp: true, // use your own /verify-complete handler
+        url: returnUrl,
+        handleCodeInApp: true, // verification happens via Firebase action link; we return to /home
 
-        // 🔽 These enable deep-linking into the native apps
-        iOS: {
-          bundleId: "au.com.tennismatch.tennismate",
-        },
+        // Enables deep-linking into the native apps (once configured)
+        iOS: { bundleId: "au.com.tennismatch.tennate" }, // <-- see note below
         android: {
           packageName: "au.com.tennismatch.tennismate",
           installApp: true,
           minimumVersion: "1",
         },
-        // Set this up in Firebase console (Dynamic Links)
         dynamicLinkDomain:
           process.env.NEXT_PUBLIC_DYNAMIC_LINK_DOMAIN || "tennismate.page.link",
       });
@@ -151,22 +146,14 @@ export default function VerifyEmailPage() {
                 disabled={sending || cooldown > 0}
                 className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {sending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Mail className="h-4 w-4" />
-                )}
-                {sending
-                  ? "Sending…"
-                  : cooldown
-                  ? `Resend in ${cooldown}s`
-                  : "Send verification email"}
+                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                {sending ? "Sending…" : cooldown ? `Resend in ${cooldown}s` : "Send verification email"}
               </button>
             </div>
 
             <div className="mt-6 space-y-2 text-sm text-gray-700 dark:text-gray-300">
               <p className="leading-relaxed">
-                We’ll email you a link. Tap it on this device to go straight back into TennisMate.
+                We’ll email you a link. Tap it on this device to return straight to TennisMate.
                 If you open it on another device, just sign in there with the same email.
               </p>
               <div className="flex flex-wrap gap-2">
