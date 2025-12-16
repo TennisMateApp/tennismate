@@ -14,43 +14,45 @@ export default function VerifyCompletePage() {
   useEffect(() => {
     const code = params.get("oobCode");
     const mode = params.get("mode");
-
-    if (!code || mode !== "verifyEmail") {
-      setStatus("error");
-      setMessage("Invalid verification link.");
-      return;
-    }
+    const verifiedFlag = params.get("verified"); // we add this in buildVerifyUrl()
 
     const run = async () => {
       try {
-        // 1) Apply the verification code
-        await applyActionCode(auth, code);
+        const hasDirectCode = mode === "verifyEmail" && !!code;
+        const hasVerifiedFlag = verifiedFlag === "1";
 
-        // 2) If this device has a logged-in user, refresh them
-        if (auth.currentUser) {
-          try {
-            await reload(auth.currentUser);
-          } catch (e) {
-            console.warn("Could not reload currentUser after verification", e);
-          }
+        // If it's neither a real verify link nor an explicit verified redirect, reject it
+        if (!hasDirectCode && !hasVerifiedFlag) {
+          setStatus("error");
+          setMessage("Invalid verification link.");
+          return;
         }
 
-        setStatus("success");
+        // Case A: Direct code flow (ideal)
+        if (hasDirectCode && code) {
+          await applyActionCode(auth, code);
+        }
 
+        // Reload current user if present, so emailVerified updates
         if (auth.currentUser) {
-          // ✅ Same device & still signed in → auto-continue into the app
+          await reload(auth.currentUser);
+        }
+
+        // If we can confirm verification on this device, auto-continue
+        if (auth.currentUser?.emailVerified) {
+          setStatus("success");
           setMessage("Email verified! Taking you into TennisMate…");
-          setTimeout(() => {
-            router.replace("/home"); // or wherever your main screen is
-          }, 1200);
-        } else {
-          // ✅ Different device / not logged in here
-          setMessage("Email verified! You can now sign in to TennisMate.");
+          setTimeout(() => router.replace("/home"), 900);
+          return;
         }
+
+        // Otherwise the email is verified but this browser/app isn't logged in
+        setStatus("success");
+        setMessage("Email verified! Please sign in to continue.");
       } catch (e) {
         console.error(e);
         setStatus("error");
-        setMessage("This link is invalid or has expired.");
+        setMessage("This verification link is invalid or has expired.");
       }
     };
 
@@ -58,7 +60,7 @@ export default function VerifyCompletePage() {
   }, [params, router]);
 
   const handleButtonClick = () => {
-    if (status === "success" && auth.currentUser) {
+    if (status === "success" && auth.currentUser?.emailVerified) {
       router.replace("/home");
     } else {
       router.replace("/login");
@@ -70,12 +72,13 @@ export default function VerifyCompletePage() {
       <div className="max-w-md w-full rounded-2xl shadow p-6 text-center">
         <h1 className="text-xl mb-2">TennisMate</h1>
         <p>{message}</p>
+
         {status !== "pending" && (
           <button
             className="mt-6 px-4 py-2 rounded-xl border"
             onClick={handleButtonClick}
           >
-            {auth.currentUser ? "Open TennisMate" : "Go to Sign In"}
+            {auth.currentUser?.emailVerified ? "Open TennisMate" : "Go to Sign In"}
           </button>
         )}
       </div>
