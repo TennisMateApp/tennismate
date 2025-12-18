@@ -12,7 +12,20 @@
           "package_name": "com.tennismate.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "16871894453-arhl9mqbrb0q47bfp48o6k4964g0pred.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tennismate.app",
+            "certificate_hash": "022b8eeb877ea82906a7b8e7e3f8d510220db913"
+          }
+        },
+        {
+          "client_id": "16871894453-pq6n70u7remnbu2pmdjf98jcshdr8geu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDp4CbYLL3Xcl6RURSn5nmP2ycZx2umkOg"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "16871894453-pq6n70u7remnbu2pmdjf98jcshdr8geu.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "16871894453-nbghefkl7sfdohpfubes3d7hp4n90372.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "au.com.tennismatch.tennismate"
+              }
+            }
+          ]
         }
       }
     }

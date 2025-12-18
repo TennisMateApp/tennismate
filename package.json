@@ -16,6 +16,7 @@
     "@capacitor/ios": "^7.4.4",
     "@capacitor/push-notifications": "^7.0.3",
     "@capacitor/status-bar": "^7.0.3",
+    "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
     "browser-image-compression": "^2.0.2",
     "csv-parse": "^6.1.0",
     "dotenv": "^17.0.1",

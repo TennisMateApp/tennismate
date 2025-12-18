@@ -38,6 +38,8 @@ import { SplashScreen } from '@capacitor/splash-screen'; //
 import { SafeAreaTop, SafeAreaBottom } from "@/components/SafeArea";
 import BackButtonHandler from "@/components/BackButtonHandler";
 import GetTheAppPrompt from "@/components/growth/GetTheAppPrompt";
+import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
+
 
 function useAppBootLoader() {
   const [bootDone, setBootDone] = useState(false);
@@ -95,6 +97,21 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     });
   }, []);
 
+  useEffect(() => {
+  if (!Capacitor.isNativePlatform()) return;
+
+  try {
+    GoogleAuth.initialize({
+      clientId: process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID!,
+      scopes: ["profile", "email"],
+      grantOfflineAccess: false,
+    });
+    console.log("[LayoutWrapper] GoogleAuth initialized");
+  } catch (e) {
+    console.error("[LayoutWrapper] GoogleAuth init failed:", e);
+  }
+}, []);
+
 
   const bootDone = useAppBootLoader();
 
@@ -109,6 +126,7 @@ useEffect(() => {
 
   const [user, setUser] = useState<any>(null);
   const [photoURL, setPhotoURL] = useState<string | null>(null);
+  const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
   const [unreadMessages, setUnreadMessages] = useState<any[]>([]);
   const [showSettings, setShowSettings] = useState(false);
@@ -195,13 +213,19 @@ const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFe
       setUserOnboardingSeen(seen);
       setNeedsTour((seen ?? 0) < ONBOARDING_VERSION);
 
-      const playerRef = doc(db, "players", u.uid);
-      unsubPlayer = onSnapshot(playerRef, (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setPhotoURL((data as any).photoURL || null);
-        }
-      });
+   const playerRef = doc(db, "players", u.uid);
+
+   unsubPlayer = onSnapshot(playerRef, (docSnap) => {
+  if (docSnap.exists()) {
+    const data = docSnap.data() as any;
+    setPhotoURL(data.photoURL || null);
+    setProfileComplete(data.profileComplete === true);
+  } else {
+    setPhotoURL(null);
+    setProfileComplete(false); // no player doc = not complete
+  }
+});
+
 
       unsubInbox = onSnapshot(
         query(
@@ -251,6 +275,7 @@ if (hasNewer && inbound) {
       setUser(null);
       setPhotoURL(null);
       setShowTour(false);
+      setProfileComplete(null);
     }
   });
 
@@ -296,6 +321,31 @@ useEffect(() => {
   })();
 }, [pathname, router]);
 
+useEffect(() => {
+  // wait until we know if profile is complete
+  if (!user) return;
+  if (profileComplete === null) return;
+
+  // don't fight email verification gate
+  if (showVerify) return;
+
+  // routes we allow even when profile is incomplete
+  const allowedPrefixes = [
+    "/profile",         // must allow the completion screen
+    "/verify-email",
+    "/verify-complete",
+    "/login",
+    "/signup",
+  ];
+
+  const isAllowed = allowedPrefixes.some((p) => pathname.startsWith(p));
+  if (isAllowed) return;
+
+  // 🔒 If incomplete, force them to complete profile before doing anything else
+  if (profileComplete === false) {
+    router.replace("/profile?edit=true");
+  }
+}, [user, profileComplete, showVerify, pathname, router]);
 
 
 

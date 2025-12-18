@@ -1,12 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { signInWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
+
+import {
+  signInWithEmailAndPassword,
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithCredential,
+  signInWithPopup,
+} from "firebase/auth";
+
+import { auth, db } from "@/lib/firebaseConfig";
+
+import { Capacitor } from "@capacitor/core";
+import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+
+
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -50,6 +64,65 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+const handleGoogleSignIn = async () => {
+  setError("");
+  setLoading(true);
+
+  try {
+    // ✅ 1) Sign in (native vs web)
+    if (Capacitor.isNativePlatform()) {
+      const res = await GoogleAuth.signIn();
+      const idToken = res.authentication?.idToken;
+      if (!idToken) throw new Error("Missing Google idToken");
+
+      const credential = GoogleAuthProvider.credential(idToken);
+      await signInWithCredential(auth, credential);
+    } else {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      await signInWithPopup(auth, provider);
+    }
+
+    // ✅ 2) ALWAYS reload after sign-in (native + web)
+    await auth.currentUser?.reload();
+
+    // ✅ 3) Build a robust photo URL
+    const u = auth.currentUser;
+    if (!u) throw new Error("No Firebase user after Google sign-in");
+
+    const rawPhoto =
+      u.providerData?.find((p) => p.providerId === "google.com")?.photoURL ||
+      u.photoURL ||
+      "";
+
+    const fixedPhotoURL = rawPhoto
+      ? rawPhoto.replace(/=s\d+(-c)?$/, "=s256-c")
+      : "";
+
+    // ✅ 4) Write into players/{uid} because Profile reads players
+await setDoc(doc(db, "players", u.uid), {
+  name: u.displayName || "",
+  email: u.email || "",
+  googlePhotoURL: fixedPhotoURL, // keep it if you want
+  photoURL: "",              // force upload
+  profileComplete: false,
+  timestamp: serverTimestamp(),
+}, { merge: true });
+
+
+    // ✅ 5) Force them into profile completion
+    router.replace("/profile?edit=true");
+  } catch (err: any) {
+    console.error("Google sign-in failed:", err);
+    setError("Google sign-in failed. Please try again.");
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
 
   return (
     <div className="relative min-h-[100dvh] overflow-hidden">
@@ -131,6 +204,7 @@ export default function LoginPage() {
               </div>
             )}
 
+
             <button
               type="submit"
               disabled={loading}
@@ -138,6 +212,23 @@ export default function LoginPage() {
             >
               {loading ? "Logging in…" : "Log In"}
             </button>
+
+          <div className="relative my-4">
+  <div className="h-px bg-gray-200" />
+  <span className="absolute left-1/2 -translate-x-1/2 -top-2 bg-white px-2 text-xs text-gray-500">
+    or
+  </span>
+</div>
+
+            <button
+  type="button"
+  onClick={handleGoogleSignIn}
+  disabled={loading}
+  className="w-full border border-gray-300 bg-white text-gray-900 py-2.5 rounded-lg hover:bg-gray-50 transition disabled:opacity-70 disabled:cursor-not-allowed"
+>
+  {loading ? "Opening Google…" : "Continue with Google"}
+</button>
+
           </form>
 
           <div className="mt-4 flex flex-col items-center gap-3">

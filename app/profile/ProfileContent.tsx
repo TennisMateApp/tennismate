@@ -276,6 +276,11 @@ if (!formData.skillBand) {
   setStatus("Please choose a skill level.");
   return;
 }
+if (!formData.availability || formData.availability.length === 0) {
+  setStatus("Please select at least one availability option.");
+  return;
+}
+
 // AU postcode (4 digits), VIC + NSW only for now
 const trimmedPostcode = formData.postcode.trim();
 
@@ -363,11 +368,16 @@ await setDoc(
             <span className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full bg-emerald-200/40 blur-2xl" />
             <span className="pointer-events-none absolute -bottom-8 -left-8 h-24 w-24 rounded-full bg-emerald-100/60 blur-2xl" />
 
-            <img
-              src={previewURL || "/default-avatar.png"}
-              alt={`${formData.name || "User"} avatar`}
-              className="h-24 w-24 rounded-full object-cover ring-4 ring-white"
-            />
+          <img
+  src={previewURL || "/default-avatar.png"}
+  alt={`${formData.name || "User"} avatar`}
+  className="h-24 w-24 rounded-full object-cover ring-4 ring-white"
+  onError={() => {
+    console.warn("[Profile] avatar failed to load:", previewURL);
+    setPreviewURL(null);
+    setFormData((p) => ({ ...p, photoURL: "" }));
+  }}
+/>
 
             <h1 className="mt-3 text-2xl sm:text-3xl font-bold break-words">
               {formData.name || "Your Name"}
@@ -637,7 +647,10 @@ await setDoc(
 
   {/* Availability */}
   <fieldset>
-    <legend className="block text-sm font-medium text-gray-800">Availability</legend>
+    <legend className="block text-sm font-medium text-gray-800">
+  Availability <span className="text-red-600">*</span>
+</legend>
+
     <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-1">
       {["Weekdays AM","Weekdays PM","Weekends AM","Weekends PM"].map((slot) => (
         <label key={slot} className="flex items-center gap-2 text-sm py-1">
@@ -781,12 +794,19 @@ await setDoc(
       <button
   form="editProfile"
   type="submit"
-  disabled={saving || !hasPhoto}
-  title={!hasPhoto ? "Add a profile photo to enable Save" : undefined}
+  disabled={saving || !hasPhoto || formData.availability.length === 0}
+  title={
+    !hasPhoto
+      ? "Add a profile photo to enable Save"
+      : formData.availability.length === 0
+      ? "Select at least one availability option to enable Save"
+      : undefined
+  }
   className="rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
 >
   {saving ? "Saving…" : "Save Profile"}
 </button>
+
 
     </div>
 
