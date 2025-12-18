@@ -32,6 +32,8 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams?.get("next") || "/home";
+  const isNative = Capacitor.isNativePlatform();
+
 
   // If already signed in, go to /home (or next) immediately
   useEffect(() => {
@@ -228,14 +230,16 @@ await setDoc(doc(db, "players", u.uid), {
   </span>
 </div>
 
-            <button
-  type="button"
-  onClick={handleGoogleSignIn}
-  disabled={loading}
-  className="w-full border border-gray-300 bg-white text-gray-900 py-2.5 rounded-lg hover:bg-gray-50 transition disabled:opacity-70 disabled:cursor-not-allowed"
->
-  {loading ? "Opening Google…" : "Continue with Google"}
-</button>
+{!isNative && (
+  <button
+    type="button"
+    onClick={handleGoogleSignIn}
+    disabled={loading}
+    className="w-full border border-gray-300 bg-white text-gray-900 py-2.5 rounded-lg hover:bg-gray-50 transition disabled:opacity-70 disabled:cursor-not-allowed"
+  >
+    {loading ? "Opening Google…" : "Continue with Google"}
+  </button>
+)}
 
           </form>
 
