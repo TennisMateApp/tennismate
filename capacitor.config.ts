@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'TennisMate',
   webDir: 'out',
 
-    server: {
+  server: {
     // ✅ point to your deployed PWA URL — no trailing slash
     url: 'https://tennismate-s7vk.vercel.app',
     cleartext: false,
@@ -17,38 +17,25 @@ const config: CapacitorConfig = {
   },
 
   plugins: {
-  SplashScreen: {
-    launchShowDuration: 1200,
-    launchAutoHide: true,
-    backgroundColor: "#ffffff",
-    androidScaleType: "CENTER_INSIDE",
-    showSpinner: false,
-  },
-  StatusBar: {
-    overlaysWebView: false,
-    style: "DARK",
-  },
-
-  // ✅ ADD THIS
-  GoogleAuth: {
-    scopes: ["profile", "email"],
-    serverClientId: process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-    forceCodeForRefreshToken: false,
-  },
-},
-
-
-  plugins: {
     SplashScreen: {
       launchShowDuration: 1200,
       launchAutoHide: true,
-      backgroundColor: '#0B132B',
+      backgroundColor: '#ffffff',
       androidScaleType: 'CENTER_INSIDE',
       showSpinner: false,
     },
+
     StatusBar: {
       overlaysWebView: false,
       style: 'DARK',
+    },
+
+    // ✅ REQUIRED so TypeScript + Vercel build passes
+    GoogleAuth: {
+      scopes: ['profile', 'email'],
+      serverClientId:
+        '16871894453-pq6n70u7remnbu2pmdjf98jcshdr8geu.apps.googleusercontent.com',
+      forceCodeForRefreshToken: false,
     },
   },
 };
