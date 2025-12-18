@@ -97,20 +97,33 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     });
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
   if (!Capacitor.isNativePlatform()) return;
 
-  try {
-    GoogleAuth.initialize({
-      clientId: process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID!,
-      scopes: ["profile", "email"],
-      grantOfflineAccess: false,
-    });
-    console.log("[LayoutWrapper] GoogleAuth initialized");
-  } catch (e) {
-    console.error("[LayoutWrapper] GoogleAuth init failed:", e);
-  }
+  const NATIVE_WEB_CLIENT_ID =
+    "16871894453-pq6n70u7remnbu2pmdjf98jcshdr8geu.apps.googleusercontent.com";
+
+  const t = setTimeout(() => {
+    try {
+      GoogleAuth.initialize({
+        clientId: NATIVE_WEB_CLIENT_ID,
+        scopes: ["profile", "email"],
+        grantOfflineAccess: false,
+      });
+
+      console.log("[LayoutWrapper] GoogleAuth initialized ✅", {
+        platform: Capacitor.getPlatform(),
+        clientId: NATIVE_WEB_CLIENT_ID,
+      });
+    } catch (e) {
+      console.error("[LayoutWrapper] GoogleAuth init failed ❌:", e);
+    }
+  }, 300); // small delay helps some Android cold starts
+
+  return () => clearTimeout(t);
 }, []);
+
+
 
 
   const bootDone = useAppBootLoader();

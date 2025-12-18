@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "16871894453-74b2uj7a1db93kekd486q2dd2opakf9o.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tennismate.app",
+            "certificate_hash": "f17f08675713eec5d0e5fb9f4b4152e1d0cb46b7"
+          }
+        },
+        {
           "client_id": "16871894453-arhl9mqbrb0q47bfp48o6k4964g0pred.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

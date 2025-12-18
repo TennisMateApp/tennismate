@@ -113,10 +113,18 @@ await setDoc(doc(db, "players", u.uid), {
 
     // ✅ 5) Force them into profile completion
     router.replace("/profile?edit=true");
-  } catch (err: any) {
-    console.error("Google sign-in failed:", err);
-    setError("Google sign-in failed. Please try again.");
-  } finally {
+} catch (err: any) {
+  console.error("Google sign-in failed:", err);
+
+  const msg =
+    err?.message ||
+    err?.errorMessage ||
+    (typeof err === "string" ? err : "") ||
+    JSON.stringify(err);
+
+  setError(`Google sign-in failed: ${msg}`);
+}
+ finally {
     setLoading(false);
   }
 };
