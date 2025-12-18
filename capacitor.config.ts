@@ -17,6 +17,28 @@ const config: CapacitorConfig = {
   },
 
   plugins: {
+  SplashScreen: {
+    launchShowDuration: 1200,
+    launchAutoHide: true,
+    backgroundColor: "#ffffff",
+    androidScaleType: "CENTER_INSIDE",
+    showSpinner: false,
+  },
+  StatusBar: {
+    overlaysWebView: false,
+    style: "DARK",
+  },
+
+  // ✅ ADD THIS
+  GoogleAuth: {
+    scopes: ["profile", "email"],
+    serverClientId: process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    forceCodeForRefreshToken: false,
+  },
+},
+
+
+  plugins: {
     SplashScreen: {
       launchShowDuration: 1200,
       launchAutoHide: true,
