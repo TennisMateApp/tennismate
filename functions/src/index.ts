@@ -4,7 +4,7 @@ import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/fire
 import { sendEventRemindersV2 } from "./eventReminders";
 import { onRequest } from "firebase-functions/v2/https";
 import * as crypto from "crypto";
-import { onSchedule } from "firebase-functions/v2/scheduler";
+import { pubsub } from "firebase-functions/v1";
 
 
 // ✅ Set correct region for Firestore: australia-southeast2
@@ -570,86 +570,80 @@ export const syncCalendarWhenParticipantsChange = onDocumentUpdated("events/{eve
   await batch.commit();
 });
 
-export const nudgePendingMatchRequests = onSchedule("every 60 minutes", async () => {
-  const now = Date.now();
-  const cutoff = new Date(now - 48 * 60 * 60 * 1000); // 48 hours ago
+export const nudgePendingMatchRequests = pubsub
+  .schedule("every 60 minutes")
+  .timeZone("Australia/Melbourne")
+  .onRun(async () => {
+    const now = Date.now();
+    const cutoffMs = now - 48 * 60 * 60 * 1000; // 48 hours
+    const cutoffDate = new Date(cutoffMs);
 
-  console.log("[Nudge] Running. Cutoff:", cutoff.toISOString());
+    console.log("[Nudge] Running. Cutoff:", cutoffDate.toISOString());
 
-  // Only look at still-pending requests.
-  // (Adjust if your pending status is different.)
-  const snap = await db
-    .collection("match_requests")
-    .where("status", "==", "unread")
-    .get();
+    const snap = await db
+      .collection("match_requests")
+      .where("status", "==", "unread")
+      .get();
 
-  if (snap.empty) {
-    console.log("[Nudge] No pending match requests found.");
-    return;
-  }
-
-  // Filter in-memory because timestamp comparisons can be tricky if some docs have null timestamps.
-  const candidates = snap.docs
-    .map((d) => ({ id: d.id, ...d.data() } as any))
-    .filter((r) => {
-      if (r.nudgeSent === true) return false;
-      const ts = r.timestamp?.toDate?.() ? r.timestamp.toDate() : null;
-      if (!ts) return false; // no timestamp = skip
-      return ts <= cutoff;
-    });
-
-  console.log(`[Nudge] Candidates: ${candidates.length}`);
-
-  for (const req of candidates) {
-    const matchId = req.id;
-    const toUserId = req.toUserId as string | undefined;
-    const fromName = (req.fromName as string | undefined) ?? "Someone";
-
-    if (!toUserId) {
-      console.log("[Nudge] Skipping (missing toUserId):", matchId);
-      continue;
+    if (snap.empty) {
+      console.log("[Nudge] No pending match requests found.");
+      return null;
     }
 
-    const reqRef = db.collection("match_requests").doc(matchId);
-
-    // Transaction makes this idempotent even if the scheduler overlaps / retries.
-    await db.runTransaction(async (tx) => {
-      const fresh = await tx.get(reqRef);
-      if (!fresh.exists) return;
-
-      const data = fresh.data() as any;
-
-      // Stop if user already responded or we already nudged
-      if (data.nudgeSent === true) return;
-      if (data.status !== "unread") return;
-
-      const freshTs = data.timestamp?.toDate?.() ? data.timestamp.toDate() : null;
-      if (!freshTs || freshTs > cutoff) return;
-
-      // ✅ Send push (your helper sends to native devices)
-      const sent = await sendAndroidPushToUser(toUserId, {
-        title: "Reminder",
-        body: `${fromName} is waiting for your reply 👀`,
-        route: "/messages",          // <-- change if you have a better route for match requests
-        type: "match_request_nudge", // helps you debug/segment later
+    const candidates = snap.docs
+      .map((d) => ({ id: d.id, ref: d.ref, data: d.data() as any }))
+      .filter(({ data }) => {
+        if (data.nudgeSent === true) return false;
+        const ts = data.timestamp?.toDate?.() ? data.timestamp.toDate() : null;
+        if (!ts) return false;
+        return ts.getTime() <= cutoffMs;
       });
 
-      console.log("[Nudge] Push sent?", sent, { matchId, toUserId });
+    console.log(`[Nudge] Candidates: ${candidates.length}`);
 
-      // Mark as nudged so it never repeats
-      tx.set(
-        reqRef,
-        {
-          nudgeSent: true,
-          nudgeSentAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    });
-  }
+    for (const c of candidates) {
+      await db.runTransaction(async (tx) => {
+        const fresh = await tx.get(c.ref);
+        if (!fresh.exists) return;
 
-  console.log("[Nudge] Done.");
-});
+        const data = fresh.data() as any;
+
+        if (data.nudgeSent === true) return;
+        if (data.status !== "unread") return;
+
+        const ts = data.timestamp?.toDate?.() ? data.timestamp.toDate() : null;
+        if (!ts || ts.getTime() > cutoffMs) return;
+
+        const toUserId = data.toUserId as string | undefined;
+        const fromName = (data.fromName as string | undefined) ?? "Someone";
+        if (!toUserId) return;
+
+        // ✅ Send push (use your existing helper)
+        const sent = await sendAndroidPushToUser(toUserId, {
+          title: `${fromName} is waiting for your reply`,
+          body: "You have a pending match request. Accept or decline to let them know.",
+          route: "/match", // change to your match requests screen if needed
+          type: "match_request_nudge_48h",
+        });
+
+        console.log("[Nudge] Push sent?", sent, { matchRequestId: fresh.id, toUserId });
+
+        tx.set(
+          c.ref,
+          {
+            nudgeSent: true,
+            nudgeSentAt: admin.firestore.FieldValue.serverTimestamp(),
+            nudgedCount: admin.firestore.FieldValue.increment(1),
+          },
+          { merge: true }
+        );
+      });
+    }
+
+    console.log("[Nudge] Done.");
+    return null;
+  });
+
 
 
 interface Court {

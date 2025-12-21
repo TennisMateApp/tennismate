@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { auth, db, storage } from "@/lib/firebaseConfig";
+import { auth, db, storage, functions } from "@/lib/firebaseConfig";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
@@ -13,7 +13,6 @@ import {
   setDoc,
   serverTimestamp,
   where,
-  deleteDoc,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import Cropper from "react-easy-crop";
@@ -23,6 +22,7 @@ import type { SkillBand } from "../../lib/skills";
 import { clampUTR, SKILL_OPTIONS, skillFromUTR } from "../../lib/skills";
 import type { ChangeEvent } from "react";
 import React from "react";
+import { httpsCallable } from "firebase/functions";
 
 const RATING_LABEL = "TennisMate Rating (TMR)";
 // ---- fallback options in case SKILL_OPTIONS is missing/mis-exported ----
@@ -343,19 +343,40 @@ await setDoc(
     }
   };
 
-  const handleDeleteProfile = async () => {
-    if (!confirm("Are you sure you want to permanently delete your profile?")) return;
-    if (!user) return;
-    try {
-      await deleteObject(ref(storage, `profile_pictures/${user.uid}/profile.jpg`)).catch(() => {});
-      await deleteDoc(doc(db, "players", user.uid));
-      await deleteDoc(doc(db, "users", user.uid));
-      await user.delete();
-      router.push("/");
-    } catch {
-      setStatus("❌ Error deleting profile.");
-    }
-  };
+const handleDeleteProfile = async () => {
+  const ok = confirm(
+    "Are you sure you want to permanently delete your TennisMate account? This cannot be undone."
+  );
+  if (!ok) return;
+
+  const currentUid = auth.currentUser?.uid;
+  if (!currentUid) {
+    setStatus("You must be signed in to delete your account.");
+    return;
+  }
+
+  try {
+    setSaving(true);
+    setStatus("Deleting your account...");
+
+    // 1) Best-effort delete profile photo (optional)
+    await deleteObject(ref(storage, `profile_pictures/${currentUid}/profile.jpg`)).catch(() => {});
+
+    // 2) Call server-side delete (this deletes Firestore + Auth reliably)
+    const fn = httpsCallable(functions, "deleteMyAccount");
+    await fn();
+
+    // 3) Local cleanup + redirect
+    await auth.signOut();
+    router.replace("/"); // or /goodbye or /login
+  } catch (e: any) {
+    console.error("[Profile] delete account failed:", e);
+    setStatus("❌ Error deleting account. Please try again.");
+  } finally {
+    setSaving(false);
+  }
+};
+
 
   if (loading) return <p className="p-6">Loading...</p>;
 

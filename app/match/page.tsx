@@ -358,6 +358,7 @@ useEffect(() => {
     // one single compute path
     await refreshMatches();
     setLoading(false);
+    window.dispatchEvent(new CustomEvent("tm:matchMeReady"));
   });
 
   return () => unsub();
@@ -400,6 +401,7 @@ const handleMatchRequest = async (match: Player) => {
       message: `Hey ${match.name}, I’d love to play sometime soon!`,
       status: "unread",
       timestamp: serverTimestamp(),
+      nudgeSent: false,
     });
 
     // de-dupe notif for this match
@@ -413,8 +415,13 @@ const handleMatchRequest = async (match: Player) => {
       console.log("⚠️ Notification already exists, skipping duplicate.");
     }
 
-    setSentRequests((prev) => new Set(prev).add(match.id));
-    alert(`✅ Request sent to ${match.name}`);
+   setSentRequests((prev) => new Set(prev).add(match.id));
+
+// 🔔 Notify onboarding tour
+window.dispatchEvent(new CustomEvent("tm:matchRequestSent"));
+
+alert(`✅ Request sent to ${match.name}`);
+
   } catch (err) {
     console.error("Failed to send match request:", err);
     alert("❌ Could not send request. Try again.");
@@ -544,7 +551,11 @@ if (loading) {
   );
 }
   return (
-    <div className="max-w-2xl mx-auto p-4 pb-28 sm:p-6">
+  <div
+    className="max-w-2xl mx-auto p-4 pb-28 sm:p-6"
+    data-tour="match-page"
+  >
+
      {/* Header hero tile */}
 <div className="-mx-4 sm:-mx-6 mb-4">
   <div className="relative h-40 sm:h-56 md:h-64 overflow-hidden rounded-2xl">
@@ -702,7 +713,7 @@ if (loading) {
         <p>No matches found yet. Try adjusting your availability or skill level.</p>
       ) : (
         <ul className="space-y-4">
-          {sortedMatches.map((match) => {
+          {sortedMatches.map((match, index) => {
             const alreadySent = sentRequests.has(match.id);
             const isNew =
               match.timestamp &&
@@ -715,8 +726,10 @@ if (loading) {
   role="region"
   aria-label={`${match.name} match card`}
   key={match.id}
+  data-tour={index === 0 ? "top-match" : undefined}
   className="rounded-2xl bg-white ring-1 ring-black/5 p-4 shadow-sm hover:shadow-md transition"
 >
+
   <div className="flex items-start gap-3">
     {/* Avatar (smaller on mobile) */}
     {match.photoURL ? (
@@ -870,11 +883,13 @@ if (loading) {
   </span>
 ) : (
   <button
-    onClick={() => handleMatchRequest(match)}
-    disabled={sendingIds.has(match.id)}
-    className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-    aria-label={`Request to play with ${match.name}`}
-  >
+  onClick={() => handleMatchRequest(match)}
+  disabled={sendingIds.has(match.id)}
+  data-tour={index === 0 ? "send-request" : undefined}
+  className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+  aria-label={`Request to play with ${match.name}`}
+>
+
     {sendingIds.has(match.id) ? "Sending…" : "Request to Play"}
   </button>
 )}

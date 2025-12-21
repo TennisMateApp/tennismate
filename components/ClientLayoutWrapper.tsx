@@ -150,7 +150,7 @@ const [showTour, setShowTour] = useState(false);
 
 
 // NEW:
-const [needsTour, setNeedsTour] = useState(false);
+const [needsTour, setNeedsTour] = useState<boolean | null>(null);
 const tourShownThisSession = useRef(false);
 
 
@@ -211,9 +211,11 @@ const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFe
     // tear down any prior listeners before wiring fresh ones on user switch
     unsubInbox(); unsubMessages(); unsubPlayer();
 
-    if (u) {
-      await u.reload();
-      setUser(auth.currentUser);
+   if (u) {
+  tourShownThisSession.current = false; // ✅ reset for this user session
+  await u.reload();
+  setUser(auth.currentUser);
+
           // ✅ Initialize native push for Android app runtime
 
 
@@ -285,7 +287,8 @@ if (hasNewer && inbound) {
         }
       );
     } else {
-      setUser(null);
+  tourShownThisSession.current = false; // ✅ reset on logout
+  setUser(null);
       setPhotoURL(null);
       setShowTour(false);
       setProfileComplete(null);
@@ -303,16 +306,21 @@ if (hasNewer && inbound) {
 
 
 useEffect(() => {
-  // Only show when:
   if (!user) return;
   if (PUBLIC_ROUTES.has(pathname || "")) return;
-  if (!needsTour) return;
+  if (needsTour !== true) return;          // ✅ only when known + needed
   if (tourShownThisSession.current) return;
   if (hideAllNav) return;
 
-  tourShownThisSession.current = true;
-  setShowTour(true);
+  const t = setTimeout(() => {
+    tourShownThisSession.current = true;
+    setShowSettings(false);
+    setShowTour(true);
+  }, 300);
+
+  return () => clearTimeout(t);
 }, [user, pathname, needsTour, hideAllNav]);
+
 
 
 
@@ -378,22 +386,30 @@ useEffect(() => {
 
 const totalMessages = unreadMessages.length; // ✅ separate count for messages
 
+function dismissOnboardingTour() {
+  setShowTour(false);
+}
 
-   async function completeOnboardingTour() {
+
+async function completeOnboardingTour() {
+  // ✅ close immediately so UI never gets stuck
+  setShowTour(false);
+  setNeedsTour(false);
+  setUserOnboardingSeen(ONBOARDING_VERSION);
+
   try {
     const u = auth.currentUser;
-    if (!u) {
-      setShowTour(false);
-      return;
-    }
+    if (!u) return;
+
     await updateDoc(doc(db, "users", u.uid), {
       onboardingVersionSeen: ONBOARDING_VERSION,
-      onboardingLastShownAt: serverTimestamp(),
+      onboardingCompletedAt: serverTimestamp(),
     });
-  } catch {}
-  setShowTour(false);
-  setUserOnboardingSeen(ONBOARDING_VERSION);
+  } catch (e) {
+    console.error("[Onboarding] failed to update onboardingVersionSeen:", e);
+  }
 }
+
 
     // Floating feedback button component
   function FloatingFeedbackButton() {
@@ -467,7 +483,7 @@ if (shouldGateToVerify) {
                     <nav className="flex items-center space-x-6 text-sm">
               {user ? (
                 <>
-                  <Link href="/profile" title="Profile">
+                  <Link href="/profile" title="Profile" data-tour="profile">
                     {photoURL ? (
                       <img
                         src={photoURL}
@@ -480,12 +496,12 @@ if (shouldGateToVerify) {
                   </Link>
 
                   {/* Directory */}
-                  <Link href="/directory" title="Directory">
+                  <Link href="/directory" title="Directory" data-tour="directory">
                     <Search className="w-6 h-6 text-green-600 hover:text-blue-800" />
                   </Link>
 
                   {/* 🟢 Courts shortcut */}
-                  <Link href="/courts" title="Courts">
+                  <Link href="/courts" title="Courts" data-tour="courts-link">
                     <GiTennisCourt
                       className={`w-6 h-6 ${
                         isActive("/courts")
@@ -517,7 +533,7 @@ if (shouldGateToVerify) {
                   </Link>
 
                   {/* Notifications */}
-                  <div className="relative flex items-center justify-center top-[2px]">
+                  <div className="relative flex items-center justify-center top-[2px]" data-tour="notifications">
                     <NotificationBell />
                   </div>
 
@@ -604,9 +620,7 @@ if (shouldGateToVerify) {
 
       {/* 🏠 Home */}
       {footerTabs.includes("home") && (
-        <Link
-          href="/home"
-          aria-label="Home"
+      <Link href="/home" aria-label="Home" data-tour="home"
           className={`flex flex-col items-center ${
             isActive("/home") ? "text-blue-700" : "text-green-600 hover:text-green-800"
           }`}
@@ -618,9 +632,8 @@ if (shouldGateToVerify) {
 
       {/* 🎯 Match Me */}
 {footerTabs.includes("match") && (
-  <Link
-    href="/match"
-    aria-label="Match Me"
+<Link href="/match" aria-label="Match Me" data-tour="match-me"
+
     className={`flex flex-col items-center ${
       isActive("/match") ? "text-blue-700" : "text-green-600 hover:text-green-800"
     }`}
@@ -647,9 +660,8 @@ if (shouldGateToVerify) {
 
       {/* 🎾 Matches (shown IN match flow) */}
       {footerTabs.includes("matches") && (
-        <Link
-          href="/matches"
-          aria-label="Matches"
+        <Link href="/matches" aria-label="Matches" data-tour="matches"
+
           className={`relative flex flex-col items-center ${
             isActive("/matches") ? "text-blue-700" : "text-green-600 hover:text-green-800"
           }`}
@@ -690,11 +702,14 @@ if (shouldGateToVerify) {
      {/* 🔔 Suggest native app for mobile web users after 20s of being logged in */}
      {user && !hideAllNav && <GetTheAppPrompt />}
 
-     <OnboardingTour
-       open={!!user && showTour && !PUBLIC_ROUTES.has(pathname || "") && !hideAllNav}
-       onClose={completeOnboardingTour}
-       onComplete={completeOnboardingTour}
-     />
+   {showTour && (
+  <OnboardingTour
+    open={!!user && !PUBLIC_ROUTES.has(pathname || "") && !hideAllNav}
+    onClose={dismissOnboardingTour}       // ✅ close = dismiss
+    onComplete={completeOnboardingTour}   // ✅ finish = complete
+  />
+)}
+
 
 
 
