@@ -283,14 +283,17 @@ useEffect(() => {
 useEffect(() => {
   if (!open || !step.requireEvent) return;
 
-  const onEvt = () => advance();
+  const onEvt = () => {
+    setI((prev) => prev + 1);
+  };
 
   window.addEventListener(step.requireEvent, onEvt as EventListener);
 
   return () => {
     window.removeEventListener(step.requireEvent as string, onEvt as EventListener);
   };
-}, [open, step.requireEvent, i]);
+}, [open, step.requireEvent]);
+
 
 
 useLayoutEffect(() => {
