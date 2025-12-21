@@ -281,14 +281,17 @@ useEffect(() => {
 
 
 useEffect(() => {
-  if (!open) return;
-  if (!step.requireEvent) return;
+  if (!open || !step.requireEvent) return;
 
-  const onEvt = () => setRequireSatisfied(true);
-  window.addEventListener(step.requireEvent, onEvt as any);
+  const onEvt = () => advance();
 
-  return () => window.removeEventListener(step.requireEvent, onEvt as any);
+  window.addEventListener(step.requireEvent, onEvt as EventListener);
+
+  return () => {
+    window.removeEventListener(step.requireEvent as string, onEvt as EventListener);
+  };
 }, [open, step.requireEvent, i]);
+
 
 useLayoutEffect(() => {
   if (!open) return;
