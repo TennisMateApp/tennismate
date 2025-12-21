@@ -4,6 +4,7 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 import { getMessaging, isSupported } from "firebase/messaging";
+import { getFunctions } from "firebase/functions";
 
 
 // ✅ Firebase config
@@ -40,3 +41,4 @@ if (typeof window !== "undefined") {
 
 // ✅ Export everything
 export { auth, db, storage, app, messaging };
+export const functions = getFunctions(app, "australia-southeast2");
