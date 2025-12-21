@@ -4,6 +4,7 @@ import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/fire
 import { sendEventRemindersV2 } from "./eventReminders";
 import { onRequest } from "firebase-functions/v2/https";
 import * as crypto from "crypto";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 
 
 // ✅ Set correct region for Firestore: australia-southeast2
@@ -569,6 +570,86 @@ export const syncCalendarWhenParticipantsChange = onDocumentUpdated("events/{eve
   await batch.commit();
 });
 
+export const nudgePendingMatchRequests = onSchedule("every 60 minutes", async () => {
+  const now = Date.now();
+  const cutoff = new Date(now - 48 * 60 * 60 * 1000); // 48 hours ago
+
+  console.log("[Nudge] Running. Cutoff:", cutoff.toISOString());
+
+  // Only look at still-pending requests.
+  // (Adjust if your pending status is different.)
+  const snap = await db
+    .collection("match_requests")
+    .where("status", "==", "unread")
+    .get();
+
+  if (snap.empty) {
+    console.log("[Nudge] No pending match requests found.");
+    return;
+  }
+
+  // Filter in-memory because timestamp comparisons can be tricky if some docs have null timestamps.
+  const candidates = snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as any))
+    .filter((r) => {
+      if (r.nudgeSent === true) return false;
+      const ts = r.timestamp?.toDate?.() ? r.timestamp.toDate() : null;
+      if (!ts) return false; // no timestamp = skip
+      return ts <= cutoff;
+    });
+
+  console.log(`[Nudge] Candidates: ${candidates.length}`);
+
+  for (const req of candidates) {
+    const matchId = req.id;
+    const toUserId = req.toUserId as string | undefined;
+    const fromName = (req.fromName as string | undefined) ?? "Someone";
+
+    if (!toUserId) {
+      console.log("[Nudge] Skipping (missing toUserId):", matchId);
+      continue;
+    }
+
+    const reqRef = db.collection("match_requests").doc(matchId);
+
+    // Transaction makes this idempotent even if the scheduler overlaps / retries.
+    await db.runTransaction(async (tx) => {
+      const fresh = await tx.get(reqRef);
+      if (!fresh.exists) return;
+
+      const data = fresh.data() as any;
+
+      // Stop if user already responded or we already nudged
+      if (data.nudgeSent === true) return;
+      if (data.status !== "unread") return;
+
+      const freshTs = data.timestamp?.toDate?.() ? data.timestamp.toDate() : null;
+      if (!freshTs || freshTs > cutoff) return;
+
+      // ✅ Send push (your helper sends to native devices)
+      const sent = await sendAndroidPushToUser(toUserId, {
+        title: "Reminder",
+        body: `${fromName} is waiting for your reply 👀`,
+        route: "/messages",          // <-- change if you have a better route for match requests
+        type: "match_request_nudge", // helps you debug/segment later
+      });
+
+      console.log("[Nudge] Push sent?", sent, { matchId, toUserId });
+
+      // Mark as nudged so it never repeats
+      tx.set(
+        reqRef,
+        {
+          nudgeSent: true,
+          nudgeSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+  }
+
+  console.log("[Nudge] Done.");
+});
 
 
 interface Court {
@@ -799,15 +880,22 @@ export const sendPushNotification = onDocumentCreated(
     const n = event.data?.data() || {};
     console.log(`[MR_BELL_CONSUMER] push start`, { notifId, type: n.type, source: n.source, runId: n.runId });
 
-    const notifData = n;
-    if (!notifData) return;
+const notifData = n;
+if (!notifData) return;
 
-       if (notifData.type === "message") {
-      console.log(
-        `[MR_BELL_CONSUMER] skipping push for message notif ${notifId} (handled by notifyOnNewMessage).`
-      );
-      return;
-    }
+// ✅ Hard stop: allows us to suppress push per-notification doc
+if (notifData.pushDisabled === true) {
+  console.log(`[MR_BELL_CONSUMER] pushDisabled=true, skipping push`, { notifId });
+  return;
+}
+
+if (notifData.type === "message") {
+  console.log(
+    `[MR_BELL_CONSUMER] skipping push for message notif ${notifId} (handled by notifyOnNewMessage).`
+  );
+  return;
+}
+
 
     if (notifData.recipientId && notifData.fromUserId && notifData.recipientId === notifData.fromUserId) {
       console.log("🛑 Ignoring self-targeted notification doc.");
@@ -992,18 +1080,26 @@ export const notifyOnNewMessage = onDocumentCreated(
     // In-app bell doc (drives your email function)
     try {
       const notifId = `msg_${conversationId}_${messageId}_${recipientId}`;
-      await db.collection("notifications").doc(notifId).set({
-        recipientId,
-        type: "message",
-        conversationId,
-        messageId,
-        title: "New message",
-        body: text.length > 100 ? text.slice(0, 100) + "…" : text,
-        url: `https://tennismate.vercel.app/messages/${conversationId}`,
-        fromUserId: senderId,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        read: false,
-      }, { merge: true });
+await db.collection("notifications").doc(notifId).set({
+  recipientId,
+  type: "message",
+  conversationId,
+  messageId,
+
+  // Keep these for in-app display + email
+  title: "New message",
+  body: text.length > 100 ? text.slice(0, 100) + "…" : text,
+  url: `https://tennismate.vercel.app/messages/${conversationId}`,
+
+  fromUserId: senderId,
+  timestamp: admin.firestore.FieldValue.serverTimestamp(),
+  read: false,
+
+  // ✅ IMPORTANT: ensure no push is ever sent from a "notifications" watcher for this doc
+  pushDisabled: true,
+  source: "cf:notifyOnNewMessage",
+}, { merge: true });
+
       console.log(`✅ Bell notification created for ${recipientId}`);
     } catch (err) {
       console.error("❌ Failed to create bell notification:", err);
