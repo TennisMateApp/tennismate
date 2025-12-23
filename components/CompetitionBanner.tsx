@@ -5,8 +5,6 @@ import { auth, db } from "@/lib/firebase"; // ✅ adjust if your firebase export
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 import { Capacitor } from "@capacitor/core";
-import { AppLauncher } from "@capacitor/app-launcher";
-import { Browser } from "@capacitor/browser";
 import Image from "next/image";
 
 export default function CompetitionBanner() {
@@ -37,81 +35,60 @@ export default function CompetitionBanner() {
     run().catch(() => setLoading(false));
   }, []);
 
-  const openStoreReview = async () => {
-    // 1) Persist click so it never shows again
+const openStoreReview = async () => {
+  const isNative = Capacitor.isNativePlatform();
+  const platform = Capacitor.getPlatform(); // "ios" | "android" | "web"
+
+  const iosUrlApp = `itms-apps://itunes.apple.com/app/id${IOS_APP_ID}?action=write-review`;
+  const iosUrlWeb = `https://apps.apple.com/app/id${IOS_APP_ID}?action=write-review`;
+
+  const androidUrlApp = `market://details?id=${ANDROID_PACKAGE}`;
+  const androidUrlWeb = `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE}`;
+
+  // ✅ Decide destination FIRST (sync), so we can open immediately
+  let destination = androidUrlWeb;
+
+  if (isNative) {
+    if (platform === "ios") destination = iosUrlApp;
+    else if (platform === "android") destination = androidUrlApp;
+  } else {
+    // Web/PWA: detect iOS vs Android
+    const ua = navigator.userAgent || "";
+    const isIOS =
+      /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
+
+    destination = isIOS ? iosUrlWeb : androidUrlWeb;
+  }
+
+  // ✅ 1) OPEN IMMEDIATELY (must be synchronous to avoid popup blocking)
+  // Try new tab first; if blocked, fall back to same-tab navigation.
+  // Web/PWA: use same-tab so Back returns to the app
+if (platform === "web") {
+  window.location.href = destination;
+  setVisible(false);
+} else {
+  // Native: open externally
+  const opened = window.open(destination, "_blank", "noopener,noreferrer");
+  if (!opened) window.location.href = destination;
+  setVisible(false);
+}
+
+  // ✅ 2) Hide immediately (UX)
+  setVisible(false);
+
+  // ✅ 3) Persist click AFTER opening (async safe)
+  try {
     const user = auth.currentUser;
     if (user) {
       const ref = doc(db, "users", user.uid);
       await setDoc(ref, { reviewBannerClickedAt: serverTimestamp() }, { merge: true });
     }
+  } catch (e) {
+    console.warn("[CompetitionBanner] Failed to persist review click:", e);
+  }
+};
 
-    // 2) Hide immediately
-    setVisible(false);
-
-    // 3) Open correct store link
-    const isNative = Capacitor.isNativePlatform();
-    const platform = Capacitor.getPlatform(); // "ios" | "android" | "web"
-
-    const iosUrlApp = `itms-apps://itunes.apple.com/app/id${IOS_APP_ID}?action=write-review`;
-    const iosUrlWeb = `https://apps.apple.com/app/id${IOS_APP_ID}?action=write-review`;
-
-    const androidUrlApp = `market://details?id=${ANDROID_PACKAGE}`;
-    const androidUrlWeb = `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE}`;
-
-    try {
-      if (isNative) {
-        if (platform === "ios") {
-          await AppLauncher.openUrl({ url: iosUrlApp });
-          return;
-        }
-        if (platform === "android") {
-          const can = await AppLauncher.canOpenUrl({ url: androidUrlApp });
-          if (can.value) {
-            await AppLauncher.openUrl({ url: androidUrlApp });
-          } else {
-            await Browser.open({ url: androidUrlWeb });
-          }
-          return;
-        }
-      }
-
-            // Web/PWA fallback (detect iOS vs Android on the web)
-      if (platform === "web") {
-        const ua = navigator.userAgent || "";
-
-        // iOS detection for Safari + iPadOS (which reports as MacIntel)
-        const isIOS =
-          /iPad|iPhone|iPod/.test(ua) ||
-          (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
-
-        window.open(isIOS ? iosUrlWeb : androidUrlWeb, "_blank", "noopener,noreferrer");
-        return;
-      }
-
-      // Non-web fallback (just in case)
-      if (platform === "ios") {
-        window.open(iosUrlWeb, "_blank", "noopener,noreferrer");
-      } else {
-        window.open(androidUrlWeb, "_blank", "noopener,noreferrer");
-      }
-
-    } catch {
-      // final fallback
-            if (platform === "web") {
-        const ua = navigator.userAgent || "";
-        const isIOS =
-          /iPad|iPhone|iPod/.test(ua) ||
-          (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
-
-        window.open(isIOS ? iosUrlWeb : androidUrlWeb, "_blank", "noopener,noreferrer");
-        return;
-      }
-
-      if (platform === "ios") await Browser.open({ url: iosUrlWeb });
-      else await Browser.open({ url: androidUrlWeb });
-
-    }
-  };
 
   const dismiss = async () => {
     // Optional: store that they dismissed (NOT permanent)
