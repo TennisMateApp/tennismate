@@ -12,6 +12,8 @@
     "@capacitor-firebase/messaging": "^7.4.0",
     "@capacitor/android": "7.4.4",
     "@capacitor/app": "^7.1.0",
+    "@capacitor/app-launcher": "^8.0.0",
+    "@capacitor/browser": "^8.0.0",
     "@capacitor/core": "^7.4.4",
     "@capacitor/ios": "^7.4.4",
     "@capacitor/push-notifications": "^7.0.3",

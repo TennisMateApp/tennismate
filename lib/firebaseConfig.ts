@@ -41,4 +41,4 @@ if (typeof window !== "undefined") {
 
 // ✅ Export everything
 export { auth, db, storage, app, messaging };
-export const functions = getFunctions(app, "australia-southeast2");
+

@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import Image from "next/image";
 import { collection, query, where, getCountFromServer } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import CompetitionBanner from "@/components/CompetitionBanner";
 
 
 // --- light Card/Button fallbacks (remove if using shadcn/ui components) ---
@@ -170,7 +171,7 @@ badge: (
 
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:py-8">
+    <main className="mx-auto w-full max-w-5xl px-4 sm:px-6 py-6 sm:py-8">
 {/* Header */}
 <section className="mb-6 sm:mb-8">
   <div className="relative overflow-hidden rounded-2xl border shadow-md">
@@ -209,6 +210,11 @@ badge: (
     </div>
   </div>
 </section>
+
+  {/* Competition Banner */}
+      <section className="mb-6 sm:mb-8" aria-label="Australian Open competition">
+        <CompetitionBanner />
+      </section>
 
       {/* Tiles */}
       <section aria-label="Primary actions">

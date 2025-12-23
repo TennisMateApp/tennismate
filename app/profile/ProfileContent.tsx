@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { auth, db, storage, functions } from "@/lib/firebaseConfig";
+import { auth, db, storage } from "@/lib/firebaseConfig";
+import { getFunctionsClient } from "@/lib/getFunctionsClient";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
@@ -349,33 +350,56 @@ const handleDeleteProfile = async () => {
   );
   if (!ok) return;
 
-  const currentUid = auth.currentUser?.uid;
-  if (!currentUid) {
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
     setStatus("You must be signed in to delete your account.");
     return;
   }
 
   try {
     setSaving(true);
-    setStatus("Deleting your account...");
+    setStatus("Deleting your account…");
 
-    // 1) Best-effort delete profile photo (optional)
-    await deleteObject(ref(storage, `profile_pictures/${currentUid}/profile.jpg`)).catch(() => {});
+    console.log("[Profile] delete start", { uid });
 
-    // 2) Call server-side delete (this deletes Firestore + Auth reliably)
+    // best-effort storage cleanup
+    await deleteObject(
+      ref(storage, `profile_pictures/${uid}/profile.jpg`)
+    ).catch((e) =>
+      console.warn("[Profile] storage delete skipped", e)
+    );
+
+    const functions = getFunctionsClient();
     const fn = httpsCallable(functions, "deleteMyAccount");
-    await fn();
 
-    // 3) Local cleanup + redirect
+    const res = await fn();
+
+    console.log("[Profile] delete success", res.data);
+
     await auth.signOut();
-    router.replace("/"); // or /goodbye or /login
-  } catch (e: any) {
-    console.error("[Profile] delete account failed:", e);
-    setStatus("❌ Error deleting account. Please try again.");
+    router.replace("/");
+  } catch (err: any) {
+    const code = err?.code;
+    const message = err?.message;
+    const details = err?.details;
+
+    console.error("[Profile] delete FAILED", {
+      code,
+      message,
+      details,
+    });
+
+    setStatus(
+      `❌ Delete failed${
+        details?.runId ? ` (ref ${details.runId})` : ""
+      }`
+    );
   } finally {
     setSaving(false);
   }
 };
+
+
 
 
   if (loading) return <p className="p-6">Loading...</p>;

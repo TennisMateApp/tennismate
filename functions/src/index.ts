@@ -2,7 +2,7 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { sendEventRemindersV2 } from "./eventReminders";
-import { onRequest } from "firebase-functions/v2/https";
+import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import * as crypto from "crypto";
 import { pubsub } from "firebase-functions/v1";
 
@@ -14,6 +14,119 @@ if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 const db = admin.firestore();
+export const deleteMyAccount = onCall(async (request) => {
+  const uid = request.auth?.uid;
+
+  // Correlation id for logs
+  const runId =
+    (crypto as any).randomUUID?.() || Math.random().toString(36).slice(2);
+
+  if (!uid) {
+    console.log("[DeleteAccount][%s] unauthenticated", runId);
+    throw new HttpsError("unauthenticated", "You must be logged in to delete your account.");
+  }
+
+  // (Optional but useful) client/app info
+  const appCheck = (request as any).app?.appId ? "present" : "missing";
+  console.log("[DeleteAccount][%s] START", runId, {
+    uid,
+    appCheck,
+    hasAuth: !!request.auth,
+  });
+
+  const usersRef = db.collection("users").doc(uid);
+  const playersRef = db.collection("players").doc(uid);
+  const devicesCol = usersRef.collection("devices");
+
+  // ---- STEP 1: read some state (for debugging only) ----
+  try {
+    const [uSnap, pSnap, dSnap] = await Promise.all([
+      usersRef.get().catch((e) => {
+        console.warn("[DeleteAccount][%s] users read failed", runId, String(e));
+        return null as any;
+      }),
+      playersRef.get().catch((e) => {
+        console.warn("[DeleteAccount][%s] players read failed", runId, String(e));
+        return null as any;
+      }),
+      devicesCol.get().catch((e) => {
+        console.warn("[DeleteAccount][%s] devices read failed", runId, String(e));
+        return null as any;
+      }),
+    ]);
+
+    console.log("[DeleteAccount][%s] PRECHECK", runId, {
+      usersDocExists: !!uSnap?.exists,
+      playersDocExists: !!pSnap?.exists,
+      devicesCount: dSnap?.size ?? null,
+    });
+  } catch (e: any) {
+    console.warn("[DeleteAccount][%s] PRECHECK error (continuing)", runId, e?.message || String(e));
+  }
+
+  // ---- STEP 2: delete devices subcollection docs FIRST ----
+  try {
+    const devicesSnap = await devicesCol.get();
+    console.log("[DeleteAccount][%s] devices found", runId, { count: devicesSnap.size });
+
+    if (!devicesSnap.empty) {
+      const b = db.batch();
+      devicesSnap.docs.forEach((d) => b.delete(d.ref));
+      await b.commit();
+      console.log("[DeleteAccount][%s] devices deleted", runId, { count: devicesSnap.size });
+    }
+  } catch (e: any) {
+    console.error("[DeleteAccount][%s] STEP devices delete FAILED", runId, e?.message || String(e));
+    throw new HttpsError("internal", "Failed deleting device tokens.", {
+      step: "delete_devices",
+      runId,
+      message: e?.message || String(e),
+    });
+  }
+
+  // ---- STEP 3: delete main Firestore docs ----
+  try {
+    const batch = db.batch();
+    batch.delete(usersRef);
+    batch.delete(playersRef);
+    await batch.commit();
+    console.log("[DeleteAccount][%s] firestore docs deleted", runId);
+  } catch (e: any) {
+    console.error("[DeleteAccount][%s] STEP firestore delete FAILED", runId, e?.message || String(e));
+    throw new HttpsError("internal", "Failed deleting Firestore documents.", {
+      step: "delete_firestore_docs",
+      runId,
+      message: e?.message || String(e),
+    });
+  }
+
+  // ---- STEP 4: delete Auth user ----
+  try {
+    await admin.auth().deleteUser(uid);
+    console.log("[DeleteAccount][%s] auth user deleted", runId, { uid });
+  } catch (e: any) {
+    const code = e?.code || e?.errorInfo?.code;
+    const msg = e?.message || String(e);
+
+    // If the auth user is already gone, treat as success.
+    if (code === "auth/user-not-found") {
+      console.warn("[DeleteAccount][%s] auth user not found (already deleted)", runId, { uid });
+    } else {
+      console.error("[DeleteAccount][%s] STEP auth delete FAILED", runId, { code, msg });
+      throw new HttpsError("internal", "Failed deleting authentication user.", {
+        step: "delete_auth_user",
+        runId,
+        code,
+        message: msg,
+      });
+    }
+  }
+
+  console.log("[DeleteAccount][%s] COMPLETE", runId, { uid });
+  return { success: true, runId };
+});
+
+
 
 // --- Route helper (handles absolute URLs and relative paths) ---
 function toRoute(input?: unknown): string {
