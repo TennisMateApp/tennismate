@@ -125,6 +125,8 @@ export default function MatchPage() {
   const [postcodeCoords, setPostcodeCoords] = useState<PostcodeCoords>({});
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<string>("score");
+  const PAGE_SIZE = 10;
+const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [matchMode, setMatchMode] = useState<"auto"|"skill"|"utr">("auto");
 
 const router = useRouter();
@@ -140,8 +142,6 @@ const setQuery = (key: string, value?: string) => {
 const [justVerified, setJustVerified] = useState(false);
 
 const [hideContacted, setHideContacted] = useState(true);
-const [onlySharedAvail, setOnlySharedAvail] = useState(false);
-const [maxKm, setMaxKm] = useState<number>(Infinity); 
 
 const [refreshing, setRefreshing] = useState(false);
 const [lastUpdated, setLastUpdated] = useState<number | null>(null);
@@ -445,33 +445,28 @@ const filteredMatches = useMemo(() => {
     // Hide already contacted?
     if (hideContacted && sentRequests.has(m.id)) return false;
 
-    // Only show if there is at least one shared availability?
-    if (onlySharedAvail) {
-      const shared = A(m.availability).some((a) =>
-        A(myProfile.availability).includes(a)
-      );
-      if (!shared) return false;
-    }
-
-    // Max distance filter (uses precomputed distance if present)
-    if (Number.isFinite(maxKm)) {
-      const d = typeof m.distance === "number" ? m.distance : Infinity;
-      if (d > (maxKm as number)) return false;
-    }
-
     return true;
   });
-}, [rawMatches, hideContacted, onlySharedAvail, maxKm, myProfile, sentRequests]);
+}, [rawMatches, hideContacted, myProfile, sentRequests]);
+
+
 
 const sortedMatches = useMemo(() => {
   if (!myProfile) return filteredMatches;
 
   return [...filteredMatches].sort((a, b) => {
-    if (sortBy === "distance") {
-      const da = typeof a.distance === "number" ? a.distance! : Infinity;
-      const db = typeof b.distance === "number" ? b.distance! : Infinity;
-      return da - db;
-    }
+   if (sortBy === "distance_desc") {
+  const da = typeof a.distance === "number" ? a.distance! : -Infinity;
+  const db = typeof b.distance === "number" ? b.distance! : -Infinity;
+  return db - da; // farthest first
+}
+  if (sortBy === "distance") {
+    const da = typeof a.distance === "number" ? a.distance! : Infinity;
+    const db = typeof b.distance === "number" ? b.distance! : Infinity;
+    return da - db; // closest first
+  }
+
+
 
     if (sortBy === "availability") {
       const sa = A(a.availability).filter((t) =>
@@ -515,18 +510,21 @@ const utrGap = (p: Player) => utrDelta(meRating, (p.skillRating ?? p.utr) ?? nul
     return da - db;
   });
 }, [filteredMatches, sortBy, myProfile]);
+const visibleMatches = useMemo(
+  () => sortedMatches.slice(0, visibleCount),
+  [sortedMatches, visibleCount]
+);
+useEffect(() => {
+  setVisibleCount(PAGE_SIZE);
+}, [sortBy, hideContacted, sortedMatches.length]);
 
 useEffect(() => {
   const qSort   = params.get("sort");
   const qHide   = params.get("hide");     // "1" | "0"
-  const qShared = params.get("shared");   // "1" | "0"
-  const qMax    = params.get("maxKm");    // "any" | number string
   const qMode   = params.get("mode");     // "auto" | "skill" | "utr"
 
   if (qSort) setSortBy(qSort);
   if (qHide === "0" || qHide === "1") setHideContacted(qHide === "1");
-  if (qShared === "0" || qShared === "1") setOnlySharedAvail(qShared === "1");
-  if (qMax) setMaxKm(qMax === "any" ? Infinity : Number(qMax));
   if (qMode === "auto" || qMode === "skill" || qMode === "utr") setMatchMode(qMode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []); // run once on mount
@@ -628,20 +626,25 @@ if (loading) {
   <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
     <div className="flex items-center gap-2">
       <span className="text-sm text-gray-600">
-        {sortedMatches.length} match{sortedMatches.length === 1 ? "" : "es"}
-      </span>
+  Showing {Math.min(visibleCount, sortedMatches.length)} of {sortedMatches.length} match
+  {sortedMatches.length === 1 ? "" : "es"}
+</span>
 
-      <label className="ml-2 text-sm font-medium">Sort</label>
-      <select
+      <label className="ml-2 text-sm font-medium">Filter</label>
+<select
   value={sortBy}
-  onChange={(e) => { setSortBy(e.target.value); setQuery("sort", e.target.value); }}
+  onChange={(e) => {
+    setSortBy(e.target.value);
+    setQuery("sort", e.target.value);
+  }}
   className="text-sm border rounded-lg px-2 py-1 w-full sm:w-auto"
 >
-        <option value="score">Best Match</option>
-        <option value="distance">Closest</option>
-        <option value="availability">Availability</option>
-        <option value="skill">Skill fit</option>
-      </select>
+  <option value="score">Best match</option>
+  <option value="availability">Availability</option>
+  <option value="skill">Skill level</option>
+  <option value="distance">Distance</option>
+</select>
+
       <label className="ml-3 text-sm font-medium">Match by</label>
       <select
       value={matchMode}
@@ -674,46 +677,17 @@ if (loading) {
         Hide contacted
       </label>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          className="accent-green-600"
-          checked={onlySharedAvail}
-          onChange={(e) => {
-  setOnlySharedAvail(e.target.checked);
-  setQuery("shared", e.target.checked ? "1" : "0");
-}}
-
-        />
-        Shared only
-      </label>
-
-      <select
-        value={Number.isFinite(maxKm) ? String(maxKm) : "any"}
-       onChange={(e) => {
-  const val = e.target.value;
-  setMaxKm(val === "any" ? Infinity : Number(val));
-  setQuery("maxKm", val);
-}}
-
-        className="text-sm border rounded-lg px-2 py-1 w-full sm:w-[140px]"
-        title="Max distance"
-      >
-        <option value="any">Any distance</option>
-        <option value="20">≤ 20 km</option>
-        <option value="10">≤ 10 km</option>
-        <option value="5">≤ 5 km</option>
-      </select>
     </div>
   </div>
 </div>
 
 
-      {sortedMatches.length === 0 ? (
-        <p>No matches found yet. Try adjusting your availability or skill level.</p>
-      ) : (
-        <ul className="space-y-4">
-          {sortedMatches.map((match, index) => {
+ {sortedMatches.length === 0 ? (
+<p>No matches found yet. Try adjusting your availability or skill level.</p>
+) : (
+  <>
+    <ul className="space-y-4">
+          {visibleMatches.map((match, index) => {
             const alreadySent = sentRequests.has(match.id);
             const isNew =
               match.timestamp &&
@@ -752,16 +726,6 @@ if (loading) {
        <h2 className="font-semibold text-gray-900 text-base sm:text-lg truncate max-w-[70%]">
           {match.name}
         </h2>
-
-        {(() => {
-          const maxScore = 15; // 4 band/4 UTR + 4 avail cap + 3 distance
-          const pct = Math.round(((match.score ?? 0) / maxScore) * 100);
-          return (
-            <span className="text-[10px] sm:text-[11px] px-2 py-[2px] rounded-full bg-green-50 text-green-700 ring-1 ring-green-200">
-              {isNaN(pct) ? "Match" : `${pct}% match`}
-            </span>
-          );
-        })()}
 
         {typeof match.distance === "number" && (
           <span className="text-[10px] sm:text-[11px] ml-auto px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
@@ -890,7 +854,7 @@ if (loading) {
   aria-label={`Request to play with ${match.name}`}
 >
 
-    {sendingIds.has(match.id) ? "Sending…" : "Request to Play"}
+    {sendingIds.has(match.id) ? "Sending…" : "Invite to Play"}
   </button>
 )}
 
@@ -901,9 +865,23 @@ if (loading) {
 
             );
           })}
-        </ul>
-      )}
-    </div>
-  );
-  
+    </ul>
+
+{sortedMatches.length > visibleCount && (
+  <div className="flex justify-center">
+    <button
+      onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+      disabled={refreshing}
+      className="mt-6 px-4 py-2.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
+    >
+      {refreshing ? "Loading…" : "Load more"}
+    </button>
+  </div>
+)}
+
+  </>
+)}
+
+  </div>
+);
 }
