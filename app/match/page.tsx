@@ -622,62 +622,69 @@ if (loading) {
 
 {/* Sticky controls (mobile-first) */}
 <div className="sticky top-[56px] z-10 mb-3 rounded-xl bg-white/90 backdrop-blur ring-1 ring-black/5 p-3">
+  <div className="space-y-3">
+    {/* Row 1: Count */}
+    <div className="text-sm text-gray-600">
+      Showing {Math.min(visibleCount, sortedMatches.length)} of {sortedMatches.length} match
+      {sortedMatches.length === 1 ? "" : "es"}
+    </div>
 
-  <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
-    <div className="flex items-center gap-2">
-      <span className="text-sm text-gray-600">
-  Showing {Math.min(visibleCount, sortedMatches.length)} of {sortedMatches.length} match
-  {sortedMatches.length === 1 ? "" : "es"}
-</span>
+    {/* Row 2: Dropdowns */}
+    <div className="grid grid-cols-2 gap-3 sm:flex sm:items-end sm:gap-4">
+      <div className="min-w-0">
+        <label className="block text-xs font-medium text-gray-600 mb-1">
+          Filter
+        </label>
+        <select
+          value={sortBy}
+          onChange={(e) => {
+            setSortBy(e.target.value);
+            setQuery("sort", e.target.value);
+          }}
+          className="w-full text-sm border rounded-lg px-2 py-2"
+        >
+          <option value="score">Best match</option>
+          <option value="availability">Availability</option>
+          <option value="skill">Skill level</option>
+          <option value="distance">Distance</option>
+        </select>
+      </div>
 
-      <label className="ml-2 text-sm font-medium">Filter</label>
-<select
-  value={sortBy}
-  onChange={(e) => {
-    setSortBy(e.target.value);
-    setQuery("sort", e.target.value);
-  }}
-  className="text-sm border rounded-lg px-2 py-1 w-full sm:w-auto"
->
-  <option value="score">Best match</option>
-  <option value="availability">Availability</option>
-  <option value="skill">Skill level</option>
-  <option value="distance">Distance</option>
-</select>
-
-      <label className="ml-3 text-sm font-medium">Match by</label>
-      <select
-      value={matchMode}
-      onChange={(e) => {
-        const val = e.target.value as "auto"|"skill"|"utr";
-         setMatchMode(val);
-         setQuery("mode", val);
-         refreshMatches(); // recalc with new mode
-         }}
-         className="text-sm border rounded-lg px-2 py-1 w-full sm:w-auto"
-         title="Primary matching method"
-         >
+      <div className="min-w-0">
+        <label className="block text-xs font-medium text-gray-600 mb-1">
+          Match by
+        </label>
+        <select
+          value={matchMode}
+          onChange={(e) => {
+            const val = e.target.value as "auto" | "skill" | "utr";
+            setMatchMode(val);
+            setQuery("mode", val);
+            refreshMatches();
+          }}
+          className="w-full text-sm border rounded-lg px-2 py-2"
+          title="Primary matching method"
+        >
           <option value="auto">Auto</option>
           <option value="skill">Skill level</option>
           <option value="utr">TMR</option>
-          </select>
+        </select>
+      </div>
     </div>
 
-    <div className="flex flex-wrap items-center gap-3">
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          className="accent-green-600"
-          checked={hideContacted}
-          onChange={(e) => { 
-  setHideContacted(e.target.checked);
-  setQuery("hide", e.target.checked ? "1" : "0");
-}}
-        />
-        Hide contacted
-      </label>
-
-    </div>
+    {/* Row 3: Toggle */}
+    <label className="flex items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        className="accent-green-600"
+        checked={hideContacted}
+        onChange={(e) => {
+          setHideContacted(e.target.checked);
+          setQuery("hide", e.target.checked ? "1" : "0");
+        }}
+      />
+      Hide contacted
+    </label>
   </div>
 </div>
 
