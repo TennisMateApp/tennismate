@@ -33,6 +33,11 @@ interface Player {
   distance?: number;
 }
 
+type ScoredPlayer = Player & {
+  score: number;
+  distance: number;
+  skillBand: SkillBand | "";
+};
 
 interface PostcodeCoords {
   [postcode: string]: { lat: number; lng: number };
@@ -186,7 +191,7 @@ setMyProfile({ ...myData, skillBand: myBand });
 const meRating = (myData.skillRating ?? myData.utr) ?? null; // ✅ prefer skillRating
 
 
-    const scoredPlayers = allPlayers
+    const scoredPlayers: ScoredPlayer[] = allPlayers
       .filter((p) => p.id !== auth.currentUser!.uid)
       .map((p) => {
         let score = 0;
@@ -246,7 +251,7 @@ if (myC && theirC) {
 
         return { ...p, score, distance, skillBand: theirBand };
 })
-.filter((p): p is Player => p !== null)
+.filter((p): p is ScoredPlayer => p !== null)
 .filter((p) => (p.score ?? 0) > 0);
 
 
@@ -752,7 +757,7 @@ if (loading) {
 
         {typeof match.distance === "number" && (
           <span className="text-[10px] sm:text-[11px] ml-auto px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-            ~{match.distance} km
+           {match.postcode} · ~{match.distance} km  
           </span>
         )}
       </div>
