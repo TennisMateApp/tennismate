@@ -15,24 +15,26 @@ if (admin.apps.length === 0) {
 }
 const db = admin.firestore();
 export const deleteMyAccount = onCall(async (request) => {
-  const uid = request.auth?.uid;
-
-  // Correlation id for logs
   const runId =
     (crypto as any).randomUUID?.() || Math.random().toString(36).slice(2);
 
-  if (!uid) {
-    console.log("[DeleteAccount][%s] unauthenticated", runId);
-    throw new HttpsError("unauthenticated", "You must be logged in to delete your account.");
-  }
+  try {
+    const uid = request.auth?.uid;
 
-  // (Optional but useful) client/app info
-  const appCheck = (request as any).app?.appId ? "present" : "missing";
-  console.log("[DeleteAccount][%s] START", runId, {
-    uid,
-    appCheck,
-    hasAuth: !!request.auth,
-  });
+    if (!uid) {
+      console.log(`[DeleteAccount][${runId}] unauthenticated`);
+      throw new HttpsError(
+        "unauthenticated",
+        "You must be logged in to delete your account.",
+        { runId }
+      );
+    }
+
+    console.log(`[DeleteAccount][${runId}] START`, {
+      uid,
+      hasAuth: !!request.auth,
+      appCheck: (request as any).app?.appId ? "present" : "missing",
+    });
 
   const usersRef = db.collection("users").doc(uid);
   const playersRef = db.collection("players").doc(uid);
@@ -124,6 +126,14 @@ export const deleteMyAccount = onCall(async (request) => {
 
   console.log("[DeleteAccount][%s] COMPLETE", runId, { uid });
   return { success: true, runId };
+
+} catch (e: any) {
+  console.error(`[DeleteAccount][${runId}] FAILED`, e?.message || String(e));
+  throw new HttpsError("internal", "Delete account failed.", {
+    runId,
+    message: e?.message || String(e),
+  });
+}
 });
 
 
@@ -1137,82 +1147,86 @@ if (!emailAllowed) {
 export const notifyOnNewMessage = onDocumentCreated(
   "conversations/{conversationId}/messages/{messageId}",
   async (event) => {
-    const message = event.data?.data();
-    const { conversationId, messageId } = event.params;
-    if (!message) return;
-
-    const senderId = message.senderId as string;
-    const recipientId = message.recipientId as string | null;
-    const text = (message.text as string) || "";
-    const read = message.read === true;
-
-    if (!recipientId) return;
-    if (recipientId === senderId) return;
-    if (!text || read) return;
-
     try {
-      // Avoid push if recipient is actively viewing this conversation
-      const userSnap = await db.collection("users").doc(recipientId).get();
-      const activeConversationId = userSnap.exists ? userSnap.get("activeConversationId") : undefined;
-      if (activeConversationId === conversationId) {
-        console.log("👀 User is viewing this conversation. No push sent.");
-      } else {
-        const senderDoc = await db.collection("players").doc(senderId).get();
-        const senderName = (senderDoc.exists ? senderDoc.get("name") : "") || "A player";
-        const body = text.length > 60 ? text.slice(0, 60) + "…" : text;
+      const message = event.data?.data();
+      const { conversationId, messageId } = event.params;
+      if (!message) return;
 
-        // 1) Try native Android first
-        const nativeSent = await sendAndroidPushToUser(recipientId, {
+      const senderId = message.senderId as string;
+      const recipientId = message.recipientId as string | null;
+      const text = (message.text as string) || "";
+      const read = message.read === true;
+
+      if (!recipientId) return;
+      if (recipientId === senderId) return;
+      if (!text || read) return;
+
+      // ✅ ALWAYS send push (even if user is in-app / in the conversation)
+      let senderName = "A player";
+      try {
+        const senderDoc = await db.collection("players").doc(senderId).get();
+        senderName = (senderDoc.exists ? (senderDoc.get("name") as string) : "") || "A player";
+      } catch (e) {
+        console.log("[notifyOnNewMessage] sender name lookup failed", String(e));
+      }
+
+      const body = text.length > 60 ? text.slice(0, 60) + "…" : text;
+
+      // 1) Try native Android/iOS first
+      const nativeSent = await sendAndroidPushToUser(recipientId, {
+        title: `New message from ${senderName}`,
+        body,
+        route: `/messages/${conversationId}`,
+        type: "new_message",
+      });
+
+      // 2) Fallback to web push if no native devices
+      if (!nativeSent) {
+        await sendWebPushToUser(recipientId, {
           title: `New message from ${senderName}`,
           body,
           route: `/messages/${conversationId}`,
           type: "new_message",
         });
-
-        // 2) Fallback to web push if no Android devices
-        if (!nativeSent) {
-          await sendWebPushToUser(recipientId, {
-            title: `New message from ${senderName}`,
-            body,
-            route: `/messages/${conversationId}`,
-            type: "new_message",
-          });
-        }
-        console.log(`✅ Push path executed (native=${nativeSent}) for ${recipientId}`);
       }
-    } catch (error) {
-      console.error("❌ Failed to send push notification:", error);
-    }
 
-    // In-app bell doc (drives your email function)
-    try {
+      console.log(`[notifyOnNewMessage] push attempted (native=${nativeSent})`, {
+        recipientId,
+        conversationId,
+        messageId,
+      });
+
+      // ✅ In-app bell doc (drives in-app list + email), but never triggers push watcher
       const notifId = `msg_${conversationId}_${messageId}_${recipientId}`;
-await db.collection("notifications").doc(notifId).set({
-  recipientId,
-  type: "message",
-  conversationId,
-  messageId,
+      await db.collection("notifications").doc(notifId).set(
+        {
+          recipientId,
+          type: "message",
+          conversationId,
+          messageId,
 
-  // Keep these for in-app display + email
-  title: "New message",
-  body: text.length > 100 ? text.slice(0, 100) + "…" : text,
-  url: `https://tennismate.vercel.app/messages/${conversationId}`,
+          title: "New message",
+          body: text.length > 100 ? text.slice(0, 100) + "…" : text,
+          url: `https://tennismate.vercel.app/messages/${conversationId}`,
 
-  fromUserId: senderId,
-  timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  read: false,
+          fromUserId: senderId,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          read: false,
 
-  // ✅ IMPORTANT: ensure no push is ever sent from a "notifications" watcher for this doc
-  pushDisabled: true,
-  source: "cf:notifyOnNewMessage",
-}, { merge: true });
+          // ✅ IMPORTANT: ensure no push is ever sent from notifications watcher for this doc
+          pushDisabled: true,
+          source: "cf:notifyOnNewMessage",
+        },
+        { merge: true }
+      );
 
-      console.log(`✅ Bell notification created for ${recipientId}`);
-    } catch (err) {
-      console.error("❌ Failed to create bell notification:", err);
+      console.log(`[notifyOnNewMessage] bell notification created for ${recipientId}`);
+    } catch (error) {
+      console.error("[notifyOnNewMessage] ERROR:", error);
     }
   }
 );
+
 
 
 export const sendMatchRequestNotification = onDocumentCreated(

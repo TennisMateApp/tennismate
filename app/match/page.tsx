@@ -127,6 +127,7 @@ export default function MatchPage() {
   const [sortBy, setSortBy] = useState<string>("score");
   const PAGE_SIZE = 10;
 const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+const MAX_DISTANCE_KM = 50; // hard cutoff to prevent interstate matches
   const [matchMode, setMatchMode] = useState<"auto"|"skill"|"utr">("auto");
 
 const router = useRouter();
@@ -221,18 +222,33 @@ if (matchMode === "utr" && meRating != null) {
         score += Math.min(shared, 4);
 
         // Distance bonus
-        const myC = coords[myData.postcode];
-        const theirC = coords[p.postcode];
-        if (myC && theirC) {
-          distance = getDistanceFromLatLonInKm(myC.lat, myC.lng, theirC.lat, theirC.lng);
-          if (distance < 5) score += 3;
-          else if (distance < 10) score += 2;
-          else if (distance < 20) score += 1;
-        }
+      // Distance bonus + HARD FILTER (prevents interstate matches)
+const myC = coords[myData.postcode];
+const theirC = coords[p.postcode];
+
+if (myC && theirC) {
+  distance = getDistanceFromLatLonInKm(myC.lat, myC.lng, theirC.lat, theirC.lng);
+
+  // 🚫 HARD FILTER: ignore players too far away
+  if (distance > MAX_DISTANCE_KM) {
+    return null;
+  }
+
+  // Keep your local distance bonus
+  if (distance < 5) score += 3;
+  else if (distance < 10) score += 2;
+  else if (distance < 20) score += 1;
+} else {
+  // No coords => exclude to avoid weird far matches
+  return null;
+}
+
 
         return { ...p, score, distance, skillBand: theirBand };
-      })
-      .filter((p) => (p.score ?? 0) > 0);
+})
+.filter((p): p is Player => p !== null)
+.filter((p) => (p.score ?? 0) > 0);
+
 
     setRawMatches(scoredPlayers);
     setLastUpdated(Date.now());
