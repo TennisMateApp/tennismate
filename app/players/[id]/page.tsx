@@ -97,32 +97,25 @@ const [matchStats, setMatchStats] = useState({
   const [showFullBio, setShowFullBio] = useState(false);
 
   useEffect(() => {
-    const fetchPlayerAndStats = async () => {
+   const fetchPlayerAndStats = async () => {
   if (!id) return;
 
-  // ✅ define in outer scope so it’s available to all queries below
+  // ✅ declare once, before any usage
   let playerUserId: string = id as string;
 
   try {
 
+
         const playerRef = doc(db, "players", id as string);
         const playerSnap = await getDoc(playerRef);
 
-        if (playerSnap.exists()) {
-          const d = playerSnap.data() as any;
+   if (playerSnap.exists()) {
+  const d = playerSnap.data() as any;
 
-          // ✅ Use Auth UID if stored on the player doc
-if (typeof d.userId === "string" && d.userId.trim()) {
-  playerUserId = d.userId.trim();
-}
-
-
-          // ✅ Auth UID for stats queries (match_requests / match_history store UIDs)
-const playerUserId: string =
-  typeof d.userId === "string" && d.userId.trim()
-    ? d.userId.trim()
-    : (id as string);
-
+  // ✅ Use Auth UID if stored on the player doc
+  if (typeof d.userId === "string" && d.userId.trim()) {
+    playerUserId = d.userId.trim();
+  }
 
           // Prefer new field, fall back to legacy "utr"
           const ratingNumber: number | null =
