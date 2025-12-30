@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, getCountFromServer } from "firebase/firestore";
 import Image from "next/image";
 import withAuth from "@/components/withAuth";
 import { onAuthStateChanged } from "firebase/auth";
@@ -77,6 +77,7 @@ type Player = {
   utr?: number | null;
   skillBand?: string | null;
   skillBandLabel?: string | null;
+  userId?: string | null;
 };
 
 
@@ -87,23 +88,41 @@ function PublicProfilePage() {
   const router = useRouter();
   const [player, setPlayer] = useState<Player | null>(null);
   const [loading, setLoading] = useState(true);
-  const [matchStats, setMatchStats] = useState({
-    matches: 0,
-    completed: 0,
-    wins: 0,
-  });
+const [matchStats, setMatchStats] = useState({
+  matches: 0,          // accepted requests (sent or received)
+  completed: 0,        // completed games (from match_history)
+  wins: 0,
+});
+
   const [showFullBio, setShowFullBio] = useState(false);
 
   useEffect(() => {
     const fetchPlayerAndStats = async () => {
-      if (!id) return;
+  if (!id) return;
 
-      try {
+  // ✅ define in outer scope so it’s available to all queries below
+  let playerUserId: string = id as string;
+
+  try {
+
         const playerRef = doc(db, "players", id as string);
         const playerSnap = await getDoc(playerRef);
 
         if (playerSnap.exists()) {
           const d = playerSnap.data() as any;
+
+          // ✅ Use Auth UID if stored on the player doc
+if (typeof d.userId === "string" && d.userId.trim()) {
+  playerUserId = d.userId.trim();
+}
+
+
+          // ✅ Auth UID for stats queries (match_requests / match_history store UIDs)
+const playerUserId: string =
+  typeof d.userId === "string" && d.userId.trim()
+    ? d.userId.trim()
+    : (id as string);
+
 
           // Prefer new field, fall back to legacy "utr"
           const ratingNumber: number | null =
@@ -116,9 +135,11 @@ function PublicProfilePage() {
   skillBandLabel: d.skillBandLabel ?? null,
   skillLevel: d.skillLevel ?? null, // legacy fallback
   rating: ratingNumber,             // fallback if band/label missing
+  
 });
 
 setPlayer({
+  userId: playerUserId,
   name: d.name,
   postcode: d.postcode,
   skillLevel: computedSkillLabel, // ✅ always a “best available” label
@@ -135,21 +156,51 @@ setPlayer({
           console.warn("Player not found in Firestore.");
         }
 
-        const matchQuery = query(
-          collection(db, "match_history"),
-          where("players", "array-contains", id)
-        );
-        const snapshot = await getDocs(matchQuery);
+      // ✅ MATCHES (accepted requests) — same definition as Matches page
+const acceptedFromQ = query(
+  collection(db, "match_requests"),
+  where("fromUserId", "==", playerUserId),
+  where("status", "==", "accepted")
+);
 
-        let total = 0, complete = 0, wins = 0;
-        snapshot.forEach((doc) => {
-          const match = doc.data() as any;
-          total++;
-          if (match.completed) complete++;
-          if (match.winnerId === id) wins++;
-        });
+const acceptedToQ = query(
+  collection(db, "match_requests"),
+  where("toUserId", "==", playerUserId),
+  where("status", "==", "accepted")
+);
 
-        setMatchStats({ matches: total, completed: complete, wins });
+const [acceptedFromCount, acceptedToCount] = await Promise.all([
+  getCountFromServer(acceptedFromQ),
+  getCountFromServer(acceptedToQ),
+]);
+
+const acceptedMatchesCount =
+  (acceptedFromCount.data().count ?? 0) + (acceptedToCount.data().count ?? 0);
+
+
+// ✅ COMPLETED + WINS (from match_history)
+const historyQ = query(
+  collection(db, "match_history"),
+  where("players", "array-contains", playerUserId)
+);
+
+const historySnap = await getDocs(historyQ);
+
+let completed = 0;
+let wins = 0;
+
+historySnap.forEach((docSnap) => {
+  const match = docSnap.data() as any;
+  if (match.completed === true || match.status === "completed") completed++;
+  if (match.winnerId === playerUserId) wins++;
+});
+
+setMatchStats({
+  matches: acceptedMatchesCount,
+  completed,
+  wins,
+});
+
       } catch (error) {
         console.error("Error loading player profile:", error);
       } finally {
@@ -320,7 +371,7 @@ setPlayer({
             <CalendarDays className="h-4 w-4" />
           </div>
           <div className="text-2xl font-bold tabular-nums">{matchStats.matches}</div>
-          <div className="mt-1 text-sm text-gray-700">Total Matches</div>
+          <div className="mt-1 text-sm text-gray-700">Accepted Matches</div>
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm text-center">
