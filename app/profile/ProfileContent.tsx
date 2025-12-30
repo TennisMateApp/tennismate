@@ -14,6 +14,7 @@ import {
   setDoc,
   serverTimestamp,
   where,
+  getCountFromServer,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import Cropper from "react-easy-crop";
@@ -158,20 +159,48 @@ setFormData({
 
     if (data.photoURL) setPreviewURL(data.photoURL);
 
-    const q = query(
-      collection(db, "match_history"),
-      where("players", "array-contains", currentUser.uid)
-    );
-    const msnap = await getDocs(q);
-    let total = 0, complete = 0, wins = 0;
-    msnap.forEach((d) => {
-      const m = d.data();
-      total++;
-      if (m.completed) complete++;
-      if (m.winnerId === currentUser.uid) wins++;
-    });
-    setMatchStats({ matches: total, completed: complete, wins });
-    setLoading(false);
+    // ✅ Matches = accepted match requests (sent or received)
+const acceptedFromQ = query(
+  collection(db, "match_requests"),
+  where("fromUserId", "==", currentUser.uid),
+  where("status", "==", "accepted")
+);
+
+const acceptedToQ = query(
+  collection(db, "match_requests"),
+  where("toUserId", "==", currentUser.uid),
+  where("status", "==", "accepted")
+);
+
+// Use count aggregation (faster/cheaper than getDocs)
+const [acceptedFromCount, acceptedToCount] = await Promise.all([
+  getCountFromServer(acceptedFromQ),
+  getCountFromServer(acceptedToQ),
+]);
+
+const acceptedMatches =
+  (acceptedFromCount.data().count ?? 0) + (acceptedToCount.data().count ?? 0);
+
+// ✅ Completed + Wins = from match_history
+const historyQ = query(
+  collection(db, "match_history"),
+  where("players", "array-contains", currentUser.uid)
+);
+
+const historySnap = await getDocs(historyQ);
+
+let completed = 0;
+let wins = 0;
+
+historySnap.forEach((d) => {
+  const m = d.data() as any;
+  if (m.completed === true || m.status === "completed") completed++;
+  if (m.winnerId === currentUser.uid) wins++;
+});
+
+setMatchStats({ matches: acceptedMatches, completed, wins });
+setLoading(false);
+
   });
   return () => unsubscribe();
 }, []);
@@ -499,7 +528,7 @@ const handleDeleteProfile = async () => {
                 <CalendarDays className="h-4 w-4" />
               </div>
               <div className="text-2xl font-bold tabular-nums">{matchStats.matches ?? 0}</div>
-              <div className="mt-1 text-sm text-gray-700">Matches</div>
+              <div className="mt-1 text-sm text-gray-700">Accepted Matches</div>
             </button>
 
             <button
