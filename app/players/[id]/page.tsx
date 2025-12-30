@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import Image from "next/image";
 import withAuth from "@/components/withAuth";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { CalendarDays, CheckCircle2, Trophy } from "lucide-react";
+import { CalendarDays, CheckCircle2, Trophy, ArrowLeft } from "lucide-react";
 import type { SkillBand } from "@/lib/skills";
 import { SKILL_OPTIONS, skillFromUTR } from "@/lib/skills";
 
@@ -84,6 +84,7 @@ const RATING_LABEL = "TennisMate Rating (TMR)";
 
 function PublicProfilePage() {
   const { id } = useParams();
+  const router = useRouter();
   const [player, setPlayer] = useState<Player | null>(null);
   const [loading, setLoading] = useState(true);
   const [matchStats, setMatchStats] = useState({
@@ -110,16 +111,26 @@ function PublicProfilePage() {
             typeof d.utr === "number" ? d.utr :
             null;
 
-          setPlayer({
-            name: d.name,
-            postcode: d.postcode,
-            skillLevel: d.skillLevel,
-            availability: d.availability || [],
-            bio: d.bio || "",
-            photoURL: d.photoURL,
-            skillRating: ratingNumber,
-            utr: d.utr ?? null, // keep for backward display if needed
-          });
+         const computedSkillLabel = toSkillLabel({
+  skillBand: d.skillBand ?? null,
+  skillBandLabel: d.skillBandLabel ?? null,
+  skillLevel: d.skillLevel ?? null, // legacy fallback
+  rating: ratingNumber,             // fallback if band/label missing
+});
+
+setPlayer({
+  name: d.name,
+  postcode: d.postcode,
+  skillLevel: computedSkillLabel, // ✅ always a “best available” label
+  availability: d.availability || [],
+  bio: d.bio || "",
+  photoURL: d.photoURL,
+  skillRating: ratingNumber,
+  utr: d.utr ?? null,
+  skillBand: d.skillBand ?? null,
+  skillBandLabel: d.skillBandLabel ?? null,
+});
+
         } else {
           console.warn("Player not found in Firestore.");
         }
@@ -184,6 +195,22 @@ function PublicProfilePage() {
 
   return (
     <div className="mx-auto max-w-3xl p-4 sm:p-6 pb-28 text-gray-800 space-y-6">
+      {/* Back button */}
+<button
+  type="button"
+  onClick={() => {
+    if (window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/match"); // fallback to Match Me tab
+    }
+  }}
+  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition"
+>
+  <ArrowLeft className="h-4 w-4" />
+  Back
+</button>
+
       {/* HERO HEADER */}
       <section className="relative overflow-hidden rounded-2xl border border-gray-200 bg-gradient-to-b from-white to-emerald-50 p-5 sm:p-6 shadow-sm">
         {/* decorative blobs */}

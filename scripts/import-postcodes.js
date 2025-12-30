@@ -1,5 +1,3 @@
-console.log("✅ import-postcodes.js started");
-
 const admin = require("firebase-admin");
 const fs = require("fs");
 const path = require("path");
@@ -7,16 +5,12 @@ const csv = require("csv-parser");
 
 // ✅ Update these if your paths differ
 const SERVICE_ACCOUNT_PATH = path.join(__dirname, "serviceAccountKey.json");
-const CSV_PATH = path.join(__dirname, "data", "australian_postcodes.csv");
-
+const CSV_PATH = path.join(__dirname, "..", "data", "australian_postcodes.csv");
 
 // ✅ If you want to import only some states first, set this:
-// const ONLY_STATES = new Set(["VIC", "NSW"]);
-const ONLY_STATES = null;
-
-if (!fs.existsSync(SERVICE_ACCOUNT_PATH)) {
-  throw new Error(`Missing service account key: ${SERVICE_ACCOUNT_PATH}`);
-}
+// e.g. new Set(["VIC", "NSW"])
+// If you want all of Australia, set to null
+const ONLY_STATES = null; // new Set(["VIC", "NSW"]);
 
 admin.initializeApp({
   credential: admin.credential.cert(require(SERVICE_ACCOUNT_PATH)),
@@ -24,6 +18,7 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
+// Tries multiple possible header names
 function pick(row, keys) {
   for (const k of keys) {
     if (row[k] != null && String(row[k]).trim() !== "") return row[k];
@@ -32,8 +27,6 @@ function pick(row, keys) {
 }
 
 async function run() {
-  console.log("CSV path:", CSV_PATH);
-
   if (!fs.existsSync(CSV_PATH)) {
     throw new Error(`CSV not found at: ${CSV_PATH}`);
   }
@@ -49,6 +42,7 @@ async function run() {
 
   console.log(`Loaded ${rows.length} CSV rows`);
 
+  // Deduplicate by postcode (some datasets have multiple localities per postcode)
   const byPostcode = new Map();
 
   for (const row of rows) {
@@ -68,6 +62,7 @@ async function run() {
 
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
+    // keep first valid occurrence for each postcode
     if (!byPostcode.has(postcode)) {
       byPostcode.set(postcode, { postcode, lat, lng, state });
     }
@@ -76,6 +71,7 @@ async function run() {
   const items = Array.from(byPostcode.values());
   console.log(`Prepared ${items.length} unique postcodes to write`);
 
+  // Batched writes (max 500 per batch)
   const BATCH_SIZE = 500;
   let written = 0;
 
@@ -84,17 +80,20 @@ async function run() {
     const chunk = items.slice(i, i + BATCH_SIZE);
 
     for (const item of chunk) {
-      const ref = db.collection("postcodes").doc(item.postcode);
+      const ref = db.collection("postcodes").doc(item.postcode); // doc id = postcode
 
+      // Write exactly the fields you said you want:
       batch.set(
         ref,
         {
           postcode: item.postcode,
           lat: item.lat,
           lng: item.lng,
+          // Optional: keep state if you want it later
+          // state: item.state,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true }
+        { merge: true } // ✅ won't delete existing fields
       );
     }
 
