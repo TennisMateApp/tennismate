@@ -9,11 +9,9 @@ import {
   Search,
   Settings,
   Home,
-  CalendarDays,
   UsersRound,
-  Swords, // 🆕 for Match Me
 } from "lucide-react";
-import { GiTennisCourt, GiTennisBall, GiTennisRacket } from "react-icons/gi";
+import { GiTennisBall, GiTennisRacket } from "react-icons/gi";
 
 import {
   collection, query, where, onSnapshot, getDoc, doc, updateDoc, writeBatch, serverTimestamp
@@ -500,27 +498,6 @@ if (shouldGateToVerify) {
                     <Search className="w-6 h-6 text-green-600 hover:text-blue-800" />
                   </Link>
 
-                  {/* 🟢 Courts shortcut */}
-                  <Link href="/courts" title="Courts" data-tour="courts-link">
-                    <GiTennisCourt
-                      className={`w-6 h-6 ${
-                        isActive("/courts")
-                          ? "text-blue-700"
-                          : "text-green-600 hover:text-blue-800"
-                      }`}
-                    />
-                  </Link>
-
-                  {/* Calendar */}
-                  <Link href="/calendar" title="Calendar">
-                    <CalendarDays
-                      className={`w-6 h-6 ${
-                        isActive("/calendar")
-                          ? "text-blue-700"
-                          : "text-green-600 hover:text-blue-800"
-                      }`}
-                    />
-                  </Link>
 
                   {/* Messages */}
                   <Link href="/messages" title="Messages" className="relative">

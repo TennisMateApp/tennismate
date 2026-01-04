@@ -15,6 +15,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { GiTennisCourt } from "react-icons/gi";
 import Image from "next/image";
 import { collection, query, where, getCountFromServer } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -115,7 +116,7 @@ const tiles: Tile[] = useMemo(
   () => [
     {
       key: 'find-match',
-      title: 'Find Match',
+      title: 'Match Me',
       description: 'Match with players near you and start a chat.',
       icon: null,
       href: '/match',
@@ -144,16 +145,18 @@ badge: (
   </span>
 ),
     },
+
     {
-      key: 'competitive',
-      title: 'Competitive',
-      description: 'Compete for ranking (coming soon).',
-      icon: null,
-      href: '#',
-      actionLabel: 'Coming soon',
-      status: 'soon',
-      imageSrc: '/images/competitive.jpg',
-    },
+  key: 'courts',
+  title: 'Courts',
+  description: 'Find tennis courts near you.',
+  icon: null,
+  href: '/courts',
+  status: 'live',
+  imageSrc: '/images/view-tennis-court.jpg',
+  imagePosition: 'center 60%',
+},
+
     {
       key: 'find-coach',
       title: 'Find a Coach',
@@ -165,6 +168,17 @@ badge: (
       imageSrc: '/images/coach.jpg',
       imagePosition: 'center 20%',
     },
+
+    {
+      key: 'competitive',
+      title: 'Competitive',
+      description: 'Compete for ranking (coming soon).',
+      icon: null,
+      href: '#',
+      actionLabel: 'Coming soon',
+      status: 'soon',
+      imageSrc: '/images/competitive.jpg',
+    },
   ],
   [eventsCount]
 );
@@ -172,44 +186,7 @@ badge: (
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 sm:px-6 py-6 sm:py-8">
-{/* Header */}
-<section className="mb-6 sm:mb-8">
-  <div className="relative overflow-hidden rounded-2xl border shadow-md">
-    {/* Background image */}
-    <Image
-      src="/images/welcome.jpg"
-      alt="Welcome background"
-      fill
-      className="object-cover"
-      priority
-      style={{ objectPosition: 'center 20%' }}
-    />
-    {/* Overlay for readability */}
-    <div className="absolute inset-0 bg-black/40" />
 
-    {/* Content */}
-    <div className="relative z-10 p-6 sm:p-8 text-white text-center">
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-        <Image
-          src="/logo.png"
-          alt="TennisMate logo"
-          width={56}
-          height={56}
-          className="rounded-xl shadow-sm ring-1 ring-white/20"
-          priority
-        />
-        <div>
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight drop-shadow-md">
-            Welcome to TennisMate
-          </h1>
-          <p className="mt-1 text-sm text-gray-100 drop-shadow max-w-[36rem] mx-auto">
-            Your hub for finding matches, scheduling games, and (soon) competing &amp; training.
-          </p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
 
   {/* Competition Banner */}
       <section className="mb-6 sm:mb-8" aria-label="Australian Open competition">

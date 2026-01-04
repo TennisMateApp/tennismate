@@ -14,6 +14,86 @@ if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 const db = admin.firestore();
+
+// ---------- EVENT AUTO-DELETE (end time + 1 hour) ----------
+function computeDeleteAfterFromEndISO(endISO: unknown): admin.firestore.Timestamp | null {
+  if (typeof endISO !== "string" || !endISO) return null;
+  const end = new Date(endISO);
+  if (isNaN(end.getTime())) return null;
+
+  // end + 1 hour
+  return admin.firestore.Timestamp.fromDate(new Date(end.getTime() + 60 * 60 * 1000));
+}
+
+// Write deleteAfter when an event is created
+export const setEventDeleteAfterOnCreate = onDocumentCreated("events/{eventId}", async (event) => {
+  const snap = event.data;
+  if (!snap) return;
+
+  const data = snap.data() as any;
+  const deleteAfter = computeDeleteAfterFromEndISO(data?.end);
+  if (!deleteAfter) return;
+
+  await snap.ref.set({ deleteAfter }, { merge: true });
+});
+
+// Update deleteAfter when an event is updated (if end changes)
+export const setEventDeleteAfterOnUpdate = onDocumentUpdated("events/{eventId}", async (event) => {
+  const after = event.data?.after?.data() as any;
+  if (!after) return;
+
+  const deleteAfter = computeDeleteAfterFromEndISO(after?.end);
+  if (!deleteAfter) return;
+
+  await event.data!.after.ref.set({ deleteAfter }, { merge: true });
+});
+
+// Scheduled cleanup: deletes events whose deleteAfter <= now (+ removes calendar entries + join requests)
+export const cleanupExpiredEvents = pubsub
+  .schedule("every 60 minutes")
+  .timeZone("Australia/Melbourne")
+  .onRun(async () => {
+    const now = admin.firestore.Timestamp.now();
+
+    const snap = await db
+      .collection("events")
+      .where("deleteAfter", "<=", now)
+      .get();
+
+    if (snap.empty) {
+      console.log("[cleanupExpiredEvents] nothing to delete");
+      return null;
+    }
+
+    console.log(`[cleanupExpiredEvents] events to delete: ${snap.size}`);
+
+    for (const docSnap of snap.docs) {
+      const eventId = docSnap.id;
+
+      // delete related calendar entries
+      const calSnap = await db.collection("calendar_events").where("eventId", "==", eventId).get();
+      if (!calSnap.empty) {
+        const b = db.batch();
+        calSnap.docs.forEach((d) => b.delete(d.ref));
+        await b.commit();
+      }
+
+      // delete join_requests subcollection docs
+      const jrSnap = await db.collection("events").doc(eventId).collection("join_requests").get();
+      if (!jrSnap.empty) {
+        const b = db.batch();
+        jrSnap.docs.forEach((d) => b.delete(d.ref));
+        await b.commit();
+      }
+
+      // finally delete event doc
+      await docSnap.ref.delete();
+      console.log(`[cleanupExpiredEvents] deleted event ${eventId}`);
+    }
+
+    return null;
+  });
+
 export const deleteMyAccount = onCall(async (request) => {
   const runId =
     (crypto as any).randomUUID?.() || Math.random().toString(36).slice(2);
@@ -149,27 +229,66 @@ function toRoute(input?: unknown): string {
   }
 }
 
+// --- Log helpers (privacy-safe token + Melbourne timestamp) ---
+function melNowISO(): string {
+  try {
+    return new Date()
+      .toLocaleString("sv-SE", { timeZone: "Australia/Melbourne" })
+      .replace(" ", "T");
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
+function safeToken(t: string): string {
+  // Don’t log full tokens. Keep last 10 chars for correlation.
+  if (!t) return "";
+  return t.length <= 10 ? t : `…${t.slice(-10)}`;
+}
+
 
 // ---------- PUSH HELPERS (native first, web fallback) ----------
 // Use fcmToken field when present; fall back to doc id.
-async function getAndroidTokensForUser(uid: string): Promise<string[]> {
-  // 👇 still named "Android", but now returns ALL native (android + ios) tokens
+type NativeDeviceToken = {
+  token: string;
+  deviceDocId: string;
+  platform: string;
+};
+
+async function getNativeDeviceTokensForUser(uid: string): Promise<NativeDeviceToken[]> {
   const snap = await db.collection("users").doc(uid).collection("devices").get();
-  const tokens: string[] = [];
+  const out: NativeDeviceToken[] = [];
 
   snap.forEach((d) => {
     const platform = (d.get("platform") as string) || "web";
 
-    // ✅ include both android AND ios, skip web / other
+    // ✅ Only native platforms
     if (platform !== "android" && platform !== "ios") return;
 
     const tokenInDoc = d.get("fcmToken") as string | undefined;
-    const token = tokenInDoc || d.id;
-    if (token) tokens.push(token);
+    const token = (tokenInDoc || d.id || "").trim();
+
+    if (!token) return;
+
+    out.push({
+      token,
+      deviceDocId: d.id,  // ✅ this is what we must delete later
+      platform,
+    });
   });
 
-  console.log("[PushFn] native tokens for user", uid, tokens);
-  return tokens;
+  console.log("[PushFn] native device tokens", {
+    at: melNowISO(),
+    uid,
+    count: out.length,
+    devices: out.map((x) => ({
+      platform: x.platform,
+      deviceDocId: x.deviceDocId,
+      token: safeToken(x.token),
+    })),
+  });
+
+  return out;
 }
 
 
@@ -229,7 +348,8 @@ async function sendAndroidPushToUser(
   uid: string,
   payload: { title: string; body: string; route?: string; type?: string }
 ): Promise<boolean> {
-  const tokens = await getAndroidTokensForUser(uid);
+  const deviceTokens = await getNativeDeviceTokensForUser(uid);
+  const tokens = deviceTokens.map((d) => d.token);
   if (!tokens.length) return false;
 
   const message: admin.messaging.MulticastMessage = {
@@ -268,6 +388,35 @@ android: {
   };
 
   const res = await admin.messaging().sendEachForMulticast(message);
+  // ✅ Log delivery result details (helps diagnose overnight failures)
+const successCount = res.responses.filter((r) => r.success).length;
+const failureCount = res.responses.length - successCount;
+
+const failures = res.responses
+  .map((r, i) => {
+    if (r.success) return null;
+    const code = (r as any).error?.code as string | undefined;
+    const msg = (r as any).error?.message as string | undefined;
+    return {
+      i,
+      token: safeToken(tokens[i]),
+      code,
+      msg,
+    };
+  })
+  .filter(Boolean);
+
+console.log("[PushFn] sendEachForMulticast result", {
+  at: melNowISO(),
+  uid,
+  type: payload.type || "general",
+  route: payload.route || null,
+  tokenCount: tokens.length,
+  successCount,
+  failureCount,
+  failures: failureCount ? failures : [],
+});
+
 
   // Clean up invalid tokens to keep lists healthy
   await Promise.all(
@@ -278,11 +427,32 @@ android: {
           code === "messaging/registration-token-not-registered" ||
           code === "messaging/invalid-registration-token"
         ) {
-          const bad = tokens[i];
-          try {
-            await db.collection("users").doc(uid).collection("devices").doc(bad).delete();
-            console.log("🧹 Removed invalid Android token", { uid, token: bad });
-          } catch {}
+         const bad = deviceTokens[i]; // ✅ has deviceDocId + token
+try {
+  await db
+    .collection("users")
+    .doc(uid)
+    .collection("devices")
+    .doc(bad.deviceDocId) // ✅ delete the device doc, not the token
+    .delete();
+
+  console.log("🧹 Removed invalid native token", {
+    at: melNowISO(),
+    uid,
+    deviceDocId: bad.deviceDocId,
+    platform: bad.platform,
+    token: safeToken(bad.token),
+  });
+} catch (e) {
+  console.warn("🧹 Failed to remove invalid native token", {
+    at: melNowISO(),
+    uid,
+    deviceDocId: bad?.deviceDocId,
+    token: safeToken(bad?.token || ""),
+    error: String(e),
+  });
+}
+
         }
       }
     })
@@ -697,10 +867,19 @@ export const nudgePendingMatchRequests = pubsub
   .schedule("every 60 minutes")
   .timeZone("Australia/Melbourne")
   .onRun(async () => {
-    const now = Date.now();
-    const cutoffMs = now - 48 * 60 * 60 * 1000; // 48 hours
-    const cutoffDate = new Date(cutoffMs);
+    const melNow = new Date(
+      new Date().toLocaleString("en-AU", { timeZone: "Australia/Melbourne" })
+    );
 
+    // only send at 6pm Melbourne time
+    if (melNow.getHours() !== 18) {
+      console.log("[Nudge] Skipping — only send at 6pm Melbourne time.");
+      return null;
+    }
+
+    const now = Date.now();
+    const cutoffMs = now - 24 * 60 * 60 * 1000; // ✅ 24 hours
+    const cutoffDate = new Date(cutoffMs);
     console.log("[Nudge] Running. Cutoff:", cutoffDate.toISOString());
 
     const snap = await db
@@ -729,24 +908,22 @@ export const nudgePendingMatchRequests = pubsub
         const fresh = await tx.get(c.ref);
         if (!fresh.exists) return;
 
-        const data = fresh.data() as any;
-
+        const data: any = fresh.data();
         if (data.nudgeSent === true) return;
         if (data.status !== "unread") return;
 
         const ts = data.timestamp?.toDate?.() ? data.timestamp.toDate() : null;
         if (!ts || ts.getTime() > cutoffMs) return;
 
-        const toUserId = data.toUserId as string | undefined;
-        const fromName = (data.fromName as string | undefined) ?? "Someone";
+        const toUserId = data.toUserId;
+        const fromName = data.fromName ?? "Someone";
         if (!toUserId) return;
 
-        // ✅ Send push (use your existing helper)
         const sent = await sendAndroidPushToUser(toUserId, {
           title: `${fromName} is waiting for your reply`,
           body: "You have a pending match request. Accept or decline to let them know.",
-          route: "/match", // change to your match requests screen if needed
-          type: "match_request_nudge_48h",
+          route: "/match",
+          type: "match_request_nudge_24h", // ✅ label updated
         });
 
         console.log("[Nudge] Push sent?", sent, { matchRequestId: fresh.id, toUserId });
@@ -766,6 +943,7 @@ export const nudgePendingMatchRequests = pubsub
     console.log("[Nudge] Done.");
     return null;
   });
+
 
 
 
@@ -1031,12 +1209,28 @@ if (notifData.type === "message") {
   (typeof notifData.route === "string" && notifData.route)
     ? notifData.route
     : toRoute(notifData.url);
+console.log(`[MR_BELL_CONSUMER] push attempt`, {
+  at: melNowISO(),
+  notifId,
+  recipientId,
+  type: notifData.type || "general",
+  route,
+  pushDisabled: notifData.pushDisabled === true,
+});
 
 
     // 1) Try native Android first
     const nativeSent = await sendAndroidPushToUser(recipientId, {
       title, body, route, type: notifData.type || "general",
     });
+    console.log(`[MR_BELL_CONSUMER] push result`, {
+  at: melNowISO(),
+  notifId,
+  recipientId,
+  type: notifData.type || "general",
+  nativeSent,
+});
+
 
     // 2) Fallback to web push if no Android devices
     if (!nativeSent) {
@@ -1048,6 +1242,7 @@ if (notifData.type === "message") {
     console.log(`✅ sendPushNotification complete (native=${nativeSent}) for ${recipientId}`);
   }
 );
+
 
 
 
@@ -1338,6 +1533,14 @@ export const sendMatchRequestNotification = onDocumentCreated(
     });
 
     console.log(`[MR_BELL][${runId}] canonical write complete`, { notifId });
+    console.log(`[MR_BELL][${runId}] created bell notif doc`, {
+  at: melNowISO(),
+  notifId,
+  matchId,
+  toUserId,
+  fromUserId,
+});
+
 
     // --- Post-write hard de-dupe (best-effort sweep) ---
 try {
