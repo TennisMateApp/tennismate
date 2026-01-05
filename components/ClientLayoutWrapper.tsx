@@ -7,9 +7,10 @@ import {
   User,
   MessageCircle,
   Search,
-  Settings,
   Home,
   UsersRound,
+  CalendarDays,
+  MoreVertical,
 } from "lucide-react";
 import { GiTennisBall, GiTennisRacket } from "react-icons/gi";
 
@@ -366,6 +367,23 @@ useEffect(() => {
   }
 }, [user, profileComplete, showVerify, pathname, router]);
 
+useEffect(() => {
+  function handleClickOutside(event: MouseEvent) {
+    if (
+      showSettings &&
+      settingsRef.current &&
+      !settingsRef.current.contains(event.target as Node)
+    ) {
+      setShowSettings(false);
+    }
+  }
+
+  document.addEventListener("mousedown", handleClickOutside);
+
+  return () => {
+    document.removeEventListener("mousedown", handleClickOutside);
+  };
+}, [showSettings]);
 
 
 useEffect(() => {
@@ -518,20 +536,28 @@ if (shouldGateToVerify) {
                   <div className="relative" ref={settingsRef}>
                     <button
                       onClick={() => setShowSettings(!showSettings)}
-                      title="Settings"
+                      title="Menu"
                       className="flex items-center justify-center mt-[1px]"
                     >
-                      <Settings className="w-6 h-6 text-green-600 hover:text-green-800" />
+                      <MoreVertical className="w-7 h-7 text-green-600 hover:text-green-800" />
                     </button>
                     {showSettings && (
                       <div className="absolute right-0 mt-2 w-48 bg-white border rounded shadow z-50">
                         <Link
-                          href="/profile?edit=true"
-                          className="block px-4 py-2 text-sm hover:bg-gray-100"
-                          onClick={() => setShowSettings(false)}
-                        >
-                          Edit Profile
-                        </Link>
+  href="/profile"
+  className="block px-4 py-2 text-sm hover:bg-gray-100"
+  onClick={() => setShowSettings(false)}
+>
+  Profile
+</Link>
+                        <Link
+  href="/calendar"
+  className="block px-4 py-2 text-sm hover:bg-gray-100"
+  onClick={() => setShowSettings(false)}
+>
+  Calendar
+</Link>
+
                         <Link
                           href="/support"
                           className="block px-4 py-2 text-sm hover:bg-gray-100"

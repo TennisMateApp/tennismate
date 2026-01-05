@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { X, ChevronLeft, ChevronRight, CheckCircle2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 type TourStep = {
   key: string;
@@ -22,83 +23,85 @@ type TourStep = {
 };
 
 
-
 const STEPS: TourStep[] = [
   {
     key: "welcome",
     title: "Welcome to TennisMate 🎾",
     body: "Quick tour: we’ll show you where the key features live so you can start matching fast.",
-    // no target for welcome
   },
+
   {
     key: "profile",
     title: "Your Profile",
-    body: "Tap here to edit your profile, skill level, postcode, and availability. This is how players find you.",
+    body: "Tap here to manage your profile, skill level, postcode, and availability. This helps other players find you.",
     target: '[data-tour="profile"]',
     placement: "bottom",
   },
+
   {
     key: "directory",
     title: "Find players in the Directory",
-    body: "Search for players nearby and view their profiles before sending a request.",
+    body: "Browse players nearby, view profiles, and decide who you’d like to play with.",
     target: '[data-tour="directory"]',
     placement: "bottom",
   },
-  {
-  key: "courts-intro",
-  title: "Courts near you",
-  body: "Browse courts in your area, see how far they are from your postcode, and use quick links to book a court.",
-  target: '[data-tour="courts-link"]',
-  placement: "top",
-  waitForTarget: true,
-},
 
   {
     key: "notifications",
     title: "Notifications",
-    body: "This is where notifications will appear (match updates, reminders, and more).",
+    body: "This is where you’ll see match updates, reminders, and important alerts.",
     target: '[data-tour="notifications"]',
     placement: "bottom",
   },
+
+  {
+    key: "courts-intro",
+    title: "Find Courts",
+    body: "Browse tennis courts near you, see distances, and quickly find places to play.",
+    target: '[data-tour="courts-tile"]',
+    placement: "top",
+    waitForTarget: true,
+    requireRoute: "/home",
+  },
+
   {
     key: "match-me",
     title: "Match Me",
-    body: "Use Match Me to send a match request and get on court quickly.",
+    body: "Use Match Me to find compatible players based on skill, location, and availability.",
     target: '[data-tour="match-me"]',
     placement: "top",
   },
+
   {
     key: "matches",
     title: "Pending & Accepted Matches",
-    body: "Go here to see pending requests, accepted matches, and match history.",
+    body: "Track match requests, accepted games, and your match history here.",
     target: '[data-tour="matches"]',
     placement: "top",
   },
-{
-  key: "first-request-intro",
-  title: "Now let’s send your first match request 👇",
-  body: "You’re set up! Tap Match Me to see recommended players.",
-  target: '[data-tour="match-me"]',
-  placement: "top",
 
-  // ✅ user must click Match Me, but we auto-continue
-  requireClickSelector: '[data-tour="match-me"]',
-  autoAdvanceOnClick: true,
-  allowClickThrough: true,
-},
-{
-  key: "top-match",
-  title: "Your best match",
-  body: "This is your highest rated matches based on distance, availability overlap, and skill. If you like, tap Send Request to start organising your next hit.",
-  target: '[data-tour="top-match"]',
-  placement: "bottom",
-  requireRoute: "/match",
-  waitForTarget: true, // ✅ ADD THIS
-},
+  {
+    key: "first-request-intro",
+    title: "Now let’s send your first match request 👇",
+    body: "You’re ready to play! Tap Match Me to see recommended players and send a request.",
+    target: '[data-tour="match-me"]',
+    placement: "top",
+    requireClickSelector: '[data-tour="match-me"]',
+    autoAdvanceOnClick: true,
+    allowClickThrough: true,
+  },
 
-
-
+  {
+    key: "top-match",
+    title: "Your best match",
+    body: "This is your highest-rated match based on distance, availability overlap, and skill. Tap Invite to Play to start organising your next hit.",
+    target: '[data-tour="top-match"]',
+    placement: "bottom",
+    requireRoute: "/match",
+    waitForTarget: true,
+  },
 ];
+
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -113,6 +116,7 @@ export default function OnboardingTour({
   onClose: () => void;
   onComplete: () => void;
 }) {
+  const router = useRouter(); 
   const [i, setI] = useState(0);
   const [mounted, setMounted] = useState(false);
 
@@ -132,6 +136,11 @@ const allowInteraction = !!step.requireClickSelector || !!step.requireEvent;
   const last = i === steps.length - 1;
 
   const [positionMode, setPositionMode] = useState<"center" | "anchored">("center");
+  const HEADER_CENTER_STEPS = new Set([
+  "profile",
+  "directory",
+  "notifications",
+]);
 
   const [requireSatisfied, setRequireSatisfied] = useState(true);
 
@@ -177,12 +186,20 @@ const measure = () => {
   const el = document.querySelector(step.target) as HTMLElement | null;
 
   // ✅ Found immediately
-  if (el) {
-    setTargetMissing(false);
-    setRect(el.getBoundingClientRect());
+if (el) {
+  setTargetMissing(false);
+  setRect(el.getBoundingClientRect());
+
+  // ✅ Header icons: keep card centered
+  if (HEADER_CENTER_STEPS.has(step.key)) {
+    setPositionMode("center");
+  } else {
     setPositionMode("anchored");
-    return;
   }
+
+  return;
+}
+
 
   // ✅ If we are NOT waiting for the target, behave like before (center fallback)
   if (!step.waitForTarget) {
@@ -197,6 +214,15 @@ const measure = () => {
   setRect(null);
   setPositionMode("center");
 };
+
+useEffect(() => {
+  if (!open) return;
+
+  // ✅ Force navigation for Courts step
+  if (step.key === "courts-intro" && !pathname.startsWith("/home")) {
+    router.push("/home");
+  }
+}, [open, step.key, pathname, router]);
 
 
 
@@ -293,6 +319,21 @@ useEffect(() => {
     window.removeEventListener(step.requireEvent as string, onEvt as EventListener);
   };
 }, [open, step.requireEvent]);
+
+useEffect(() => {
+  if (!open) return;
+  if (!step.target) return;
+
+  const el = document.querySelector(step.target) as HTMLElement | null;
+  if (!el) return;
+
+  // ✅ Scroll the element into view before measuring
+  el.scrollIntoView({
+    behavior: "smooth",
+    block: "center",
+    inline: "center",
+  });
+}, [open, i, step.target]);
 
 
 

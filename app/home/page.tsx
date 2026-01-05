@@ -197,7 +197,7 @@ badge: (
       <section aria-label="Primary actions">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {tiles.map(({ key, ...tileProps }) => (
-            <ActionTile key={key} {...tileProps} />
+            <ActionTile key={key} {...tileProps} dataTour={key === "courts" ? "courts-tile" : undefined} />
           ))}
         </div>
       </section>
@@ -215,6 +215,7 @@ function ActionTile({
   imageSrc, // ← add this
   imagePosition,
   badge,  
+  dataTour,
 }: {
   title: string;
   description: string;
@@ -225,6 +226,7 @@ function ActionTile({
   imageSrc?: string; // ← add this
   imagePosition?: string;
   badge?: React.ReactNode; 
+  dataTour?: string;
 }) {
 
   const isSoon = status === 'soon';
@@ -332,12 +334,14 @@ const content = (
 
   if (isSoon) return content;
 
-  return (
-    <Link
-      href={href}
-      className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary rounded-2xl"
-    >
-      {content}
-    </Link>
-  );
+return (
+  <Link
+    href={href}
+    data-tour={dataTour}   // ✅ MOVE HERE
+    className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary rounded-2xl"
+  >
+    {content}
+  </Link>
+);
+
 }
