@@ -4,8 +4,6 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 import { getMessaging, isSupported } from "firebase/messaging";
-import { getFunctions } from "firebase/functions";
-
 
 // ✅ Firebase config
 export const firebaseConfig = {
@@ -18,7 +16,6 @@ export const firebaseConfig = {
   measurementId: "G-SB2RF5Y238",
 };
 
-// ✅ VAPID key for push notifications
 export const vapidKey =
   "BA97nNeJC9ENFKBHLTuynQEo13Kotj-ZayG1lZbf79vHDYOZKnYRGRGNy3rKO2_RKn0BkPYjy1FtmX1Mcn1Sf88";
 
@@ -30,11 +27,15 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 
 // ✅ Safe client-only messaging init
-export let messaging: ReturnType<typeof getMessaging> | null = null;
+let messaging: ReturnType<typeof getMessaging> | null = null;
 
-
+if (typeof window !== "undefined") {
+  isSupported().then((supported) => {
+    if (supported) {
+      messaging = getMessaging(app);
+    }
+  });
+}
 
 // ✅ Export everything
 export { auth, db, storage, app, messaging };
-
-
