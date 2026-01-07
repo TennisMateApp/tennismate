@@ -35,6 +35,7 @@ function toSkillLabel(value: string | null | undefined) {
 
 export default function SignupPage() {
   const [showEmailExistsModal, setShowEmailExistsModal] = useState(false);
+  const [existingEmail, setExistingEmail] = useState<string>("");
   const router = useRouter();
 
   const [formData, setFormData] = useState({
@@ -201,11 +202,14 @@ const isSupportedRegion = firstDigit === "3" || firstDigit === "2";
 
     try {
       // 1) Create Auth user
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        formData.email,
-        formData.password
-      );
+const email = formData.email.trim().toLowerCase();
+
+const userCredential = await createUserWithEmailAndPassword(
+  auth,
+  email,
+  formData.password
+);
+
       const user = userCredential.user;
 
       // 2) Upload REQUIRED profile photo
@@ -224,7 +228,7 @@ const isSupportedRegion = firstDigit === "3" || firstDigit === "2";
         doc(db, "users", user.uid),
         {
           name: formData.name,
-          email: formData.email,
+          email,
           requireVerification: true,
           createdAt: serverTimestamp(),
         },
@@ -241,7 +245,7 @@ const isSupportedRegion = firstDigit === "3" || firstDigit === "2";
   await setDoc(doc(db, "players", user.uid), {
     name: formData.name,
     nameLower: (formData.name || "").toLowerCase(),
-    email: formData.email,
+    email,
     postcode: formData.postcode,
     skillRating: ratingOrNull,
     utr: ratingOrNull, // TEMP
@@ -264,32 +268,46 @@ const isSupportedRegion = firstDigit === "3" || firstDigit === "2";
       } else {
         await setDoc(doc(db, "waitlist_users", user.uid), {
           name: formData.name,
-          email: formData.email,
+          email,
           postcode: formData.postcode,
           timestamp: serverTimestamp(),
           source: "signupForm",
         });
-
+        
         setShowWaitlistModal(true);
         setStatus("");
       }
     } catch (error: any) {
       if (error?.code === "auth/email-already-in-use") {
+        const email = formData.email.trim().toLowerCase();
+        setExistingEmail(email);
         setShowEmailExistsModal(true);
+        setStatus("");
+        return;
       } else if (error?.code === "auth/weak-password") {
         setStatus("⚠️ Password must be at least 6 characters.");
+        return;
       } else {
         console.error("Signup error:", error);
         setStatus("❌ Something went wrong. Please try again.");
+        return;
       }
     }
+
+
+
   }; // handleSubmit
 
   return (
     <>
       {showEmailExistsModal && (
-        <SignupErrorModal onClose={() => setShowEmailExistsModal(false)} />
-      )}
+  <SignupErrorModal
+    email={existingEmail}
+    onClose={() => setShowEmailExistsModal(false)}
+    onGoToLogin={() => router.push(`/login?email=${encodeURIComponent(existingEmail)}`)}
+  />
+)}
+
 
       <div className="relative min-h-screen">
         <Image src="/images/login-tennis-court.jpg" alt="" fill priority className="object-cover" />

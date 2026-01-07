@@ -1,33 +1,40 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import React from "react";
 
-export default function SignupErrorModal({ onClose }: { onClose: () => void }) {
-  const router = useRouter();
+type Props = {
+  email: string;
+  onClose: () => void;
+  onGoToLogin: () => void;
+};
 
-  const handleLogin = () => {
-    router.push("/login");
-  };
-
+export default function SignupErrorModal({ email, onClose, onGoToLogin }: Props) {
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 max-w-sm w-full shadow-lg text-center">
-        <h2 className="text-xl font-semibold mb-4">Email Already Registered</h2>
-        <p className="mb-6">
-          An account with this email already exists. Would you like to log in instead?
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-lg p-6 w-[92%] max-w-md space-y-4">
+        <h2 className="text-lg font-semibold">Email already in use</h2>
+
+        <p className="text-sm text-gray-700">
+          An account already exists for{" "}
+          <span className="font-semibold">{email || "this email address"}</span>.
+          Please log in instead.
         </p>
-        <div className="flex justify-center gap-4">
-          <button
-            onClick={handleLogin}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
-            Login
-          </button>
+
+        <div className="flex gap-3 justify-end pt-2">
           <button
             onClick={onClose}
-            className="border border-gray-300 px-4 py-2 rounded hover:bg-gray-100"
+            type="button"
+            className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
           >
-            Cancel
+            Close
+          </button>
+
+          <button
+            onClick={onGoToLogin}
+            type="button"
+            className="px-4 py-2 rounded-md bg-green-600 text-white hover:bg-green-700"
+          >
+            Go to Login
           </button>
         </div>
       </div>
