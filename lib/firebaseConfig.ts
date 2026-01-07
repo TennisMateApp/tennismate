@@ -15,6 +15,7 @@ export const firebaseConfig = {
   storageBucket: "tennismate-d8acb.firebasestorage.app",
   messagingSenderId: "16871894453",
   appId: "1:16871894453:web:32b39ae341acf34cdebdfc",
+  measurementId: "G-SB2RF5Y238",
 };
 
 // ✅ VAPID key for push notifications
@@ -29,16 +30,11 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 
 // ✅ Safe client-only messaging init
-let messaging: ReturnType<typeof getMessaging> | null = null;
+export let messaging: ReturnType<typeof getMessaging> | null = null;
 
-if (typeof window !== "undefined") {
-  isSupported().then((supported) => {
-    if (supported) {
-      messaging = getMessaging(app);
-    }
-  });
-}
+
 
 // ✅ Export everything
 export { auth, db, storage, app, messaging };
+
 
