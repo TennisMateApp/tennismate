@@ -31,6 +31,7 @@ interface Player {
   photoURL?: string;
   timestamp?: any;
   joinedAt?: any;  
+  createdAt?: any;
   nameLower?: string;
 }
 
@@ -117,11 +118,11 @@ export default function DirectoryPage() {
     const loadFirstPage = async () => {
       try {
         setLoading(true);
-        const qy = query(
-          collection(db, "players"),
-          orderBy("timestamp", "desc"),
-          limit(PAGE_SIZE)
-        );
+       const qy = query(
+  collection(db, "players"),
+  orderBy("nameLower"),
+  limit(PAGE_SIZE)
+);
         const snap = await getDocs(qy);
 
         const page = snap.docs.map((d) => {
@@ -134,6 +135,7 @@ export default function DirectoryPage() {
             photoURL: v.photoURL ?? undefined,
             timestamp: v.timestamp ?? undefined,
             joinedAt: v.joinedAt ?? undefined, 
+            createdAt: v.createdAt ?? undefined, 
             nameLower: v.nameLower ?? undefined,
           } as Player;
         });
@@ -155,12 +157,12 @@ export default function DirectoryPage() {
     if (!hasMore || loadingMore || !cursor) return;
     try {
       setLoadingMore(true);
-      const qy = query(
-        collection(db, "players"),
-        orderBy("timestamp", "desc"),
-        startAfter(cursor),
-        limit(PAGE_SIZE)
-      );
+     const qy = query(
+  collection(db, "players"),
+  orderBy("nameLower"),
+  startAfter(cursor),
+  limit(PAGE_SIZE)
+);
       const snap = await getDocs(qy);
 
       const page = snap.docs.map((d) => {
@@ -173,6 +175,7 @@ export default function DirectoryPage() {
           photoURL: v.photoURL ?? undefined,
           timestamp: v.timestamp ?? undefined,
           joinedAt: v.joinedAt ?? undefined, 
+          createdAt: v.createdAt ?? undefined, 
           nameLower: v.nameLower ?? undefined,
         } as Player;
       });
@@ -222,6 +225,7 @@ export default function DirectoryPage() {
             photoURL: v.photoURL ?? undefined,
             timestamp: v.timestamp ?? undefined,
             joinedAt: v.joinedAt ?? undefined, 
+            createdAt: v.createdAt ?? undefined, 
             nameLower: v.nameLower ?? undefined,
           } as Player;
         });
@@ -267,6 +271,7 @@ export default function DirectoryPage() {
           photoURL: v.photoURL ?? undefined,
           timestamp: v.timestamp ?? undefined,
           joinedAt: v.joinedAt ?? undefined, 
+          createdAt: v.createdAt ?? undefined, 
           nameLower: v.nameLower ?? undefined,
         } as Player;
       });
@@ -355,19 +360,22 @@ export default function DirectoryPage() {
             {/* Cards grid */}
             <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {visiblePlayers.map((player, index) => {
-                 const joinedMs =
-    typeof player.joinedAt?.toDate === "function"
-      ? player.joinedAt.toDate().getTime()
-      : typeof player.timestamp?.toDate === "function"
-      ? player.timestamp.toDate().getTime()
-      : player.joinedAt
-      ? new Date(player.joinedAt).getTime()
-      : player.timestamp
-      ? new Date(player.timestamp).getTime()
-      : 0;
+const createdMs =
+  typeof player.createdAt?.toDate === "function"
+    ? player.createdAt.toDate().getTime()
+    : typeof player.createdAt === "number"
+    ? player.createdAt
+    : player.createdAt
+    ? new Date(player.createdAt).getTime()
+    : 0;
 
-  const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
-  const isNew = joinedMs > 0 && (Date.now() - joinedMs) < ONE_WEEK;
+
+const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
+const ageMs = Date.now() - createdMs;
+
+// guard against invalid / future dates
+const isNew = createdMs > 0 && ageMs >= 0 && ageMs < ONE_WEEK;
+
 
                 return (
                   <motion.article
