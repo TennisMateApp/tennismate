@@ -9,32 +9,37 @@ export default function BackButtonHandler() {
   const router = useRouter();
   const pathname = usePathname() || "";
 
-  useEffect(() => {
-    // ✅ Only run on native apps (Android/iOS via Capacitor)
-    if (!Capacitor.isNativePlatform()) return;
+useEffect(() => {
+  if (!Capacitor.isNativePlatform()) return;
 
-    const sub = App.addListener("backButton", () => {
-      // ✅ If we have browser history, navigate back inside the app
+  let handle: { remove: () => Promise<void> } | null = null;
+
+  (async () => {
+    handle = await App.addListener("backButton", () => {
       if (window.history.length > 1) {
         router.back();
         return;
       }
 
-      // ✅ If there is NO history (cold-opened deep link), go to Home instead of exiting
       if (pathname !== "/home") {
         router.replace("/home");
         return;
       }
 
-      // ✅ If already on /home, do nothing (prevents exit)
-      // If you WANT exit on home, uncomment the next line:
+      // Do nothing on /home to prevent exiting
+      // If you want to exit here, uncomment:
       // App.exitApp();
     });
+  })();
 
-    return () => {
-      sub.remove();
-    };
-  }, [router, pathname]);
+  return () => {
+    // remove listener on unmount
+    if (handle) {
+      handle.remove();
+    }
+  };
+}, [router, pathname]);
+
 
   return null;
 }
