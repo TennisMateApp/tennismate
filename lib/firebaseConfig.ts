@@ -3,7 +3,8 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
-import { getMessaging, isSupported } from "firebase/messaging";
+import { getMessaging, isSupported as isMessagingSupported } from "firebase/messaging";
+import { getAnalytics, isSupported as isAnalyticsSupported, type Analytics } from "firebase/analytics";
 
 // ✅ Firebase config
 export const firebaseConfig = {
@@ -20,22 +21,42 @@ export const vapidKey =
   "BA97nNeJC9ENFKBHLTuynQEo13Kotj-ZayG1lZbf79vHDYOZKnYRGRGNy3rKO2_RKn0BkPYjy1FtmX1Mcn1Sf88";
 
 // ✅ Safe Firebase app init
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-const auth = getAuth(app);
-const db = getFirestore(app);
-const storage = getStorage(app);
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
 
-// ✅ Safe client-only messaging init
-let messaging: ReturnType<typeof getMessaging> | null = null;
-
+// ✅ Messaging (async support check)
+export let messaging: ReturnType<typeof getMessaging> | null = null;
 if (typeof window !== "undefined") {
-  isSupported().then((supported) => {
-    if (supported) {
-      messaging = getMessaging(app);
-    }
-  });
+  isMessagingSupported()
+    .then((supported) => {
+      if (supported) messaging = getMessaging(app);
+    })
+    .catch(() => {
+      messaging = null;
+    });
 }
 
-// ✅ Export everything
-export { auth, db, storage, app, messaging };
+// ✅ Analytics: cache + safe getter (reliable in Next/SSR)
+let analyticsCache: Analytics | null = null;
+let analyticsInitStarted = false;
+
+export async function getAnalyticsSafe(): Promise<Analytics | null> {
+  if (typeof window === "undefined") return null;
+  if (analyticsCache) return analyticsCache;
+
+  if (!analyticsInitStarted) {
+    analyticsInitStarted = true;
+    try {
+      const supported = await isAnalyticsSupported();
+      if (!supported) return null;
+      analyticsCache = getAnalytics(app);
+    } catch {
+      analyticsCache = null;
+    }
+  }
+
+  return analyticsCache;
+}

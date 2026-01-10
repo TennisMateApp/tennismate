@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "U6TCW92L5L.au.com.tennismatch.tennismate",
+        "paths": ["/auth/*", "/home*", "/*"]
+      }
+    ]
+  }
+}

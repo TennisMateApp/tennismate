@@ -35,6 +35,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { suggestCourt } from "@/lib/suggestCourt";
+import { track } from "@/lib/track";
 
 
 // --- Helpers ---
@@ -201,10 +202,18 @@ const CourtBadge = ({
   const safeBooking = normalizeUrl(bookingUrl || undefined);
 
   // 🔹 local click logger - reuse same collection
-  const handleClick = async (type: "map" | "booking") => {
-    const user = auth.currentUser;
-    if (!user || !courtId) return;
+const handleClick = async (type: "map" | "booking") => {
+  const user = auth.currentUser;
+  if (!user || !courtId) return;
 
+  // ✅ GA event (safe — won't crash if analytics isn't available)
+  track(type === "map" ? "court_map_clicked" : "court_booking_clicked", {
+    court_id: courtId,
+    match_context: "match_requests", // optional: helps segment
+    has_booking_url: type === "booking" ? true : undefined,
+  });
+
+  try {
     const ref = doc(db, "court_clicks", `${user.uid}_${courtId}`);
     await setDoc(
       ref,
@@ -219,7 +228,11 @@ const CourtBadge = ({
       },
       { merge: true }
     );
-  };
+  } catch (e) {
+    console.error("Failed to log court click", e);
+  }
+};
+
 
   return (
     <div className="w-full max-w-[520px]">
@@ -655,6 +668,12 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
       players: [fromUserId, toUserId],
     });
 
+    track("match_request_accepted", {
+  match_id: matchId,
+  from_user_id: fromUserId,
+  to_user_id: toUserId,
+});
+
     await Promise.all([
       setDoc(
         doc(db, "players", toUserId),
@@ -720,6 +739,10 @@ const handleStartMatch = useCallback(async (match: Match) => {
   try {
     const refMatch = doc(db, "match_requests", match.id);
     await updateDoc(refMatch, { started: true, startedAt: serverTimestamp() });
+
+    track("match_started", {
+  match_id: match.id,
+});
 
     const other = match.playerId === currentUserId ? match.opponentId : match.playerId;
     await addDoc(collection(db, "notifications"), {
@@ -802,12 +825,18 @@ const handleSuggestCourt = useCallback(async (match: Match) => {
 
 
 const handleCompleteGame = useCallback((match: Match) => {
+  track("match_completed_cta", {
+    match_id: match.id,
+  });
   router.push(`/matches/${match.id}/complete/details`);
 }, [router]);
 
 const deleteMatch = useCallback(async (id: string) => {
   if (!confirm("Delete this match?")) return;
   await deleteDoc(doc(db, "match_requests", id));
+   track("match_request_declined", {
+    match_id: id,
+  });
   setMatches((prev) => prev.filter((m) => m.id !== id));
 }, []);
 

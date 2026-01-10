@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.tennismate.app",
+      "sha256_cert_fingerprints": [
+        "ED:03:D7:1A:15:54:75:30:9A:24:45:1C:A3:65:07:1C:C6:69:0E:4E:47:33:B9:70:40:0F:C5:67:BF:92:36:FC",
+        "B1:D0:96:55:4D:7A:77:6D:6A:45:60:B1:A2:EE:F0:D5:BF:49:C7:84:8B:EC:99:4C:59:E6:9F:84:5E:F1:80:75"
+      ]
+    }
+  }
+]
