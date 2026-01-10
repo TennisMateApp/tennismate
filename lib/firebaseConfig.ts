@@ -29,6 +29,7 @@ export const storage = getStorage(app);
 
 // ✅ Messaging (async support check)
 export let messaging: ReturnType<typeof getMessaging> | null = null;
+
 if (typeof window !== "undefined") {
   isMessagingSupported()
     .then((supported) => {
@@ -39,24 +40,35 @@ if (typeof window !== "undefined") {
     });
 }
 
-// ✅ Analytics: cache + safe getter (reliable in Next/SSR)
+// ✅ Analytics (async safe getter + cache)
 let analyticsCache: Analytics | null = null;
-let analyticsInitStarted = false;
+let analyticsInitPromise: Promise<Analytics | null> | null = null;
 
-export async function getAnalyticsSafe(): Promise<Analytics | null> {
-  if (typeof window === "undefined") return null;
-  if (analyticsCache) return analyticsCache;
+export function getAnalyticsSafe(): Promise<Analytics | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (analyticsCache) return Promise.resolve(analyticsCache);
 
-  if (!analyticsInitStarted) {
-    analyticsInitStarted = true;
+  // If multiple calls happen at once, reuse the same init
+  if (analyticsInitPromise) return analyticsInitPromise;
+
+  analyticsInitPromise = (async () => {
     try {
       const supported = await isAnalyticsSupported();
       if (!supported) return null;
-      analyticsCache = getAnalytics(app);
-    } catch {
-      analyticsCache = null;
-    }
-  }
 
-  return analyticsCache;
+      analyticsCache = getAnalytics(app);
+
+      // ✅ temporary sanity log (remove later)
+      console.log("✅ GA analytics initialised", firebaseConfig.measurementId);
+
+      return analyticsCache;
+    } catch {
+      return null;
+    } finally {
+      // allow re-init attempts if it failed
+      analyticsInitPromise = null;
+    }
+  })();
+
+  return analyticsInitPromise;
 }

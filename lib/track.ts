@@ -11,7 +11,7 @@ export async function track(eventName: string, params?: Record<string, any>) {
     if (!analytics) return;
     logEvent(analytics, eventName, params);
   } catch {
-    // silent fail
+    // silent fail (tracking should never break the app)
   }
 }
 

@@ -38,6 +38,7 @@ import { SafeAreaTop, SafeAreaBottom } from "@/components/SafeArea";
 import BackButtonHandler from "@/components/BackButtonHandler";
 import GetTheAppPrompt from "@/components/growth/GetTheAppPrompt";
 import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
+import { track, trackSetUserId } from "@/lib/track";
 
 
 function useAppBootLoader() {
@@ -144,6 +145,7 @@ useEffect(() => {
   const [showSettings, setShowSettings] = useState(false);
   const [showVerify, setShowVerify] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const profileTrackedRef = useRef(false);
   const [userOnboardingSeen, setUserOnboardingSeen] = useState<number | null>(null);
 const [showTour, setShowTour] = useState(false);
 
@@ -155,6 +157,18 @@ const tourShownThisSession = useRef(false);
 
 const router = useRouter();
 const pathname = usePathname() || "";
+
+useEffect(() => {
+  if (!pathname) return;
+
+  track("page_view", {
+    page_path: pathname,
+    page_location: typeof window !== "undefined" ? window.location.href : undefined,
+    page_title: typeof document !== "undefined" ? document.title : undefined,
+  });
+}, [pathname]);
+
+
 
 // 👇 routes that should be full-bleed (no grey background, no boxed layout)
 const fullBleedRoutes = ["/login", "/signup"];
@@ -211,6 +225,15 @@ const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFe
     unsubInbox(); unsubMessages(); unsubPlayer();
 
    if (u) {
+  profileTrackedRef.current = false;
+  trackSetUserId(u.uid);
+
+  // ✅ Track login only once per browser session (prevents firing on every refresh)
+  const loginKey = `ga_login_tracked_${u.uid}`;
+  if (typeof window !== "undefined" && !sessionStorage.getItem(loginKey)) {
+    track("login", { method: "firebase" });
+    sessionStorage.setItem(loginKey, "1");
+  }
   tourShownThisSession.current = false; // ✅ reset for this user session
   await u.reload();
   setUser(auth.currentUser);
@@ -286,7 +309,12 @@ if (hasNewer && inbound) {
         }
       );
     } else {
+      profileTrackedRef.current = false;
+      trackSetUserId(null);
+  track("logout");
+
   tourShownThisSession.current = false; // ✅ reset on logout
+  
   setUser(null);
       setPhotoURL(null);
       setShowTour(false);
@@ -302,6 +330,19 @@ if (hasNewer && inbound) {
     unsubPlayer();
   };
 }, []);
+
+useEffect(() => {
+  if (!user) return;
+  if (profileComplete !== true) return;
+  if (profileTrackedRef.current) return;
+
+  profileTrackedRef.current = true;
+
+  track("profile_completed", {
+    user_id: user.uid,
+  });
+}, [user, profileComplete]);
+
 
 
 useEffect(() => {
