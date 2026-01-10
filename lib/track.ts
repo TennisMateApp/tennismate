@@ -1,15 +1,15 @@
 // lib/track.ts
-import { getAnalyticsSafe } from "./firebaseConfig";
 import { logEvent, setUserId } from "firebase/analytics";
+import { getAnalyticsSafe } from "./firebaseConfig";
 
 /**
- * Track a GA4 event safely (won’t crash SSR or if analytics isn't supported).
+ * Track a GA4 event safely (won’t crash SSR and won’t fire until Analytics is supported).
  */
 export async function track(eventName: string, params?: Record<string, any>) {
   try {
-    const analytics = await getAnalyticsSafe();
-    if (!analytics) return;
-    logEvent(analytics, eventName, params);
+    const a = await getAnalyticsSafe();
+    if (!a) return;
+    logEvent(a, eventName, params);
   } catch {
     // silent fail (tracking should never break the app)
   }
@@ -17,13 +17,12 @@ export async function track(eventName: string, params?: Record<string, any>) {
 
 /**
  * Attach Firebase UID to GA (helps user-level funnels).
- * Call this after login (or whenever auth state becomes known).
  */
 export async function trackSetUserId(uid: string | null) {
   try {
-    const analytics = await getAnalyticsSafe();
-    if (!analytics) return;
-    setUserId(analytics, uid ?? null);
+    const a = await getAnalyticsSafe();
+    if (!a) return;
+    setUserId(a, uid ?? null);
   } catch {
     // silent
   }

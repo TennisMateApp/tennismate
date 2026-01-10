@@ -161,12 +161,13 @@ const pathname = usePathname() || "";
 useEffect(() => {
   if (!pathname) return;
 
-  track("page_view", {
+  void track("page_view", {
     page_path: pathname,
     page_location: typeof window !== "undefined" ? window.location.href : undefined,
     page_title: typeof document !== "undefined" ? document.title : undefined,
   });
 }, [pathname]);
+
 
 
 
@@ -226,12 +227,12 @@ const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFe
 
    if (u) {
   profileTrackedRef.current = false;
-  trackSetUserId(u.uid);
+void trackSetUserId(u.uid);
 
   // ✅ Track login only once per browser session (prevents firing on every refresh)
   const loginKey = `ga_login_tracked_${u.uid}`;
   if (typeof window !== "undefined" && !sessionStorage.getItem(loginKey)) {
-    track("login", { method: "firebase" });
+   void track("login", { method: "firebase" });
     sessionStorage.setItem(loginKey, "1");
   }
   tourShownThisSession.current = false; // ✅ reset for this user session
@@ -310,8 +311,9 @@ if (hasNewer && inbound) {
       );
     } else {
       profileTrackedRef.current = false;
-      trackSetUserId(null);
-  track("logout");
+      void trackSetUserId(null);
+void track("logout");
+
 
   tourShownThisSession.current = false; // ✅ reset on logout
   
@@ -338,9 +340,9 @@ useEffect(() => {
 
   profileTrackedRef.current = true;
 
-  track("profile_completed", {
-    user_id: user.uid,
-  });
+  void track("profile_completed", {
+  user_id: user.uid,
+});
 }, [user, profileComplete]);
 
 

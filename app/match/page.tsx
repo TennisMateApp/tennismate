@@ -12,6 +12,7 @@ import { onAuthStateChanged, applyActionCode } from "firebase/auth";
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 import Image from "next/image";
+import { track } from "@/lib/track";
 // import { getContinueUrl } from "@/lib/auth/getContinueUrl";
 
 
@@ -424,6 +425,23 @@ const handleMatchRequest = async (match: Player) => {
       timestamp: serverTimestamp(),
       nudgeSent: false,
     });
+
+    // ✅ GA4: track match request sent
+void track("match_request_sent", {
+  match_id: matchRef.id,
+  from_user_id: user.uid,
+  to_user_id: match.id,
+  distance_km: typeof match.distance === "number" ? match.distance : null,
+  from_postcode: myProfile.postcode ?? null,
+  to_postcode: match.postcode ?? null,
+  match_mode: matchMode, // "auto" | "skill" | "utr"
+  skill_band_me: myProfile.skillBand || null,
+  skill_band_them: match.skillBand || null,
+  tmr_me: typeof (myProfile.skillRating ?? myProfile.utr) === "number" ? (myProfile.skillRating ?? myProfile.utr) : null,
+  tmr_them: typeof (match.skillRating ?? match.utr) === "number" ? (match.skillRating ?? match.utr) : null,
+});
+
+
 
     // de-dupe notif for this match
     const notifQuery = query(
@@ -875,16 +893,26 @@ if (loading) {
   </span>
 ) : (
   <button
-  onClick={() => handleMatchRequest(match)}
-  disabled={sendingIds.has(match.id)}
-  data-tour={index === 0 ? "send-request" : undefined}
-  className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-  aria-label={`Request to play with ${match.name}`}
->
+    onClick={() => {
+      // 📊 GA4: user clicked "Invite to Play"
+      void track("match_request_click", {
+        to_user_id: match.id,
+        distance_km: typeof match.distance === "number" ? match.distance : null,
+        match_mode: matchMode, // "auto" | "skill" | "utr"
+      });
 
+      handleMatchRequest(match);
+    }}
+    disabled={sendingIds.has(match.id)}
+    data-tour={index === 0 ? "send-request" : undefined}
+    className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+    aria-label={`Request to play with ${match.name}`}
+
+>
     {sendingIds.has(match.id) ? "Sending…" : "Invite to Play"}
   </button>
 )}
+
 
       </div>
     </div>
