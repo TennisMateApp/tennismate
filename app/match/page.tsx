@@ -29,6 +29,7 @@ interface Player {
   bio: string;
   email: string;
   photoURL?: string;
+  birthYear?: number | null;
   age?: number | null;        // ✅ NEW
   gender?: string | null;     // ✅ NEW
   isMatchable?: boolean | null; // ✅ NEW
@@ -48,6 +49,19 @@ interface PostcodeCoords {
 }
 
 const A = <T,>(x: T[] | undefined | null): T[] => Array.isArray(x) ? x : [];
+
+const deriveAgeFromBirthYear = (birthYear: unknown) => {
+  if (typeof birthYear !== "number" || !Number.isFinite(birthYear)) return null;
+  const currentYear = new Date().getFullYear();
+  const age = currentYear - birthYear;
+
+  // sanity bounds to avoid typos
+  if (birthYear < 1900 || birthYear > currentYear) return null;
+  if (age < 0 || age > 110) return null;
+
+  return age;
+};
+
 
 // ---- Skill band + UTR helpers ----
 
@@ -184,6 +198,9 @@ const [lastUpdated, setLastUpdated] = useState<number | null>(null);
     const mySnap = await getDoc(myRef);
     if (!mySnap.exists()) return;
     const myData = mySnap.data() as Player;
+    const myBirthYear = (myData as any)?.birthYear ?? null;
+const myAge = deriveAgeFromBirthYear(myBirthYear) ?? (typeof (myData as any)?.age === "number" ? (myData as any).age : null);
+
     const hidden = (myData as any)?.isMatchable === false;
 setMyProfileHidden(hidden);
 
@@ -200,7 +217,7 @@ if (hidden) {
   legacyToBand(myData.skillLevel) ||
   ""
 ) as SkillBand | "";
-setMyProfile({ ...myData, skillBand: myBand });
+setMyProfile({ ...myData, skillBand: myBand, birthYear: myBirthYear, age: myAge, id: mySnap.id });
 
 
     // 2) Postcode coords
@@ -220,15 +237,27 @@ setMyProfile({ ...myData, skillBand: myBand });
     const snapshot = await getDocs(collection(db, "players"));
 const allPlayers = snapshot.docs.map((d) => {
   const data = d.data() as any;
+
+  const birthYear =
+    typeof data.birthYear === "number" && Number.isFinite(data.birthYear)
+      ? data.birthYear
+      : null;
+
+  // ✅ Prefer birthYear-derived age; fallback to legacy data.age if present
+  const derivedAge = deriveAgeFromBirthYear(birthYear);
+  const legacyAge = typeof data.age === "number" && Number.isFinite(data.age) ? data.age : null;
+
   return {
     ...(data as Player),
     id: d.id,
-    age: typeof data.age === "number" ? data.age : null,
+    birthYear,
+    age: derivedAge ?? legacyAge ?? null,
     gender: typeof data.gender === "string" ? data.gender : null,
     // ✅ default to true so older profiles still show
     isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
   } as Player;
 });
+
 
 
 

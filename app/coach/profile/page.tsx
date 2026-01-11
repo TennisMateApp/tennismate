@@ -9,6 +9,7 @@ import {
   setDoc,
   updateDoc,
   serverTimestamp,
+  GeoPoint,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
@@ -34,13 +35,23 @@ type CoachProfile = {
   playingBackground: string;
 
   courtAddress: string;
-  coachingSkillLevels: string[];
+  postcode?: string;        // ✅ optional to support older docs
+  lat?: number | null;
+  lng?: number | null;
+  location?: any;
 
+  coachingSkillLevels: string[];
   galleryPhotos: GalleryPhoto[];
 
   createdAt?: any;
   updatedAt?: any;
+  activatedAt?: any;
+
+  status?: "draft" | "active";
+  nearbyCoachPingSent?: boolean;
+  nearbyCoachPingSentAt?: any;
 };
+
 
 const DEFAULT_SKILL_LEVELS = [
   "Beginner",
@@ -69,10 +80,12 @@ export default function CoachProfilePage() {
   const [bio, setBio] = useState("");
   const [playingBackground, setPlayingBackground] = useState("");
   const [courtAddress, setCourtAddress] = useState("Place where coaching takes place");
+  const [postcode, setPostcode] = useState("");
   const [coachingSkillLevels, setCoachingSkillLevels] = useState<string[]>([]);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>([]);
   const [success, setSuccess] = useState<string | null>(null);
+  const [status, setStatus] = useState<"draft" | "active">("draft");
 
   // --- Avatar cropping state ---
 const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -168,6 +181,13 @@ async function getPlayerDefaults(uid: string) {
 
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
+
+    postcode: "",
+    lat: null,
+    lng: null,
+    location: null,
+
+    status: "draft",
   };
 
   await setDoc(coachRef, starter);
@@ -183,6 +203,8 @@ async function getPlayerDefaults(uid: string) {
   setCourtAddress(starter.courtAddress);
   setCoachingSkillLevels(starter.coachingSkillLevels);
   setGalleryPhotos(starter.galleryPhotos);
+  setPostcode(starter.postcode);
+  setStatus("draft");
 
   return;
 }
@@ -217,6 +239,8 @@ if ((!data.name || !data.name.trim()) || !data.avatar) {
         setCourtAddress(data.courtAddress ?? "");
         setCoachingSkillLevels(Array.isArray(data.coachingSkillLevels) ? data.coachingSkillLevels : []);
         setGalleryPhotos(Array.isArray(data.galleryPhotos) ? data.galleryPhotos : []);
+        setPostcode((data as any).postcode ?? "");
+        setStatus((data as any).status === "active" ? "active" : "draft");
       } catch (e: any) {
         setError(e?.message ?? "Failed to load coach profile");
       }
@@ -249,36 +273,108 @@ if ((!data.name || !data.name.trim()) || !data.avatar) {
   }
 }
 
+async function lookupPostcodeLatLng(pc: string): Promise<{ lat: number; lng: number } | null> {
+  const clean = pc.trim();
+  if (!/^\d{4}$/.test(clean)) return null;
+
+  // Assumes your postcodes are stored as docs keyed by postcode: /postcodes/3000
+  const snap = await getDoc(doc(db, "postcodes", clean));
+  if (!snap.exists()) return null;
+
+  const d = snap.data() as any;
+
+  // Adjust these field names if your postcode docs use different keys
+  const lat = typeof d.lat === "number" ? d.lat : null;
+  const lng = typeof d.lng === "number" ? d.lng : null;
+
+  if (lat == null || lng == null) return null;
+  return { lat, lng };
+}
+
+
+
   async function saveProfile() {
-  if (!coachRef || !uid) return;
+    if (!coachRef || !uid) return;
+
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const pc = postcode.trim();
+      if (!/^\d{4}$/.test(pc)) {
+        setError("Please enter a valid 4-digit Australian postcode.");
+        return;
+      }
+
+      const coords = await lookupPostcodeLatLng(pc);
+      if (!coords) {
+        setError("Postcode not found. Please check and try again.");
+        return;
+      }
+
+      await updateDoc(coachRef, {
+        name: name.trim(),
+        mobile: mobile.trim(),
+        contactFirstForRate,
+        coachingExperience: coachingExperience.trim(),
+        bio: bio.trim(),
+        playingBackground: playingBackground.trim(),
+        courtAddress: courtAddress.trim(),
+        postcode: pc,
+        lat: coords.lat,
+        lng: coords.lng,
+        location: new GeoPoint(coords.lat, coords.lng),
+        coachingSkillLevels,
+        galleryPhotos,
+        updatedAt: serverTimestamp(),
+      } as any);
+
+      setSuccess("✅ Coach profile saved successfully!");
+      setTimeout(() => router.push("/profile"), 900);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to save profile");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+async function publishCoachProfile() {
+  if (!coachRef) return;
 
   setSaving(true);
   setError(null);
   setSuccess(null);
 
   try {
+    // ✅ Basic validation so we don’t notify users with half-finished profiles
+    if (!name.trim()) throw new Error("Please add your name before publishing.");
+    if (!mobile.trim()) throw new Error("Please add your mobile before publishing.");
+    if (!postcode.trim() || !/^\d{4}$/.test(postcode.trim())) {
+      throw new Error("Please add a valid 4-digit postcode before publishing.");
+    }
+
+    // Ensure postcode -> lat/lng exists (and location)
+    const pc = postcode.trim();
+    const coords = await lookupPostcodeLatLng(pc);
+    if (!coords) throw new Error("Postcode not found. Please check and try again.");
+
     await updateDoc(coachRef, {
-      name: name.trim(),
-      mobile: mobile.trim(),
-      contactFirstForRate,
-      coachingExperience: coachingExperience.trim(),
-      bio: bio.trim(),
-      playingBackground: playingBackground.trim(),
-      courtAddress: courtAddress.trim(),
-      coachingSkillLevels,
-      galleryPhotos,
+      // keep location fields consistent at publish time
+      postcode: pc,
+      lat: coords.lat,
+      lng: coords.lng,
+      location: new GeoPoint(coords.lat, coords.lng),
+
+      status: "active",
+      activatedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     } as any);
 
-    // ✅ Show confirmation popup
-    setSuccess("✅ Coach profile saved successfully!");
-
-    // ✅ Navigate back to the main Profile page after a short moment
-    setTimeout(() => {
-      router.push("/profile");
-    }, 900);
+    setStatus("active");
+    setSuccess("✅ Coach profile published! Players near you will be notified.");
   } catch (e: any) {
-    setError(e?.message ?? "Failed to save profile");
+    setError(e?.message ?? "Failed to publish coach profile.");
   } finally {
     setSaving(false);
   }
@@ -444,26 +540,37 @@ function cancelAvatarCrop() {
 
   return (
     <div className="max-w-3xl mx-auto p-4 pb-24">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">My Coach Profile</h1>
-          <p className="text-sm opacity-70">Edit your coach details and photos.</p>
-        </div>
+ <div className="flex items-start justify-between gap-3">
+  <div>
+    <h1 className="text-xl font-semibold">My Coach Profile</h1>
+    <p className="text-sm opacity-70">Edit your coach details and photos.</p>
+  </div>
 
-        <button
-          onClick={saveProfile}
-          disabled={saving}
-          className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+  <div className="flex items-center gap-2">
+    {status !== "active" ? (
+      <button
+        onClick={publishCoachProfile}
+        disabled={saving}
+        className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
+      >
+        {saving ? "Working…" : "Publish"}
+      </button>
+    ) : (
+      <div className="px-3 py-2 rounded-lg border text-sm bg-green-50 text-green-800 border-green-200">
+        Active ✅
       </div>
+    )}
 
-      {error && (
-        <div className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+    <button
+      onClick={saveProfile}
+      disabled={saving}
+      className="px-4 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
+    >
+      {saving ? "Saving…" : "Save draft"}
+    </button>
+  </div>
+</div>
+
 
       {success && (
   <div className="mt-4 rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-800">
@@ -599,6 +706,24 @@ function cancelAvatarCrop() {
             className="mt-1 w-full rounded-lg border px-3 py-2"
             placeholder="Place where coaching will take place"
           />
+          <div className="mt-3">
+  <label className="text-sm font-medium">Postcode</label>
+  <input
+    value={postcode}
+    onChange={(e) => {
+      // keep digits only, max 4
+      const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
+      setPostcode(digits);
+    }}
+    className="mt-1 w-full rounded-lg border px-3 py-2"
+    placeholder="e.g. 3000"
+    inputMode="numeric"
+  />
+  <p className="mt-1 text-xs opacity-70">
+    Used to notify nearby players when you join (and for local discovery).
+  </p>
+</div>
+
         </div>
       </div>
 

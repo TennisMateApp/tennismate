@@ -112,10 +112,19 @@ export default function ProfilePage() {
   bio: "",
   photoURL: "",
   badges: [] as string[],
-  age: "" as number | "",
+  birthYear: "" as number | "",
   gender: "",
   timestamp: null as any,
 });
+
+const derivedAge = useMemo(() => {
+  if (typeof formData.birthYear !== "number") return null;
+  const currentYear = new Date().getFullYear();
+  const age = currentYear - formData.birthYear;
+  if (!Number.isFinite(age) || age < 0 || age > 120) return null;
+  return age;
+}, [formData.birthYear]);
+
 
 // Profile photo presence (preview, stored, or freshly cropped)
 // NOTE: compute after formData is declared to avoid "Cannot access 'formData' before initialization"
@@ -169,7 +178,7 @@ setFormData({
   bio: data.bio || "",
   photoURL: data.photoURL || "",
   badges: Array.isArray(data.badges) ? data.badges : [],
-  age: typeof data.age === "number" ? data.age : "",
+  birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
   gender: typeof data.gender === "string" ? data.gender : "",
   timestamp: data.timestamp || null,
 });
@@ -231,15 +240,13 @@ setLoading(false);
 const handleChange = (e: any) => {
   const { name, value } = e.target;
 
-  if (name === "age") {
-    // allow blank, otherwise store number
-    const v = String(value).trim();
-    setFormData((prev) => ({
-      ...prev,
-      age: v === "" ? "" : Number(v),
-    }));
-    return;
-  }
+if (name === "birthYear") {
+  const digits = String(value).replace(/\D/g, "").slice(0, 4); // YYYY
+  const by = digits === "" ? "" : Number(digits);
+  setFormData((prev) => ({ ...prev, birthYear: by }));
+  return;
+}
+
 
   setFormData((prev) => ({ ...prev, [name]: value }));
 };
@@ -405,6 +412,33 @@ if (!formData.availability || formData.availability.length === 0) {
   return;
 }
 
+// Birth Year validation (18+)
+const currentYear = new Date().getFullYear();
+const by = typeof formData.birthYear === "number" ? formData.birthYear : null;
+
+if (!by) {
+  setStatus("Please enter your birth year.");
+  return;
+}
+
+const age = currentYear - by;
+
+if (!Number.isFinite(by) || by < 1900 || by > currentYear) {
+  setStatus("Please enter a valid birth year (e.g. 1994).");
+  return;
+}
+
+if (age < 18) {
+  setStatus("TennisMate is for adults only (18+).");
+  return;
+}
+
+if (age > 110) {
+  setStatus("Please enter a valid birth year (e.g. 1994).");
+  return;
+}
+
+
 // AU postcode (4 digits), VIC + NSW only for now
 const trimmedPostcode = formData.postcode.trim();
 
@@ -437,24 +471,27 @@ await setDoc(
     const { rating, ...rest } = formData; // ← strip UI-only field
     const badges = Array.isArray(formData.badges) ? formData.badges : [];
 
-    return {
-      ...rest,
-      badges,
-      // canonical fields:
-      age: formData.age === "" ? null : formData.age,
+return {
+  ...rest,
+  badges,
+  // canonical fields:
+  birthYear: formData.birthYear === "" ? null : formData.birthYear,
   gender: formData.gender || null,
-      skillBand: formData.skillBand || null,
-      skillBandLabel: toSkillLabel(formData.skillBand),
-      skillRating: formData.rating === "" ? null : formData.rating,
-      utr: formData.rating === "" ? null : formData.rating, // TEMP mirror
-      skillLevel: coarseFromBand(formData.skillBand),
-      photoURL,
-      nameLower: (formData.name || "").toLowerCase(),
-      email: user.email,
-      timestamp: serverTimestamp(),
-      profileComplete: true,
-      isMatchable: !!formData.isMatchable,
-    };
+
+  skillBand: formData.skillBand || null,
+  skillBandLabel: toSkillLabel(formData.skillBand),
+  skillRating: formData.rating === "" ? null : formData.rating,
+  utr: formData.rating === "" ? null : formData.rating, // TEMP mirror
+  skillLevel: coarseFromBand(formData.skillBand),
+
+  photoURL,
+  nameLower: (formData.name || "").toLowerCase(),
+  email: user.email,
+  timestamp: serverTimestamp(),
+  profileComplete: true,
+  isMatchable: !!formData.isMatchable,
+};
+
   })(),
   { merge: true }
 );
@@ -571,11 +608,11 @@ const handleDeleteProfile = async () => {
             </div>
 
 {/* Age + Gender pills (above email) */}
-{(typeof formData.age === "number" && formData.age > 0) || !!formData.gender ? (
+{(typeof derivedAge === "number" && derivedAge > 0) || !!formData.gender ? (
   <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-sm text-gray-600">
-    {typeof formData.age === "number" && formData.age > 0 && (
+    {typeof derivedAge === "number" && derivedAge > 0 && (
       <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
-        Age {formData.age}
+        Age {derivedAge}
       </span>
     )}
 
@@ -586,6 +623,7 @@ const handleDeleteProfile = async () => {
     )}
   </div>
 ) : null}
+
 
 {/* Email (now below age/gender) */}
 {user?.email && (
@@ -859,23 +897,26 @@ const handleDeleteProfile = async () => {
 
   {/* Age + Gender */}
 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-  <div>
-    <label className="block text-sm font-medium text-gray-800">
-      Age
-    </label>
-    <input
-      name="age"
-      type="number"
-      inputMode="numeric"
-      min={13}
-      max={100}
-      placeholder="e.g. 29"
-      value={formData.age}
-      onChange={handleChange}
-      className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600 bg-white"
-    />
-    <p className="mt-1 text-xs text-gray-500">Optional. Used to help match similar players.</p>
-  </div>
+<div>
+  <label className="block text-sm font-medium text-gray-800">
+    Birth Year <span className="text-red-600">*</span>
+  </label>
+  <input
+    name="birthYear"
+    type="text"
+    inputMode="numeric"
+    placeholder="e.g. 1994"
+    value={formData.birthYear === "" ? "" : String(formData.birthYear)}
+    onChange={handleChange}
+    maxLength={4}
+    required
+    className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600 bg-white"
+  />
+  <p className="mt-1 text-xs text-gray-500">
+    Used to confirm you’re 18+ and improve matchmaking. Not shown publicly.
+  </p>
+</div>
+
 
   <div>
     <label className="block text-sm font-medium text-gray-800">
@@ -1141,14 +1182,23 @@ const handleDeleteProfile = async () => {
       <button
   form="editProfile"
   type="submit"
-  disabled={saving || !hasPhoto || formData.availability.length === 0}
-  title={
-    !hasPhoto
-      ? "Add a profile photo to enable Save"
-      : formData.availability.length === 0
-      ? "Select at least one availability option to enable Save"
-      : undefined
-  }
+  disabled={
+  saving ||
+  !hasPhoto ||
+  formData.availability.length === 0 ||
+  formData.birthYear === ""
+}
+
+ title={
+  !hasPhoto
+    ? "Add a profile photo to enable Save"
+    : formData.availability.length === 0
+    ? "Select at least one availability option to enable Save"
+    : formData.birthYear === ""
+    ? "Enter your birth year to enable Save"
+    : undefined
+}
+
   className="rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
 >
   {saving ? "Saving…" : "Save Profile"}

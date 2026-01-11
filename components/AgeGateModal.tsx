@@ -4,45 +4,54 @@ import { useMemo, useState } from "react";
 
 type Props = {
   isOpen: boolean;
-  onSave: (age: number) => Promise<void> | void;
+  onSave: (birthYear: number) => Promise<void> | void; // ✅ birthYear
   onSignOut?: () => Promise<void> | void;
 };
 
 export default function AgeGateModal({ isOpen, onSave, onSignOut }: Props) {
-  const [ageInput, setAgeInput] = useState("");
+  const [birthYearInput, setBirthYearInput] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const ageNum = useMemo(() => {
-    const n = Number(ageInput);
+  const birthYearNum = useMemo(() => {
+    const n = Number(birthYearInput);
     return Number.isFinite(n) ? n : NaN;
-  }, [ageInput]);
+  }, [birthYearInput]);
 
   if (!isOpen) return null;
 
   const handleSave = async () => {
     setError("");
 
-    const n = Number(ageInput);
-    if (!Number.isFinite(n) || !Number.isInteger(n)) {
-      setError("Please enter a whole number (e.g. 29).");
+    const currentYear = new Date().getFullYear();
+    const by = Number(birthYearInput);
+
+    if (!Number.isFinite(by) || !Number.isInteger(by)) {
+      setError("Please enter a valid 4-digit year (e.g. 1994).");
       return;
     }
-    if (n < 18) {
+    if (by < 1900 || by > currentYear) {
+      setError(`Please enter a valid birth year (1900–${currentYear}).`);
+      return;
+    }
+
+    const age = currentYear - by;
+
+    if (age < 18) {
       setError("You must be 18+ to use TennisMate.");
       return;
     }
-    if (n > 100) {
-      setError("Please enter a valid age (18–100).");
+    if (age > 110) {
+      setError("Please enter a valid birth year.");
       return;
     }
 
     try {
       setSaving(true);
-      await onSave(n);
+      await onSave(by); // ✅ pass birthYear
     } catch (e) {
       console.error(e);
-      setError("Could not save your age. Please try again.");
+      setError("Could not save your birth year. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -53,29 +62,25 @@ export default function AgeGateModal({ isOpen, onSave, onSignOut }: Props) {
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
         <h2 className="text-xl font-semibold">Confirm your age</h2>
         <p className="mt-2 text-sm text-gray-700">
-          TennisMate is for adults only. Please enter your age to continue.
-Age helps us recommend better matches by prioritising players in a similar age range and improving compatibility. You can still match with anyone, and your age won’t be publicly displayed.
+          TennisMate is for adults only. Please enter your birth year to continue.
+          Birth year helps improve match recommendations. It won’t be publicly displayed.
         </p>
 
         <div className="mt-4">
           <label className="block text-sm font-medium mb-1">
-            Age <span className="text-red-600">*</span>
+            Birth Year <span className="text-red-600">*</span>
           </label>
 
           <input
-            type="number"
+            type="text"
             inputMode="numeric"
-            min={18}
-            max={100}
-            step={1}
-            value={ageInput}
+            value={birthYearInput}
             onChange={(e) => {
-              // allow typing freely, but keep it clean
-              const digits = e.target.value.replace(/\D/g, "").slice(0, 3);
-              setAgeInput(digits);
+              const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
+              setBirthYearInput(digits);
               setError("");
             }}
-            placeholder="e.g. 29"
+            placeholder="e.g. 1994"
             className="w-full rounded-lg border border-gray-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
           />
 
@@ -85,7 +90,7 @@ Age helps us recommend better matches by prioritising players in a similar age r
         <button
           type="button"
           onClick={handleSave}
-          disabled={saving || !ageInput || !Number.isFinite(ageNum)}
+          disabled={saving || birthYearInput.length !== 4 || !Number.isFinite(birthYearNum)}
           className={`mt-5 w-full rounded-lg bg-green-600 px-4 py-2.5 font-semibold text-white hover:bg-green-700 ${
             saving ? "opacity-70" : ""
           }`}

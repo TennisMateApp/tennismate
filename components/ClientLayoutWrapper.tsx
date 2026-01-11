@@ -265,34 +265,50 @@ void trackSetUserId(u.uid);
 const playerRef = doc(db, "players", u.uid);
 
 unsubPlayer = onSnapshot(playerRef, (docSnap) => {
+  // Always block age gate on public routes / verify flow
+  const canShowGate = !PUBLIC_ROUTES.has(pathname || "") && !showVerify;
+
   if (docSnap.exists()) {
     const data = docSnap.data() as any;
 
-    setPhotoURL(data.photoURL || null);
+    setPhotoURL(typeof data.photoURL === "string" ? data.photoURL : null);
     setProfileComplete(data.profileComplete === true);
 
-    // ✅ AGE GATE: show modal if missing or under 18
-    const age = typeof data.age === "number" ? data.age : null;
-    const needsAge = !age || age < 18;
+    // ✅ AGE GATE (birthYear): show modal if missing/invalid or under 18
+    const birthYear =
+      typeof data.birthYear === "number" && Number.isFinite(data.birthYear)
+        ? data.birthYear
+        : null;
 
-    // Don't block public/verify routes (avoid fighting your verify-email gate)
-    if (!PUBLIC_ROUTES.has(pathname || "") && !showVerify) {
-      setShowAgeGate(needsAge);
+    const currentYear = new Date().getFullYear();
+    const computedAge = birthYear ? currentYear - birthYear : null;
+
+    const needsBirthYear =
+      !birthYear ||
+      birthYear < 1900 ||
+      birthYear > currentYear ||
+      computedAge === null ||
+      computedAge < 18 ||
+      computedAge > 110;
+
+    if (canShowGate) {
+      setShowAgeGate(needsBirthYear);
     } else {
       setShowAgeGate(false);
     }
   } else {
+    // No player doc
     setPhotoURL(null);
     setProfileComplete(false);
 
-    // No player doc: treat as needs age/profile setup (but don't block verify/public routes)
-    if (!PUBLIC_ROUTES.has(pathname || "") && !showVerify) {
+    if (canShowGate) {
       setShowAgeGate(true);
     } else {
       setShowAgeGate(false);
     }
   }
 });
+
 
 
 
@@ -576,18 +592,17 @@ if (shouldGateToVerify) {
 
     <PushClientOnly />
 
-    <AgeGateModal
+   <AgeGateModal
   isOpen={!!user && showAgeGate && !PUBLIC_ROUTES.has(pathname || "") && !showVerify}
-  onSave={async (age) => {
+  onSave={async (birthYear) => {
     const u = auth.currentUser;
     if (!u) return;
 
-    // ✅ safest: merge in case player doc doesn't exist for some old account
     await setDoc(
       doc(db, "players", u.uid),
       {
-        age,
-        ageUpdatedAt: serverTimestamp(),
+        birthYear, // ✅ now defined (it's the param)
+        birthYearUpdatedAt: serverTimestamp(),
       },
       { merge: true }
     );
@@ -599,6 +614,7 @@ if (shouldGateToVerify) {
     router.push("/login");
   }}
 />
+
 
 {!hideAllNav && (
   <>

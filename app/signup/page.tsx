@@ -44,7 +44,7 @@ const [formData, setFormData] = useState({
   password: "",
   postcode: "",
   gender: "" as "" | "Male" | "Female" | "Non-binary" | "Other",
-  age: "",
+  birthYear: "",
   skillBand: "" as SkillBand | "",
   rating: "" as number | "",
   availability: [] as string[],
@@ -87,7 +87,15 @@ const [formData, setFormData] = useState({
     !!formData.password &&
     !!formData.postcode &&
     !!formData.skillBand &&
-    !!formData.age &&     
+(() => {
+  if (!formData.birthYear) return false;
+  const by = Number(formData.birthYear);
+  const currentYear = new Date().getFullYear();
+  const age = currentYear - by;
+
+  return Number.isFinite(by) && by >= 1900 && by <= currentYear && age >= 18 && age <= 110;
+})() &&
+
     formData.availability.length > 0 &&
     hasPhoto; // ← MANDATORY PHOTO
 
@@ -128,13 +136,13 @@ const [formData, setFormData] = useState({
       return;
     }
 
-if (name === "age") {
-  // allow typing freely, but only digits
-  const digits = value.replace(/\D/g, "").slice(0, 3); // up to 3 digits
-  setFormData((prev) => ({ ...prev, age: digits }));
-  setErrors((prev) => ({ ...prev, age: "" }));
+if (name === "birthYear") {
+  const digits = value.replace(/\D/g, "").slice(0, 4); // YYYY
+  setFormData((prev) => ({ ...prev, birthYear: digits }));
+  setErrors((prev) => ({ ...prev, birthYear: "" }));
   return;
 }
+
 
 
 
@@ -207,19 +215,27 @@ if (name === "age") {
       newErrors.rating = "TMR must be between 1.00 and 16.50.";
     }
 
-    if (!formData.age) {
-  newErrors.age = "Age is required (18+).";
-  {errors.age && <p className="text-sm text-red-600 mt-1">{errors.age}</p>}
+const currentYear = new Date().getFullYear();
+
+if (!formData.birthYear) {
+  newErrors.birthYear = "Birth year is required (18+).";
 } else {
-  const ageNum = Number(formData.age);
-  if (!Number.isFinite(ageNum) || ageNum < 18 || ageNum > 100) {
-    newErrors.age = "You must be 18+ to use TennisMate.";
+  const by = Number(formData.birthYear);
+  const age = currentYear - by;
+
+  // Reasonable bounds to prevent typos
+  if (!Number.isFinite(by) || by < 1900 || by > currentYear) {
+    newErrors.birthYear = "Please enter a valid year (e.g. 1994).";
+  } else if (age < 18) {
+    newErrors.birthYear = "TennisMate is for adults only (18+).";
+  } else if (age > 110) {
+    newErrors.birthYear = "Please enter a valid year (e.g. 1994).";
   }
 }
 
+setErrors(newErrors);
+if (Object.keys(newErrors).length > 0) return;
 
-    setErrors(newErrors);
-    if (Object.keys(newErrors).length > 0) return;
 
     setStatus("Submitting...");
 
@@ -275,7 +291,7 @@ await setDoc(doc(db, "players", user.uid), {
   postcode: formData.postcode,
 
   gender: formData.gender || null,
-  age: formData.age ? Number(formData.age) : null,
+  birthYear: formData.birthYear ? Number(formData.birthYear) : null,
 
   skillRating: ratingOrNull,
   utr: ratingOrNull,
@@ -486,26 +502,25 @@ await setDoc(doc(db, "players", user.uid), {
 </select>
 {errors.gender && <p className="text-sm text-red-600 mt-1">{errors.gender}</p>}
 
-{/* Age (optional) */}
+{/* Birth Year (required) */}
 <label className="block text-sm font-medium mb-1">
-  Age <span className="text-red-600">*</span>
+  Birth Year <span className="text-red-600">*</span>
 </label>
 <input
-  type="number"
-  name="age"
-  min={18}
-  max={100}
-  step={1}
+  type="text"
+  name="birthYear"
   inputMode="numeric"
-  placeholder="e.g. 29"
-  value={formData.age}
+  placeholder="e.g. 1994"
+  value={formData.birthYear}
   onChange={handleChange}
+  maxLength={4}
   className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
 />
-{errors.age && <p className="text-sm text-red-600 mt-1">{errors.age}</p>}
+{errors.birthYear && <p className="text-sm text-red-600 mt-1">{errors.birthYear}</p>}
 <p className="text-xs text-gray-500">
-  You must be 18+ to join TennisMate.
+  Used to confirm you’re 18+ and to improve matchmaking. Your birth year is not shown publicly.
 </p>
+
 
 
               {/* TMR (optional) */}
