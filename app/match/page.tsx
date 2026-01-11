@@ -20,15 +20,17 @@ interface Player {
   id: string;
   name: string;
   postcode: string;
-  skillLevel?: string;           // legacy (optional)
-  skillBand?: SkillBand | "";    // new
+  skillLevel?: string;
+  skillBand?: SkillBand | "";
   skillBandLabel?: string | null;
-  utr?: number | null;           // new
+  utr?: number | null;
   skillRating?: number | null;
   availability: string[];
   bio: string;
   email: string;
   photoURL?: string;
+  age?: number | null;        // ✅ NEW
+  gender?: string | null;     // ✅ NEW
   timestamp?: any;
   score?: number;
   distance?: number;
@@ -104,6 +106,19 @@ function utrPoints(gap:number){
   return 0;
 }
 
+type AgeBand = "" | "18-24" | "25-34" | "35-44" | "45-54" | "55+";
+
+const inAgeBand = (age: number, band: AgeBand) => {
+  if (band === "") return true; // Any
+  if (band === "18-24") return age >= 18 && age <= 24;
+  if (band === "25-34") return age >= 25 && age <= 34;
+  if (band === "35-44") return age >= 35 && age <= 44;
+  if (band === "45-54") return age >= 45 && age <= 54;
+  if (band === "55+") return age >= 55;
+  return true;
+};
+
+
 
 function getDistanceFromLatLonInKm(
   lat1: number,
@@ -135,6 +150,11 @@ export default function MatchPage() {
 const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 const MAX_DISTANCE_KM = 50; // hard cutoff to prevent interstate matches
   const [matchMode, setMatchMode] = useState<"auto"|"skill"|"utr">("auto");
+
+type GenderFilter = "" | "Male" | "Female" | "Non-binary" | "Other";
+
+const [ageBand, setAgeBand] = useState<AgeBand>("");
+const [genderFilter, setGenderFilter] = useState<GenderFilter>("");
 
 const router = useRouter();
 const params = useSearchParams();
@@ -186,7 +206,16 @@ setMyProfile({ ...myData, skillBand: myBand });
 
     // 4) All players + score (mode-aware)
     const snapshot = await getDocs(collection(db, "players"));
-    const allPlayers = snapshot.docs.map((d) => ({ ...(d.data() as Player), id: d.id }));
+    const allPlayers = snapshot.docs.map((d) => {
+  const data = d.data() as any;
+  return {
+    ...(data as Player),
+    id: d.id,
+    age: typeof data.age === "number" ? data.age : null,
+    gender: typeof data.gender === "string" ? data.gender : null,
+  } as Player;
+});
+
 
    const meBand   = myBand;
 const meRating = (myData.skillRating ?? myData.utr) ?? null; // ✅ prefer skillRating
@@ -484,9 +513,26 @@ const filteredMatches = useMemo(() => {
     // Hide already contacted?
     if (hideContacted && sentRequests.has(m.id)) return false;
 
+    // ✅ Gender filter:
+    // - If "Any" (""), include everyone (including unknown gender)
+    // - If specific gender chosen, only include exact matches (unknown excluded)
+    if (genderFilter !== "") {
+      if (!m.gender) return false;
+      if (m.gender !== genderFilter) return false;
+    }
+
+    // ✅ Age filter:
+    // - If "Any" (""), include everyone (including unknown age)
+    // - If specific band chosen, only include ages within band (unknown excluded)
+    if (ageBand !== "") {
+      if (typeof m.age !== "number") return false;
+      if (!inAgeBand(m.age, ageBand)) return false;
+    }
+
     return true;
   });
-}, [rawMatches, hideContacted, myProfile, sentRequests]);
+}, [rawMatches, hideContacted, myProfile, sentRequests, ageBand, genderFilter]);
+
 
 
 
@@ -711,6 +757,44 @@ if (loading) {
       </div>
     </div>
 
+        {/* Row 2.5: Age/Gender filters */}
+<div className="grid grid-cols-2 gap-3 sm:flex sm:items-end sm:gap-4">
+  <div className="min-w-0">
+    <label className="block text-xs font-medium text-gray-600 mb-1">
+      Age
+    </label>
+    <select
+      value={ageBand}
+      onChange={(e) => setAgeBand(e.target.value as any)}
+      className="w-full text-sm border rounded-lg px-2 py-2"
+    >
+      <option value="">Any</option>
+      <option value="18-24">18–24</option>
+      <option value="25-34">25–34</option>
+      <option value="35-44">35–44</option>
+      <option value="45-54">45–54</option>
+      <option value="55+">55+</option>
+    </select>
+  </div>
+
+  <div className="min-w-0">
+    <label className="block text-xs font-medium text-gray-600 mb-1">
+      Gender
+    </label>
+    <select
+      value={genderFilter}
+      onChange={(e) => setGenderFilter(e.target.value as any)}
+      className="w-full text-sm border rounded-lg px-2 py-2"
+    >
+      <option value="">Any</option>
+      <option value="Male">Male</option>
+      <option value="Female">Female</option>
+      <option value="Non-binary">Non-binary</option>
+      <option value="Other">Other</option>
+    </select>
+  </div>
+</div>
+
     {/* Row 3: Toggle */}
     <label className="flex items-center gap-2 text-sm">
       <input
@@ -724,6 +808,7 @@ if (loading) {
       />
       Hide contacted
     </label>
+
   </div>
 </div>
 
