@@ -15,8 +15,18 @@ import {
 import { GiTennisBall, GiTennisRacket } from "react-icons/gi";
 
 import {
-  collection, query, where, onSnapshot, getDoc, doc, updateDoc, writeBatch, serverTimestamp
+  collection,
+  query,
+  where,
+  onSnapshot,
+  getDoc,
+  doc,
+  setDoc,
+  updateDoc,
+  writeBatch,
+  serverTimestamp,
 } from "firebase/firestore";
+
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import dynamic from "next/dynamic";
@@ -39,6 +49,7 @@ import BackButtonHandler from "@/components/BackButtonHandler";
 import GetTheAppPrompt from "@/components/growth/GetTheAppPrompt";
 import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { track, trackSetUserId } from "@/lib/track";
+import AgeGateModal from "@/components/AgeGateModal";
 
 
 function useAppBootLoader() {
@@ -180,7 +191,7 @@ const isActive = (href: string) =>
 
 const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
 
-
+const [showAgeGate, setShowAgeGate] = useState(false);
 
 // Show "Matches" instead of "Events" when the user is in the match flow
 const inMatchFlow =
@@ -251,18 +262,38 @@ void trackSetUserId(u.uid);
       setUserOnboardingSeen(seen);
       setNeedsTour((seen ?? 0) < ONBOARDING_VERSION);
 
-   const playerRef = doc(db, "players", u.uid);
+const playerRef = doc(db, "players", u.uid);
 
-   unsubPlayer = onSnapshot(playerRef, (docSnap) => {
+unsubPlayer = onSnapshot(playerRef, (docSnap) => {
   if (docSnap.exists()) {
     const data = docSnap.data() as any;
+
     setPhotoURL(data.photoURL || null);
     setProfileComplete(data.profileComplete === true);
+
+    // ✅ AGE GATE: show modal if missing or under 18
+    const age = typeof data.age === "number" ? data.age : null;
+    const needsAge = !age || age < 18;
+
+    // Don't block public/verify routes (avoid fighting your verify-email gate)
+    if (!PUBLIC_ROUTES.has(pathname || "") && !showVerify) {
+      setShowAgeGate(needsAge);
+    } else {
+      setShowAgeGate(false);
+    }
   } else {
     setPhotoURL(null);
-    setProfileComplete(false); // no player doc = not complete
+    setProfileComplete(false);
+
+    // No player doc: treat as needs age/profile setup (but don't block verify/public routes)
+    if (!PUBLIC_ROUTES.has(pathname || "") && !showVerify) {
+      setShowAgeGate(true);
+    } else {
+      setShowAgeGate(false);
+    }
   }
 });
+
 
 
       unsubInbox = onSnapshot(
@@ -353,6 +384,7 @@ useEffect(() => {
   if (needsTour !== true) return;          // ✅ only when known + needed
   if (tourShownThisSession.current) return;
   if (hideAllNav) return;
+  if (showAgeGate) return; // ✅ don't show tour while age gate is open
 
   const t = setTimeout(() => {
     tourShownThisSession.current = true;
@@ -361,7 +393,7 @@ useEffect(() => {
   }, 300);
 
   return () => clearTimeout(t);
-}, [user, pathname, needsTour, hideAllNav]);
+}, [user, pathname, needsTour, hideAllNav, showAgeGate]);
 
 
 
@@ -391,6 +423,8 @@ useEffect(() => {
 
   // don't fight email verification gate
   if (showVerify) return;
+    if (showAgeGate) return; // ✅ don't redirect while age modal is blocking
+
 
   // routes we allow even when profile is incomplete
   const allowedPrefixes = [
@@ -408,7 +442,7 @@ useEffect(() => {
   if (profileComplete === false) {
     router.replace("/profile?edit=true");
   }
-}, [user, profileComplete, showVerify, pathname, router]);
+}, [user, profileComplete, showVerify, showAgeGate, pathname, router]);
 
 useEffect(() => {
   function handleClickOutside(event: MouseEvent) {
@@ -448,6 +482,26 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
 function dismissOnboardingTour() {
   setShowTour(false);
 }
+
+useEffect(() => {
+  if (!user) {
+    setShowAgeGate(false);
+    return;
+  }
+
+  // Never show age gate on public routes (login/signup/verify-email)
+  if (PUBLIC_ROUTES.has(pathname || "")) {
+    setShowAgeGate(false);
+    return;
+  }
+
+  // Don't fight the email verification gate
+  if (showVerify) {
+    setShowAgeGate(false);
+    return;
+  }
+}, [user, pathname, showVerify]);
+
 
 
 async function completeOnboardingTour() {
@@ -521,6 +575,31 @@ if (shouldGateToVerify) {
       <BackButtonHandler />
 
     <PushClientOnly />
+
+    <AgeGateModal
+  isOpen={!!user && showAgeGate && !PUBLIC_ROUTES.has(pathname || "") && !showVerify}
+  onSave={async (age) => {
+    const u = auth.currentUser;
+    if (!u) return;
+
+    // ✅ safest: merge in case player doc doesn't exist for some old account
+    await setDoc(
+      doc(db, "players", u.uid),
+      {
+        age,
+        ageUpdatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    setShowAgeGate(false);
+  }}
+  onSignOut={async () => {
+    await signOut(auth);
+    router.push("/login");
+  }}
+/>
+
 {!hideAllNav && (
   <>
 <header

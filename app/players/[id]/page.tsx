@@ -307,12 +307,6 @@ setMatchStats({
                 </span>
               ) : null}
 
-              {typeof player.age === "number" && player.age > 0 ? (
-  <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
-    Age {player.age}
-  </span>
-) : null}
-
 {player.gender ? (
   <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
     {player.gender}

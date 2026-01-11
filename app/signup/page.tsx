@@ -38,16 +38,19 @@ export default function SignupPage() {
   const [existingEmail, setExistingEmail] = useState<string>("");
   const router = useRouter();
 
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    password: "",
-    postcode: "",
-    skillBand: "" as SkillBand | "",
-    rating: "" as number | "",
-    availability: [] as string[],
-    bio: "",
-  });
+const [formData, setFormData] = useState({
+  name: "",
+  email: "",
+  password: "",
+  postcode: "",
+  gender: "" as "" | "Male" | "Female" | "Non-binary" | "Other",
+  age: "",
+  skillBand: "" as SkillBand | "",
+  rating: "" as number | "",
+  availability: [] as string[],
+  bio: "",
+});
+
 
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
@@ -84,6 +87,7 @@ export default function SignupPage() {
     !!formData.password &&
     !!formData.postcode &&
     !!formData.skillBand &&
+    !!formData.age &&     
     formData.availability.length > 0 &&
     hasPhoto; // ← MANDATORY PHOTO
 
@@ -123,6 +127,17 @@ export default function SignupPage() {
       setErrors((prev) => ({ ...prev, rating: "" }));
       return;
     }
+
+if (name === "age") {
+  // allow typing freely, but only digits
+  const digits = value.replace(/\D/g, "").slice(0, 3); // up to 3 digits
+  setFormData((prev) => ({ ...prev, age: digits }));
+  setErrors((prev) => ({ ...prev, age: "" }));
+  return;
+}
+
+
+
 
     setFormData((prev) => ({ ...prev, [name]: value }));
     setErrors((prev) => ({ ...prev, [name]: "" }));
@@ -192,6 +207,17 @@ export default function SignupPage() {
       newErrors.rating = "TMR must be between 1.00 and 16.50.";
     }
 
+    if (!formData.age) {
+  newErrors.age = "Age is required (18+).";
+  {errors.age && <p className="text-sm text-red-600 mt-1">{errors.age}</p>}
+} else {
+  const ageNum = Number(formData.age);
+  if (!Number.isFinite(ageNum) || ageNum < 18 || ageNum > 100) {
+    newErrors.age = "You must be 18+ to use TennisMate.";
+  }
+}
+
+
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
 
@@ -242,25 +268,26 @@ const userCredential = await createUserWithEmailAndPassword(
   const skillBandValue = formData.skillBand || null;
   const skillBandLabel = toSkillLabel(skillBandValue);
 
-  await setDoc(doc(db, "players", user.uid), {
-    name: formData.name,
-    nameLower: (formData.name || "").toLowerCase(),
-    email,
-    postcode: formData.postcode,
-    skillRating: ratingOrNull,
-    utr: ratingOrNull, // TEMP
+await setDoc(doc(db, "players", user.uid), {
+  name: formData.name,
+  nameLower: (formData.name || "").toLowerCase(),
+  email,
+  postcode: formData.postcode,
 
-    // Keep canonical value for logic
-    skillBand: skillBandValue,
-    // NEW: human-readable version for display
-    skillBandLabel,
+  gender: formData.gender || null,
+  age: formData.age ? Number(formData.age) : null,
 
-    availability: formData.availability,
-    bio: formData.bio,
-    photoURL, // guaranteed real image
-    profileComplete: true,
-    timestamp: serverTimestamp(),
-  });
+  skillRating: ratingOrNull,
+  utr: ratingOrNull,
+  skillBand: skillBandValue,
+  skillBandLabel,
+  availability: formData.availability,
+  bio: formData.bio,
+  photoURL,
+  profileComplete: true,
+  timestamp: serverTimestamp(),
+});
+
 
 
         setStatus("");
@@ -440,6 +467,46 @@ const userCredential = await createUserWithEmailAndPassword(
                 />
               </div>
               {errors.postcode && <p className="text-sm text-red-600 mb-2">{errors.postcode}</p>}
+
+              {/* Gender (optional) */}
+<label className="block text-sm font-medium mb-1">
+  Gender (optional)
+</label>
+<select
+  name="gender"
+  value={formData.gender}
+  onChange={handleChange}
+  className="w-full pl-3 pr-8 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+>
+  <option value="">Prefer not to say</option>
+  <option value="Male">Male</option>
+  <option value="Female">Female</option>
+  <option value="Non-binary">Non-binary</option>
+  <option value="Other">Other</option>
+</select>
+{errors.gender && <p className="text-sm text-red-600 mt-1">{errors.gender}</p>}
+
+{/* Age (optional) */}
+<label className="block text-sm font-medium mb-1">
+  Age <span className="text-red-600">*</span>
+</label>
+<input
+  type="number"
+  name="age"
+  min={18}
+  max={100}
+  step={1}
+  inputMode="numeric"
+  placeholder="e.g. 29"
+  value={formData.age}
+  onChange={handleChange}
+  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+/>
+{errors.age && <p className="text-sm text-red-600 mt-1">{errors.age}</p>}
+<p className="text-xs text-gray-500">
+  You must be 18+ to join TennisMate.
+</p>
+
 
               {/* TMR (optional) */}
               <div className="grid gap-2">
