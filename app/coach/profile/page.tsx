@@ -203,7 +203,7 @@ async function getPlayerDefaults(uid: string) {
   setCourtAddress(starter.courtAddress);
   setCoachingSkillLevels(starter.coachingSkillLevels);
   setGalleryPhotos(starter.galleryPhotos);
-  setPostcode(starter.postcode);
+  setPostcode(starter.postcode ?? "");
   setStatus("draft");
 
   return;
