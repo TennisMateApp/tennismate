@@ -216,6 +216,46 @@ export const deleteMyAccount = onCall(async (request) => {
 }
 });
 
+export const deleteMyCoachProfile = onCall(async (request) => {
+  const runId =
+    (crypto as any).randomUUID?.() || Math.random().toString(36).slice(2);
+
+  try {
+    const uid = request.auth?.uid;
+
+    if (!uid) {
+      console.log(`[DeleteCoach][${runId}] unauthenticated`);
+      throw new HttpsError(
+        "unauthenticated",
+        "You must be logged in to delete your coach profile.",
+        { runId }
+      );
+    }
+
+    console.log(`[DeleteCoach][${runId}] START`, { uid });
+
+    // 1) Delete Firestore coach doc
+    const coachRef = db.collection("coaches").doc(uid);
+    await coachRef.delete();
+    console.log(`[DeleteCoach][${runId}] Firestore coach doc deleted`, { path: `coaches/${uid}` });
+
+    // 2) Delete all Storage files under coaches/{uid}/
+    // NOTE: This removes avatar + gallery + any nested paths.
+    const bucket = admin.storage().bucket();
+    await bucket.deleteFiles({ prefix: `coaches/${uid}/` });
+    console.log(`[DeleteCoach][${runId}] Storage deleted`, { prefix: `coaches/${uid}/` });
+
+    console.log(`[DeleteCoach][${runId}] COMPLETE`, { uid });
+    return { success: true, runId };
+  } catch (e: any) {
+    console.error(`[DeleteCoach][${runId}] FAILED`, e?.message || String(e));
+    throw new HttpsError("internal", "Delete coach profile failed.", {
+      runId,
+      message: e?.message || String(e),
+    });
+  }
+});
+
 
 
 // --- Route helper (handles absolute URLs and relative paths) ---

@@ -158,16 +158,16 @@ badge: (
 },
 
     {
-      key: 'find-coach',
-      title: 'Find a Coach',
-      description: 'Book 1:1 or group lessons (coming soon).',
-      icon: null,
-      href: '#',
-      actionLabel: 'Coming soon',
-      status: 'soon',
-      imageSrc: '/images/coach.jpg',
-      imagePosition: 'center 20%',
-    },
+  key: "find-coach",
+  title: "Find a Coach",
+  description: "Browse local coaches and view profiles.",
+  icon: null,
+  href: "/coaches",
+  status: "live",
+  imageSrc: "/images/coach.jpg",
+  imagePosition: "center 20%",
+},
+
 
     {
       key: 'competitive',

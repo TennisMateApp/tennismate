@@ -84,6 +84,10 @@ export default function ProfilePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any>(null);
+  const [userRole, setUserRole] = useState<string>("");
+  const [coachInvited, setCoachInvited] = useState<boolean>(false);
+  const canSeeCoachingSection =
+  coachInvited === true || userRole === "coach" || userRole === "both";
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
@@ -104,6 +108,7 @@ export default function ProfilePage() {
   skillBand: "" as SkillBand | "",
   rating: "" as number | "",
   availability: [] as string[],
+  isMatchable: true,
   bio: "",
   photoURL: "",
   badges: [] as string[],
@@ -130,6 +135,14 @@ const safeBadges = Array.isArray(formData.badges) ? formData.badges : [];
     if (!currentUser) return;
     setUser(currentUser);
 
+    const userRef = doc(db, "users", currentUser.uid);
+    const userSnap = await getDoc(userRef);
+    const u = userSnap.exists() ? (userSnap.data() as any) : {};
+
+    setUserRole(typeof u.role === "string" ? u.role : "");
+    setCoachInvited(u.coachInvited === true);
+
+
     const playerRef = doc(db, "players", currentUser.uid);
     const snap = await getDoc(playerRef);
     const data = snap.data() || {};
@@ -152,6 +165,7 @@ setFormData({
   skillBand: derivedBand || "",
   rating: typeof ratingNumber === "number" ? ratingNumber : "",
   availability: data.availability || [],
+  isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
   bio: data.bio || "",
   photoURL: data.photoURL || "",
   badges: Array.isArray(data.badges) ? data.badges : [],
@@ -302,6 +316,70 @@ const handleRemovePhoto = async () => {
   }
 };
 
+const handleActivateCoachProfile = async () => {
+  if (!user) return;
+
+  try {
+    setSaving(true);
+    setStatus("Activating coach profile...");
+
+    const uid = user.uid;
+
+    // If they already have a player profile, make them BOTH so Match Me still works
+    const playerSnap = await getDoc(doc(db, "players", uid));
+    const nextRole = playerSnap.exists() ? "both" : "coach";
+
+    // 1) Update users doc to grant coach access
+    await setDoc(
+      doc(db, "users", uid),
+      {
+        role: nextRole,
+        coachInvited: false, // consume invite
+        coachActivatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    // 2) Ensure coaches/{uid} exists (create starter doc if missing)
+    const coachRef = doc(db, "coaches", uid);
+    const coachSnap = await getDoc(coachRef);
+
+    if (!coachSnap.exists()) {
+      await setDoc(
+        coachRef,
+        {
+          userId: uid,
+          name: formData.name || "",
+avatar: formData.photoURL || null,
+          mobile: "",
+          contactFirstForRate: true,
+          coachingExperience: "",
+          bio: "",
+          playingBackground: "",
+          courtAddress: "",
+          coachingSkillLevels: [],
+          galleryPhotos: [],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    // local state update
+    setUserRole(nextRole);
+    setCoachInvited(false);
+
+    setStatus("✅ Coach profile activated!");
+    router.push("/coach/profile");
+  } catch (e: any) {
+    console.error(e);
+    setStatus(e?.message ?? "❌ Failed to activate coach profile.");
+  } finally {
+    setSaving(false);
+  }
+};
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -375,6 +453,7 @@ await setDoc(
       email: user.email,
       timestamp: serverTimestamp(),
       profileComplete: true,
+      isMatchable: !!formData.isMatchable,
     };
   })(),
   { merge: true }
@@ -491,25 +570,32 @@ const handleDeleteProfile = async () => {
               )}
             </div>
 
-            {user?.email && (
-              <p className="mt-1 text-sm text-gray-500">
-                <a href={`mailto:${user.email}`} className="hover:underline">
-                  {user.email}
-                </a>
-              </p>
-            )}
+{/* Age + Gender pills (above email) */}
+{(typeof formData.age === "number" && formData.age > 0) || !!formData.gender ? (
+  <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-sm text-gray-600">
+    {typeof formData.age === "number" && formData.age > 0 && (
+      <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
+        Age {formData.age}
+      </span>
+    )}
 
-            {typeof formData.age === "number" && formData.age > 0 && (
-  <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
-    Age {formData.age}
-  </span>
+    {formData.gender && (
+      <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
+        {formData.gender}
+      </span>
+    )}
+  </div>
+) : null}
+
+{/* Email (now below age/gender) */}
+{user?.email && (
+  <p className="mt-1 text-sm text-gray-500">
+    <a href={`mailto:${user.email}`} className="hover:underline">
+      {user.email}
+    </a>
+  </p>
 )}
 
-{formData.gender && (
-  <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
-    {formData.gender}
-  </span>
-)}
 
 
             {formData.bio && (
@@ -609,6 +695,81 @@ const handleDeleteProfile = async () => {
               <p className="mt-2 text-sm text-gray-600">No availability set.</p>
             )}
           </section>
+
+
+      {/* COACH (invite-only) */}
+{canSeeCoachingSection && (
+  <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+    <h2 className="text-lg font-semibold">Coaching</h2>
+    <p className="mt-1 text-sm text-gray-600">
+      Offer lessons and appear in the coach directory.
+    </p>
+
+    <div className="mt-3 flex flex-wrap gap-2">
+      {(userRole === "coach" || userRole === "both") ? (
+        <button
+          type="button"
+          onClick={() => router.push("/coach/profile")}
+          className="rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-green-700"
+        >
+          Edit Coach Profile
+        </button>
+      ) : coachInvited ? (
+        <button
+          type="button"
+          onClick={handleActivateCoachProfile}
+          disabled={saving}
+          className="rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 disabled:opacity-60"
+        >
+          {saving ? "Activating..." : "Activate Coach Profile"}
+        </button>
+      ) : null}
+    </div>
+  </section>
+)}
+
+         {/* Coach-only: Match Me availability status (view mode) */}
+{(userRole === "coach" || userRole === "both") && (
+  <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <h2 className="text-lg font-semibold">Matchmaking availability</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          This controls whether your player profile appears in Match Me suggestions.
+        </p>
+      </div>
+
+      <span
+        className={[
+          "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border",
+          formData.isMatchable
+            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+            : "bg-gray-50 text-gray-700 border-gray-200",
+        ].join(" ")}
+      >
+        {formData.isMatchable ? "Available" : "Not available"}
+      </span>
+    </div>
+
+    <div className="mt-3 text-xs text-gray-600">
+      Status:{" "}
+      <strong className={formData.isMatchable ? "text-emerald-700" : "text-gray-700"}>
+        {formData.isMatchable ? "Visible in Match Me" : "Hidden from Match Me"}
+      </strong>
+    </div>
+
+    <div className="mt-4">
+      <button
+        type="button"
+        onClick={() => router.push("/profile?edit=true")}
+        className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-gray-50"
+      >
+        Change availability
+      </button>
+    </div>
+  </section>
+)}
+
 
 {/* BADGES */}
 <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm" aria-labelledby="badges-heading">
@@ -812,6 +973,46 @@ const handleDeleteProfile = async () => {
       ))}
     </div>
   </fieldset>
+
+  {/* Match Me visibility */}
+<div className="rounded-2xl border border-gray-200 bg-white p-4">
+  <div className="flex items-start justify-between gap-4">
+    <div>
+      <div className="text-sm font-semibold text-gray-800">Match Me visibility</div>
+      <p className="mt-1 text-xs text-gray-500">
+        Turn this off to hide your player profile from Match Me suggestions.
+      </p>
+    </div>
+
+    <button
+      type="button"
+      onClick={() =>
+        setFormData((p) => ({ ...p, isMatchable: !p.isMatchable }))
+      }
+      className={[
+        "relative inline-flex h-7 w-12 items-center rounded-full transition",
+        formData.isMatchable ? "bg-green-600" : "bg-gray-300",
+      ].join(" ")}
+      aria-pressed={formData.isMatchable}
+      aria-label="Toggle Match Me visibility"
+    >
+      <span
+        className={[
+          "inline-block h-5 w-5 transform rounded-full bg-white transition",
+          formData.isMatchable ? "translate-x-6" : "translate-x-1",
+        ].join(" ")}
+      />
+    </button>
+  </div>
+
+  <div className="mt-2 text-xs">
+    Status:{" "}
+    <span className={formData.isMatchable ? "text-green-700 font-semibold" : "text-gray-700 font-semibold"}>
+      {formData.isMatchable ? "Visible in Match Me" : "Hidden from Match Me"}
+    </span>
+  </div>
+</div>
+
 
   {/* Bio */}
   <div>

@@ -31,6 +31,7 @@ interface Player {
   photoURL?: string;
   age?: number | null;        // ✅ NEW
   gender?: string | null;     // ✅ NEW
+  isMatchable?: boolean | null; // ✅ NEW
   timestamp?: any;
   score?: number;
   distance?: number;
@@ -147,9 +148,10 @@ export default function MatchPage() {
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<string>("score");
   const PAGE_SIZE = 10;
-const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-const MAX_DISTANCE_KM = 50; // hard cutoff to prevent interstate matches
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const MAX_DISTANCE_KM = 50; // hard cutoff to prevent interstate matches
   const [matchMode, setMatchMode] = useState<"auto"|"skill"|"utr">("auto");
+  const [myProfileHidden, setMyProfileHidden] = useState(false);
 
 type GenderFilter = "" | "Male" | "Female" | "Non-binary" | "Other";
 
@@ -182,6 +184,16 @@ const [lastUpdated, setLastUpdated] = useState<number | null>(null);
     const mySnap = await getDoc(myRef);
     if (!mySnap.exists()) return;
     const myData = mySnap.data() as Player;
+    const hidden = (myData as any)?.isMatchable === false;
+setMyProfileHidden(hidden);
+
+// If hidden, stop here — don't compute matches
+if (hidden) {
+  setRawMatches([]);
+  setLastUpdated(Date.now());
+  return;
+}
+
    const myBand = (
   myData.skillBand ||
   skillFromUTR((myData.skillRating ?? myData.utr) ?? null) ||
@@ -206,15 +218,18 @@ setMyProfile({ ...myData, skillBand: myBand });
 
     // 4) All players + score (mode-aware)
     const snapshot = await getDocs(collection(db, "players"));
-    const allPlayers = snapshot.docs.map((d) => {
+const allPlayers = snapshot.docs.map((d) => {
   const data = d.data() as any;
   return {
     ...(data as Player),
     id: d.id,
     age: typeof data.age === "number" ? data.age : null,
     gender: typeof data.gender === "string" ? data.gender : null,
+    // ✅ default to true so older profiles still show
+    isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
   } as Player;
 });
+
 
 
    const meBand   = myBand;
@@ -223,6 +238,7 @@ const meRating = (myData.skillRating ?? myData.utr) ?? null; // ✅ prefer skill
 
     const scoredPlayers: ScoredPlayer[] = allPlayers
       .filter((p) => p.id !== auth.currentUser!.uid)
+      .filter((p) => p.isMatchable !== false) // ✅ NEW: hide users who turned it off
       .map((p) => {
         let score = 0;
         let distance = Infinity;
@@ -633,6 +649,36 @@ if (loading) {
     </div>
   );
 }
+
+if (myProfileHidden) {
+  return (
+    <div className="max-w-2xl mx-auto p-4 pb-28 sm:p-6">
+      <div className="rounded-2xl border bg-white p-5 shadow-sm">
+        <h1 className="text-xl font-semibold">Match Me is turned off</h1>
+        <p className="mt-2 text-sm text-gray-700">
+          Your profile is hidden — turn it back on to use Match Me.
+        </p>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            onClick={() => router.push("/profile?edit=true")}
+            className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700"
+          >
+            Turn it on in Profile
+          </button>
+
+          <button
+            onClick={() => router.push("/profile")}
+            className="px-4 py-2 rounded-lg border hover:bg-gray-50"
+          >
+            Back to Profile
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
   return (
   <div
     className="max-w-2xl mx-auto p-4 pb-28 sm:p-6"
