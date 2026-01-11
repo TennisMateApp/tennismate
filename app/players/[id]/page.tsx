@@ -72,6 +72,8 @@ type Player = {
   availability: string[];
   bio: string;
   photoURL?: string;
+  age?: number | null;
+  gender?: string | null;
   // New canonical + legacy support
   skillRating?: number | null;
   utr?: number | null;
@@ -139,6 +141,8 @@ setPlayer({
   availability: d.availability || [],
   bio: d.bio || "",
   photoURL: d.photoURL,
+   age: typeof d.age === "number" ? d.age : null,
+  gender: typeof d.gender === "string" ? d.gender : null,
   skillRating: ratingNumber,
   utr: d.utr ?? null,
   skillBand: d.skillBand ?? null,
@@ -302,6 +306,19 @@ setMatchStats({
                   Postcode {player.postcode}
                 </span>
               ) : null}
+
+              {typeof player.age === "number" && player.age > 0 ? (
+  <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
+    Age {player.age}
+  </span>
+) : null}
+
+{player.gender ? (
+  <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
+    {player.gender}
+  </span>
+) : null}
+
             </div>
 
             {/* Optional note under chips */}

@@ -7,12 +7,13 @@ import { auth } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, sendEmailVerification, signOut } from "firebase/auth";
 import { Mail, ShieldCheck, Loader2 } from "lucide-react";
 
-// Hostname + scheme only (no path). Falls back to your Vercel domain.
+// Use your verified custom domain for email action links (Universal/App Links)
 const APP_ORIGIN =
-  process.env.NEXT_PUBLIC_APP_ORIGIN || "https://tennismate-s7vk.vercel.app";
+  process.env.NEXT_PUBLIC_APP_ORIGIN || "https://tennis-mate.com.au";
 
-// After verification, Firebase will redirect the user here
-const buildVerifyReturnUrl = () => `${APP_ORIGIN}/home?verified=1`;
+// After verification, send the user back into the app
+const buildVerifyReturnUrl = () => `${APP_ORIGIN}/auth/email-action?mode=verify`;
+
 
 export default function VerifyEmailPage() {
   const router = useRouter();
@@ -54,20 +55,19 @@ export default function VerifyEmailPage() {
     try {
       const returnUrl = buildVerifyReturnUrl();
 
-      await sendEmailVerification(auth.currentUser, {
-        url: returnUrl,
-        handleCodeInApp: true, // verification happens via Firebase action link; we return to /home
+await sendEmailVerification(auth.currentUser, {
+  url: returnUrl,
+  handleCodeInApp: true, // keeps the "tap link → open app" style flow
 
-        // Enables deep-linking into the native apps (once configured)
-        iOS: { bundleId: "au.com.tennismatch.tennate" }, // <-- see note below
-        android: {
-          packageName: "au.com.tennismatch.tennismate",
-          installApp: true,
-          minimumVersion: "1",
-        },
-        dynamicLinkDomain:
-          process.env.NEXT_PUBLIC_DYNAMIC_LINK_DOMAIN || "tennismate.page.link",
-      });
+  // App IDs MUST match your actual builds
+  iOS: { bundleId: "au.com.tennismatch.tennismate" },
+  android: {
+    packageName: "com.tennismate.app",
+    installApp: true,
+    minimumVersion: "1",
+  },
+});
+
 
       setCooldown(60);
       alert("Verification email sent. Check your inbox.");
@@ -140,16 +140,31 @@ export default function VerifyEmailPage() {
               </div>
             </div>
 
-            <div className="mt-6">
-              <button
-                onClick={sendEmail}
-                disabled={sending || cooldown > 0}
-                className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-                {sending ? "Sending…" : cooldown ? `Resend in ${cooldown}s` : "Send verification email"}
-              </button>
-            </div>
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+  <button
+    onClick={sendEmail}
+    disabled={sending || cooldown > 0}
+    className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
+  >
+    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+    {sending ? "Sending…" : cooldown ? `Resend in ${cooldown}s` : "Send verification email"}
+  </button>
+
+  <button
+    type="button"
+    onClick={async () => {
+      const u = auth.currentUser;
+      if (!u) return;
+      await u.reload();
+      if (u.emailVerified) router.replace("/home");
+      else alert("Not verified yet. Please tap the link in your email, then try again.");
+    }}
+    className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200"
+  >
+    I verified — continue
+  </button>
+</div>
+
 
             <div className="mt-6 space-y-2 text-sm text-gray-700 dark:text-gray-300">
               <p className="leading-relaxed">

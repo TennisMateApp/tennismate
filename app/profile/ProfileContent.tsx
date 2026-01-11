@@ -107,6 +107,8 @@ export default function ProfilePage() {
   bio: "",
   photoURL: "",
   badges: [] as string[],
+  age: "" as number | "",
+  gender: "",
   timestamp: null as any,
 });
 
@@ -153,6 +155,8 @@ setFormData({
   bio: data.bio || "",
   photoURL: data.photoURL || "",
   badges: Array.isArray(data.badges) ? data.badges : [],
+  age: typeof data.age === "number" ? data.age : "",
+  gender: typeof data.gender === "string" ? data.gender : "",
   timestamp: data.timestamp || null,
 });
 
@@ -210,10 +214,22 @@ setLoading(false);
     setEditMode(searchParams.get("edit") === "true");
   }, [searchParams]);
 
-  const handleChange = (e: any) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
+const handleChange = (e: any) => {
+  const { name, value } = e.target;
+
+  if (name === "age") {
+    // allow blank, otherwise store number
+    const v = String(value).trim();
+    setFormData((prev) => ({
+      ...prev,
+      age: v === "" ? "" : Number(v),
+    }));
+    return;
+  }
+
+  setFormData((prev) => ({ ...prev, [name]: value }));
+};
+
 
 // NEW: UTR field (optional)
 const handleRatingChange = (raw: string) => {
@@ -347,6 +363,8 @@ await setDoc(
       ...rest,
       badges,
       // canonical fields:
+      age: formData.age === "" ? null : formData.age,
+  gender: formData.gender || null,
       skillBand: formData.skillBand || null,
       skillBandLabel: toSkillLabel(formData.skillBand),
       skillRating: formData.rating === "" ? null : formData.rating,
@@ -480,6 +498,19 @@ const handleDeleteProfile = async () => {
                 </a>
               </p>
             )}
+
+            {typeof formData.age === "number" && formData.age > 0 && (
+  <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
+    Age {formData.age}
+  </span>
+)}
+
+{formData.gender && (
+  <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2.5 py-0.5">
+    {formData.gender}
+  </span>
+)}
+
 
             {formData.bio && (
               <>
@@ -664,6 +695,47 @@ const handleDeleteProfile = async () => {
 </p>
 
   </div>
+
+  {/* Age + Gender */}
+<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  <div>
+    <label className="block text-sm font-medium text-gray-800">
+      Age
+    </label>
+    <input
+      name="age"
+      type="number"
+      inputMode="numeric"
+      min={13}
+      max={100}
+      placeholder="e.g. 29"
+      value={formData.age}
+      onChange={handleChange}
+      className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600 bg-white"
+    />
+    <p className="mt-1 text-xs text-gray-500">Optional. Used to help match similar players.</p>
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-800">
+      Gender
+    </label>
+    <select
+      name="gender"
+      value={formData.gender}
+      onChange={handleChange}
+      className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600 bg-white"
+    >
+      <option value="">Prefer not to say</option>
+      <option value="Male">Male</option>
+      <option value="Female">Female</option>
+      <option value="Non-binary">Non-binary</option>
+      <option value="Other">Other</option>
+    </select>
+    <p className="mt-1 text-xs text-gray-500">Optional.</p>
+  </div>
+</div>
+
 
   {/* Skill level */}
   <div>
