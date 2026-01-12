@@ -37,6 +37,13 @@ interface Player {
 
 const PAGE_SIZE = 20;
 
+const DIR_CACHE_KEY = "tm_directory_page1_v1";
+const DIR_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+const SEARCH_CACHE_PREFIX = "tm_dir_search_v1:";
+const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+
 function getSkillLabel(v: DocumentData): string {
   // 1) New schema: explicit human-readable label from signup
   if (typeof v.skillBandLabel === "string" && v.skillBandLabel.trim()) {
@@ -116,14 +123,38 @@ export default function DirectoryPage() {
   // ----- initial browse load (latest players by timestamp) -----
   useEffect(() => {
     const loadFirstPage = async () => {
+
+            // ✅ Session cache for first directory page (saves reads on revisit)
+      const cachedRaw = sessionStorage.getItem(DIR_CACHE_KEY);
+      if (cachedRaw) {
+        try {
+          const cached = JSON.parse(cachedRaw);
+          const isFresh = Date.now() - cached.ts < DIR_CACHE_TTL_MS;
+
+          if (isFresh && Array.isArray(cached.players)) {
+            setPlayers(cached.players);
+            setHasMore(!!cached.hasMore);
+            setCursor(null); // cursor rebuilt only if user taps Load more
+            setLoading(false);
+            return;
+          }
+        } catch {
+          // ignore cache errors
+        }
+      }
+
+
       try {
         setLoading(true);
-       const qy = query(
-  collection(db, "players"),
-  orderBy("nameLower"),
-  limit(PAGE_SIZE)
-);
+
+        const qy = query(
+          collection(db, "players"),
+          orderBy("nameLower"),
+          limit(PAGE_SIZE)
+        );
+
         const snap = await getDocs(qy);
+
 
         const page = snap.docs.map((d) => {
           const v = d.data() as DocumentData;
@@ -143,6 +174,18 @@ export default function DirectoryPage() {
         setPlayers(page);
         setCursor(snap.docs[snap.docs.length - 1] ?? null);
         setHasMore(snap.size === PAGE_SIZE);
+
+                // ✅ Save first page to session cache
+        sessionStorage.setItem(
+          DIR_CACHE_KEY,
+          JSON.stringify({
+            ts: Date.now(),
+            players: page,
+            hasMore: snap.size === PAGE_SIZE,
+          })
+        );
+
+
       } catch (err) {
         console.error("Error fetching first page:", err);
       } finally {
@@ -154,15 +197,33 @@ export default function DirectoryPage() {
 
   // ----- load more in browse mode -----
   const loadMore = async () => {
-    if (!hasMore || loadingMore || !cursor) return;
+    if (!hasMore || loadingMore) return;
+
     try {
       setLoadingMore(true);
-     const qy = query(
-  collection(db, "players"),
-  orderBy("nameLower"),
-  startAfter(cursor),
-  limit(PAGE_SIZE)
-);
+
+      // ✅ Rebuild cursor if first page came from session cache
+      let effectiveCursor = cursor;
+
+      if (!effectiveCursor) {
+        const bootstrapSnap = await getDocs(
+          query(collection(db, "players"), orderBy("nameLower"), limit(PAGE_SIZE))
+        );
+
+        effectiveCursor =
+          bootstrapSnap.docs[bootstrapSnap.docs.length - 1] ?? null;
+
+        setCursor(effectiveCursor);
+        if (!effectiveCursor) return;
+      }
+
+      const qy = query(
+        collection(db, "players"),
+        orderBy("nameLower"),
+        startAfter(effectiveCursor),
+        limit(PAGE_SIZE)
+      );
+
       const snap = await getDocs(qy);
 
       const page = snap.docs.map((d) => {
@@ -171,11 +232,11 @@ export default function DirectoryPage() {
           id: d.id,
           name: v.name ?? "",
           postcode: v.postcode ?? "",
-          skillLevel: getSkillLabel(v),  
+          skillLevel: getSkillLabel(v),
           photoURL: v.photoURL ?? undefined,
           timestamp: v.timestamp ?? undefined,
-          joinedAt: v.joinedAt ?? undefined, 
-          createdAt: v.createdAt ?? undefined, 
+          joinedAt: v.joinedAt ?? undefined,
+          createdAt: v.createdAt ?? undefined,
           nameLower: v.nameLower ?? undefined,
         } as Player;
       });
@@ -190,6 +251,7 @@ export default function DirectoryPage() {
     }
   };
 
+
   // ----- search (prefix on nameLower) -----
   useEffect(() => {
     let cancelled = false;
@@ -203,6 +265,26 @@ export default function DirectoryPage() {
     }
 
     setSearching(true);
+        // ✅ Session cache for searches (cuts reads while typing/backspacing)
+    const cacheKey = SEARCH_CACHE_PREFIX + qStr;
+    const cachedRaw = sessionStorage.getItem(cacheKey);
+    if (cachedRaw) {
+      try {
+        const cached = JSON.parse(cachedRaw);
+        const isFresh = Date.now() - cached.ts < SEARCH_CACHE_TTL_MS;
+
+        if (isFresh && Array.isArray(cached.players)) {
+          setSearchResults(cached.players);
+          setSearchCursor(null); // rebuilt only if user taps Load more
+          setHasMoreSearch(!!cached.hasMore);
+          setSearching(false);
+          return;
+        }
+      } catch {
+        // ignore cache errors
+      }
+    }
+
     const handle = setTimeout(async () => {
       try {
         const qy = query(
@@ -233,6 +315,16 @@ export default function DirectoryPage() {
         setSearchResults(page);
         setSearchCursor(snap.docs[snap.docs.length - 1] ?? null);
         setHasMoreSearch(snap.size === PAGE_SIZE);
+                // ✅ Save search results to session cache
+        sessionStorage.setItem(
+          cacheKey,
+          JSON.stringify({
+            ts: Date.now(),
+            players: page,
+            hasMore: snap.size === PAGE_SIZE,
+          })
+        );
+
       } catch (err) {
         console.error("Error searching players:", err);
       } finally {
@@ -248,17 +340,40 @@ export default function DirectoryPage() {
 
   // ----- load more in search mode -----
   const loadMoreSearch = async () => {
-    if (!inSearch || !hasMoreSearch || loadingMore || !searchCursor) return;
+    if (!inSearch || !hasMoreSearch || loadingMore) return;
+
     try {
       setLoadingMore(true);
+
+      // ✅ Rebuild searchCursor if search results came from cache
+      let effectiveCursor = searchCursor;
+
+      if (!effectiveCursor) {
+        const bootstrapSnap = await getDocs(
+          query(
+            collection(db, "players"),
+            orderBy("nameLower"),
+            startAt(qStr),
+            endAt(qStr + "\uf8ff"),
+            limit(PAGE_SIZE)
+          )
+        );
+
+        effectiveCursor =
+          bootstrapSnap.docs[bootstrapSnap.docs.length - 1] ?? null;
+
+        setSearchCursor(effectiveCursor);
+        if (!effectiveCursor) return;
+      }
+
       const qy = query(
         collection(db, "players"),
         orderBy("nameLower"),
-        // continue after last doc but still keep the upper bound for the prefix
-        startAfter(searchCursor),
+        startAfter(effectiveCursor),
         endAt(qStr + "\uf8ff"),
         limit(PAGE_SIZE)
       );
+
       const snap = await getDocs(qy);
 
       const page = snap.docs.map((d) => {
@@ -267,11 +382,11 @@ export default function DirectoryPage() {
           id: d.id,
           name: v.name ?? "",
           postcode: v.postcode ?? "",
-          skillLevel: getSkillLabel(v),  
+          skillLevel: getSkillLabel(v),
           photoURL: v.photoURL ?? undefined,
           timestamp: v.timestamp ?? undefined,
-          joinedAt: v.joinedAt ?? undefined, 
-          createdAt: v.createdAt ?? undefined, 
+          joinedAt: v.joinedAt ?? undefined,
+          createdAt: v.createdAt ?? undefined,
           nameLower: v.nameLower ?? undefined,
         } as Player;
       });
@@ -285,6 +400,7 @@ export default function DirectoryPage() {
       setLoadingMore(false);
     }
   };
+
 
   // ----- choose which list to show -----
   const visiblePlayers = useMemo(
