@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { db, auth } from "@/lib/firebaseConfig";
 import { type SkillBand, SKILL_OPTIONS, skillFromUTR } from "../../lib/skills";
 import {
   collection, getDocs, doc, getDoc, addDoc,
-  serverTimestamp, query, where, updateDoc,
+  serverTimestamp, query, where, updateDoc, Timestamp,
 } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged, applyActionCode } from "firebase/auth";
@@ -166,6 +166,7 @@ export default function MatchPage() {
   const MAX_DISTANCE_KM = 50; // hard cutoff to prevent interstate matches
   const [matchMode, setMatchMode] = useState<"auto"|"skill"|"utr">("auto");
   const [myProfileHidden, setMyProfileHidden] = useState(false);
+  const refreshingRef = useRef(false);
 
 type GenderFilter = "" | "Male" | "Female" | "Non-binary" | "Other";
 
@@ -189,10 +190,63 @@ const [hideContacted, setHideContacted] = useState(true);
 const [refreshing, setRefreshing] = useState(false);
 const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
- const refreshMatches = useCallback(async () => {
+const POSTCODES_CACHE_KEY = "tm_postcodes_coords_v1";
+const POSTCODES_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+const REFRESH_MIN_MS = 2 * 60 * 1000; // 2 minutes
+
+const loadPostcodeCoords = useCallback(async () => {
+  // 1) try session cache first
+  const cachedRaw = sessionStorage.getItem(POSTCODES_CACHE_KEY);
+  if (cachedRaw) {
+    try {
+      const cached = JSON.parse(cachedRaw);
+      if (
+        cached &&
+        typeof cached.ts === "number" &&
+        Date.now() - cached.ts < POSTCODES_CACHE_TTL_MS &&
+        cached.coords
+      ) {
+        setPostcodeCoords(cached.coords as PostcodeCoords);
+        return cached.coords as PostcodeCoords;
+      }
+    } catch {
+      // ignore cache errors
+    }
+  }
+
+  // 2) fetch once
+  const postcodeSnap = await getDocs(collection(db, "postcodes"));
+  const coords: PostcodeCoords = {};
+  postcodeSnap.forEach((d) => {
+    coords[d.id] = d.data() as { lat: number; lng: number };
+  });
+
+  setPostcodeCoords(coords);
+  sessionStorage.setItem(
+    POSTCODES_CACHE_KEY,
+    JSON.stringify({ ts: Date.now(), coords })
+  );
+
+  return coords;
+}, [POSTCODES_CACHE_KEY, POSTCODES_CACHE_TTL_MS, db]);
+
+
+const refreshMatches = useCallback(async () => {
   if (!auth.currentUser) return;
+
+  // ✅ prevent duplicate refresh calls while one is already running
+  if (refreshingRef.current) return;
+refreshingRef.current = true;
+
+  // ✅ throttle refresh frequency
+  if (lastUpdated && Date.now() - lastUpdated < REFRESH_MIN_MS) {
+    return;
+  }
+
   setRefreshing(true);
   try {
+
     // 1) Ensure user/profile
     const myRef = doc(db, "players", auth.currentUser.uid);
     const mySnap = await getDoc(myRef);
@@ -220,15 +274,19 @@ if (hidden) {
 setMyProfile({ ...myData, skillBand: myBand, birthYear: myBirthYear, age: myAge, id: mySnap.id });
 
 
-    // 2) Postcode coords
-    const postcodeSnap = await getDocs(collection(db, "postcodes"));
-    const coords: PostcodeCoords = {};
-    postcodeSnap.forEach((d) => { coords[d.id] = d.data() as { lat: number; lng: number }; });
-    setPostcodeCoords(coords);
+   // 2) Postcode coords (cached)
+const coords = await loadPostcodeCoords();
 
-    // 3) Sent requests
-    const reqQ = query(collection(db, "match_requests"), where("fromUserId", "==", auth.currentUser.uid));
-    const reqSnap = await getDocs(reqQ);
+
+    // 3) Sent requests (limit to recent history to cut reads)
+const ninetyDaysAgo = Timestamp.fromMillis(Date.now() - 90 * 24 * 60 * 60 * 1000);
+const reqQ = query(
+  collection(db, "match_requests"),
+  where("fromUserId", "==", auth.currentUser.uid),
+  where("timestamp", ">=", ninetyDaysAgo)
+);
+const reqSnap = await getDocs(reqQ);
+
     const sentTo = new Set<string>();
     reqSnap.forEach((d) => { const data = d.data() as any; if (data.toUserId) sentTo.add(data.toUserId); });
     setSentRequests(sentTo);
@@ -333,9 +391,11 @@ if (myC && theirC) {
     setRawMatches(scoredPlayers);
     setLastUpdated(Date.now());
   } finally {
-    setRefreshing(false);
-  }
-}, [matchMode]);
+  refreshingRef.current = false;
+  setRefreshing(false);
+}
+
+}, [matchMode, lastUpdated, loadPostcodeCoords]);
 
   async function finalizeVerification() {
   if (!auth.currentUser) return;
