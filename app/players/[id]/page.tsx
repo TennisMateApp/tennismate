@@ -72,7 +72,7 @@ type Player = {
   availability: string[];
   bio: string;
   photoURL?: string;
-  age?: number | null;
+  birthYear?: number | null;
   gender?: string | null;
   // New canonical + legacy support
   skillRating?: number | null;
@@ -141,7 +141,6 @@ setPlayer({
   availability: d.availability || [],
   bio: d.bio || "",
   photoURL: d.photoURL,
-   age: typeof d.age === "number" ? d.age : null,
   gender: typeof d.gender === "string" ? d.gender : null,
   skillRating: ratingNumber,
   utr: d.utr ?? null,

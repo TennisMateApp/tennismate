@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseConfig";
 import SignupErrorModal from "@/components/SignupErrorModal";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp, getDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import Cropper from "react-easy-crop";
 import getCroppedImg from "../utils/cropImage";
@@ -15,6 +15,7 @@ import Image from "next/image";
 import { Mail, Lock, User, MapPin, Camera } from "lucide-react";
 
 import { clampUTR, SKILL_OPTIONS, skillFromUTR, type SkillBand } from "../../lib/skills";
+import { geohashForLocation } from "geofire-common";
 
 const DEFAULT_AVATAR = "/images/default-avatar.jpg";
 const RATING_LABEL = "TennisMate Rating (TMR)";
@@ -277,49 +278,77 @@ const userCredential = await createUserWithEmailAndPassword(
         { merge: true }
       );
 
-    if (isSupportedRegion) {
-  // 4) players/{uid} — canonical: skillRating; mirror: utr (temporary)
+if (isSupportedRegion) {
   const ratingOrNull = formData.rating === "" ? null : formData.rating;
 
   const skillBandValue = formData.skillBand || null;
   const skillBandLabel = toSkillLabel(skillBandValue);
 
-await setDoc(doc(db, "players", user.uid), {
-  name: formData.name,
-  nameLower: (formData.name || "").toLowerCase(),
-  email,
-  postcode: formData.postcode,
+  let lat: number | null = null;
+  let lng: number | null = null;
+  let geohash: string | null = null;
 
-  gender: formData.gender || null,
-  birthYear: formData.birthYear ? Number(formData.birthYear) : null,
-
-  skillRating: ratingOrNull,
-  utr: ratingOrNull,
-  skillBand: skillBandValue,
-  skillBandLabel,
-  availability: formData.availability,
-  bio: formData.bio,
-  photoURL,
-  profileComplete: true,
-  timestamp: serverTimestamp(),
-});
-
-
-
-        setStatus("");
-        router.replace("/verify-email");
-      } else {
-        await setDoc(doc(db, "waitlist_users", user.uid), {
-          name: formData.name,
-          email,
-          postcode: formData.postcode,
-          timestamp: serverTimestamp(),
-          source: "signupForm",
-        });
-        
-        setShowWaitlistModal(true);
-        setStatus("");
+  try {
+    const pcSnap = await getDoc(doc(db, "postcodes", formData.postcode));
+    if (pcSnap.exists()) {
+      const pc = pcSnap.data() as any;
+      if (typeof pc.lat === "number" && typeof pc.lng === "number") {
+        lat = pc.lat;
+        lng = pc.lng;
+        geohash = geohashForLocation([lat, lng]);
       }
+    }
+  } catch (e) {
+    console.warn("Postcode lookup failed; continuing without lat/lng/geohash", e);
+  }
+
+  await setDoc(
+    doc(db, "players", user.uid),
+    {
+      name: formData.name,
+      nameLower: (formData.name || "").toLowerCase(),
+      email,
+      postcode: formData.postcode,
+
+      gender: formData.gender || null,
+      birthYear: formData.birthYear ? Number(formData.birthYear) : null,
+
+      isMatchable: true,
+
+      lat,
+      lng,
+      geohash,
+
+      skillRating: ratingOrNull,
+      utr: ratingOrNull,
+      skillBand: skillBandValue,
+      skillBandLabel,
+      availability: formData.availability,
+      bio: formData.bio,
+      photoURL,
+      profileComplete: true,
+      timestamp: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  setStatus("");
+  router.replace("/verify-email");
+  return;
+} else {
+  await setDoc(doc(db, "waitlist_users", user.uid), {
+    name: formData.name,
+    email,
+    postcode: formData.postcode,
+    timestamp: serverTimestamp(),
+    source: "signupForm",
+  });
+
+  setShowWaitlistModal(true);
+  setStatus("");
+  return;
+}
+
     } catch (error: any) {
       if (error?.code === "auth/email-already-in-use") {
         const email = formData.email.trim().toLowerCase();

@@ -17,6 +17,7 @@ import {
   QuerySnapshot,
   arrayUnion,
   setDoc,
+  documentId, 
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -33,6 +34,8 @@ import {
 import { GiTennisBall } from "react-icons/gi";
 import Link from "next/link";
 
+const POSTCODES_CACHE_KEY = "tm_postcodes_coords_v1";
+const POSTCODES_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // --- Helpers ---
 const formatRelativeTime = (d?: Date | null) => {
@@ -103,6 +106,41 @@ type Match = {
 type PCMap = Record<string, { lat: number; lng: number }>;
 type PlayerLite = { postcode?: string; lat?: number; lng?: number; photoURL?: string; name?: string };
 
+const loadPostcodeCoordsCached = async (): Promise<PCMap> => {
+  // 1) session cache
+  const cachedRaw = sessionStorage.getItem(POSTCODES_CACHE_KEY);
+  if (cachedRaw) {
+    try {
+      const cached = JSON.parse(cachedRaw);
+      if (
+        cached &&
+        typeof cached.ts === "number" &&
+        Date.now() - cached.ts < POSTCODES_CACHE_TTL_MS &&
+        cached.coords
+      ) {
+        return cached.coords as PCMap;
+      }
+    } catch {
+      // ignore cache errors
+    }
+  }
+
+  // 2) fetch once
+  const pcSnap = await getDocs(collection(db, "postcodes"));
+  const map: PCMap = {};
+  pcSnap.forEach((p) => {
+    map[p.id] = p.data() as { lat: number; lng: number };
+  });
+
+  sessionStorage.setItem(
+    POSTCODES_CACHE_KEY,
+    JSON.stringify({ ts: Date.now(), coords: map })
+  );
+
+  return map;
+};
+
+
 function getDistanceFromLatLonInKm(
   lat1: number, lon1: number, lat2: number, lon2: number
 ): number {
@@ -117,6 +155,12 @@ function getDistanceFromLatLonInKm(
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return Math.round(R * c);
 }
+
+const chunk = <T,>(arr: T[], size: number) => {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
 
 
 export default function MatchesClient() {
@@ -175,29 +219,65 @@ useEffect(() => {
     return () => unsub();
   }, []);
 
-  useEffect(() => {
+  // ✅ Load my player + cached postcode coords (once per user session)
+useEffect(() => {
   if (!currentUserId) return;
+
   (async () => {
     try {
       // me
       const me = await getDoc(doc(db, "players", currentUserId));
       if (me.exists()) {
         const d = me.data() as any;
-        setMyPlayer({ postcode: d.postcode, lat: d.lat, lng: d.lng }); // lat/lng optional
+        setMyPlayer({ postcode: d.postcode, lat: d.lat, lng: d.lng });
       } else {
         setMyPlayer(null);
       }
 
-      // postcode coords (same collection you use on /match)
-      const pcSnap = await getDocs(collection(db, "postcodes"));
-      const map: PCMap = {};
-      pcSnap.forEach((p) => { map[p.id] = p.data() as { lat: number; lng: number }; });
-      setPostcodeCoords(map);
+      // cached postcodes
+      const coords = await loadPostcodeCoordsCached();
+      setPostcodeCoords(coords);
     } catch (e) {
       console.error("Failed to load player/coords:", e);
     }
   })();
 }, [currentUserId]);
+
+
+const loadPostcodeCoords = useCallback(async () => {
+  // 1) session cache
+  const cachedRaw = sessionStorage.getItem(POSTCODES_CACHE_KEY);
+  if (cachedRaw) {
+    try {
+      const cached = JSON.parse(cachedRaw);
+      if (
+        cached &&
+        typeof cached.ts === "number" &&
+        Date.now() - cached.ts < POSTCODES_CACHE_TTL_MS &&
+        cached.coords
+      ) {
+        setPostcodeCoords(cached.coords as PCMap);
+        return cached.coords as PCMap;
+      }
+    } catch {}
+  }
+
+  // 2) fetch once
+  const pcSnap = await getDocs(collection(db, "postcodes"));
+  const map: PCMap = {};
+  pcSnap.forEach((p) => {
+    map[p.id] = p.data() as { lat: number; lng: number };
+  });
+
+  setPostcodeCoords(map);
+  sessionStorage.setItem(
+    POSTCODES_CACHE_KEY,
+    JSON.stringify({ ts: Date.now(), coords: map })
+  );
+
+  return map;
+}, []);
+
 
 
   // Listen for match requests
@@ -259,6 +339,57 @@ const proc = (snap: QuerySnapshot<DocumentData>) => {
     const unsubTo = onSnapshot(toQ, proc);
     return () => { unsubFrom(); unsubTo(); };
   }, [currentUserId]);
+
+  // ✅ Prefetch opponent profiles in batches (prevents getDoc() in render)
+useEffect(() => {
+  if (!currentUserId) return;
+  if (matches.length === 0) return;
+
+  const opponentIds = Array.from(
+    new Set(
+      matches.map((m) =>
+        m.playerId === currentUserId ? m.opponentId : m.playerId
+      )
+    )
+  );
+
+  // fetch only ids not in cache yet
+  const missing = opponentIds.filter((id) => oppCache[id] === undefined);
+  if (missing.length === 0) return;
+
+  (async () => {
+    try {
+      const batches = chunk(missing, 10); // Firestore "in" max = 10
+      for (const ids of batches) {
+        const q = query(
+          collection(db, "players"),
+          where(documentId(), "in", ids)
+        );
+        const snap = await getDocs(q);
+
+        const updates: Record<string, PlayerLite | null> = {};
+        ids.forEach((id) => (updates[id] = null)); // default if not found
+
+        snap.forEach((d) => {
+          const data = d.data() as any;
+          updates[d.id] = {
+            postcode: data.postcode,
+            lat: data.lat,
+            lng: data.lng,
+            photoURL: data.photoURL,
+            name: data.name,
+          };
+        });
+
+        setOppCache((prev) => ({ ...prev, ...updates }));
+      }
+    } catch (e) {
+      console.error("Opponent prefetch failed:", e);
+    }
+  })();
+}, [matches, currentUserId, oppCache]);
+// ✅ keep deps minimal
+
 
   // Accept a match and award badge
 const acceptMatch = async (matchId: string, currentUserId: string) => {
@@ -386,7 +517,6 @@ const startedAt =
 let distanceKm: number | null = null;
 
 try {
-  // A) If match has a suggested court with lat/lng AND I have my lat/lng:
   if (
     typeof match.suggestedCourtLat === "number" &&
     typeof match.suggestedCourtLng === "number" &&
@@ -395,11 +525,12 @@ try {
     typeof myPlayer.lng === "number"
   ) {
     distanceKm = getDistanceFromLatLonInKm(
-      myPlayer.lat, myPlayer.lng,
-      match.suggestedCourtLat, match.suggestedCourtLng
+      myPlayer.lat,
+      myPlayer.lng,
+      match.suggestedCourtLat,
+      match.suggestedCourtLng
     );
   } else if (myPlayer) {
-    // B) Otherwise fallback to postcode→coords using opponent's postcode
     const computeFromPC = (theirPostcode?: string | null) => {
       const mine = myPlayer.postcode ? postcodeCoords[myPlayer.postcode] : undefined;
       const theirs = theirPostcode ? postcodeCoords[theirPostcode] : undefined;
@@ -409,29 +540,12 @@ try {
     };
 
     const cached = oppCache[other];
-    if (cached) {
-      computeFromPC(cached.postcode);
-    } else if (cached === undefined) {
-      // first encounter of this opponent: fetch once and cache
-      (async () => {
-        try {
-const s = await getDoc(doc(db, "players", other));
-const d = s.exists() ? (s.data() as any) : null;
-setOppCache((prev) => ({
-  ...prev,
-  [other]: d
-    ? { postcode: d.postcode, lat: d.lat, lng: d.lng, photoURL: d.photoURL, name: d.name }
-    : null,
-}));
-        } catch {
-          setOppCache((prev) => ({ ...prev, [other]: null }));
-        }
-      })();
-    }
+    if (cached) computeFromPC(cached.postcode);
   }
 } catch {
   // ignore; distanceKm stays null
 }
+
 
 
     return (

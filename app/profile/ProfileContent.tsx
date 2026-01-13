@@ -25,6 +25,7 @@ import { clampUTR, SKILL_OPTIONS, skillFromUTR } from "../../lib/skills";
 import type { ChangeEvent } from "react";
 import React from "react";
 import { httpsCallable } from "firebase/functions";
+import { geohashForLocation } from "geofire-common";
 
 const RATING_LABEL = "TennisMate Rating (TMR)";
 // ---- fallback options in case SKILL_OPTIONS is missing/mis-exported ----
@@ -101,6 +102,7 @@ export default function ProfilePage() {
   const [editMode, setEditMode] = useState(false);
   const [bioExpanded, setBioExpanded] = useState(false);
 
+  const originalPostcodeRef = React.useRef<string>("");
 
  const [formData, setFormData] = useState({
   name: "",
@@ -183,6 +185,7 @@ setFormData({
   timestamp: data.timestamp || null,
 });
 
+originalPostcodeRef.current = String(data.postcode || "").trim();
 
     if (data.photoURL) setPreviewURL(data.photoURL);
 
@@ -387,6 +390,26 @@ avatar: formData.photoURL || null,
   }
 };
 
+const getLatLngForPostcode = async (postcode: string): Promise<{ lat: number; lng: number }> => {
+  const pc = postcode.trim();
+  const pcRef = doc(db, "postcodes", pc);
+  const pcSnap = await getDoc(pcRef);
+
+  if (!pcSnap.exists()) {
+    throw new Error("POSTCODE_NOT_FOUND");
+  }
+
+  const data = pcSnap.data() as any;
+  const lat = typeof data.lat === "number" ? data.lat : null;
+  const lng = typeof data.lng === "number" ? data.lng : null;
+
+  if (lat == null || lng == null) {
+    throw new Error("POSTCODE_BAD_COORDS");
+  }
+
+  return { lat, lng };
+};
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -455,9 +478,32 @@ if (firstDigit !== "2" && firstDigit !== "3") {
   return;
 }
 
+const newPostcode = trimmedPostcode;
+const oldPostcode = (originalPostcodeRef.current || "").trim();
+const postcodeChanged = newPostcode !== oldPostcode;
+
     setSaving(true);
     setStatus("Saving...");
     try {
+      let nextLat: number | null = null;
+let nextLng: number | null = null;
+let nextGeohash: string | null = null;
+
+if (postcodeChanged) {
+  try {
+    const { lat, lng } = await getLatLngForPostcode(newPostcode);
+    nextLat = lat;
+    nextLng = lng;
+    nextGeohash = geohashForLocation([lat, lng]);
+} catch (err: any) {
+  console.error("[Profile] postcode lookup failed", err);
+  setStatus("❌ Could not find coordinates for that postcode. Please check it and try again.");
+  setSaving(false); // ✅ release UI
+  return;
+}
+
+}
+
       let photoURL = formData.photoURL;
       if (croppedImage) {
         const refSt = ref(storage, `profile_pictures/${user.uid}/profile.jpg`);
@@ -471,9 +517,15 @@ await setDoc(
     const { rating, ...rest } = formData; // ← strip UI-only field
     const badges = Array.isArray(formData.badges) ? formData.badges : [];
 
+
 return {
   ...rest,
+  postcode: newPostcode,
   badges,
+
+  // location fields only if postcode changed
+  ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
+
   // canonical fields:
   birthYear: formData.birthYear === "" ? null : formData.birthYear,
   gender: formData.gender || null,
@@ -492,11 +544,13 @@ return {
   isMatchable: !!formData.isMatchable,
 };
 
+
   })(),
   { merge: true }
 );
 
-
+setFormData((p) => ({ ...p, postcode: newPostcode }));
+originalPostcodeRef.current = newPostcode;
 
       setStatus("✅ Profile saved successfully!");
       router.push("/profile");

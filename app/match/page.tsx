@@ -4,8 +4,20 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { db, auth } from "@/lib/firebaseConfig";
 import { type SkillBand, SKILL_OPTIONS, skillFromUTR } from "../../lib/skills";
 import {
-  collection, getDocs, doc, getDoc, addDoc,
-  serverTimestamp, query, where, updateDoc, Timestamp,
+  collection,
+  getDocs,
+  doc,
+  getDoc,
+  addDoc,
+  serverTimestamp,
+  query,
+  where,
+  updateDoc,
+  Timestamp,
+  orderBy,
+  startAt,
+  endAt,
+  limit,
 } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged, applyActionCode } from "firebase/auth";
@@ -13,6 +25,8 @@ import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 import Image from "next/image";
 import { track } from "@/lib/track";
+import { geohashQueryBounds } from "geofire-common";
+
 // import { getContinueUrl } from "@/lib/auth/getContinueUrl";
 
 
@@ -36,6 +50,9 @@ interface Player {
   timestamp?: any;
   score?: number;
   distance?: number;
+  lat?: number | null;
+  lng?: number | null;
+  geohash?: string | null;
 }
 
 type ScoredPlayer = Player & {
@@ -44,9 +61,6 @@ type ScoredPlayer = Player & {
   skillBand: SkillBand | "";
 };
 
-interface PostcodeCoords {
-  [postcode: string]: { lat: number; lng: number };
-}
 
 const A = <T,>(x: T[] | undefined | null): T[] => Array.isArray(x) ? x : [];
 
@@ -153,12 +167,16 @@ function getDistanceFromLatLonInKm(
   return Math.round(R * c);
 }
 
+const MAX_NEARBY_READS = 600; // max docs per geohash bound query (safety cap)
+const SENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const SENT_LOOKBACK_DAYS = 14; // when cache expires, only read last 14 days
+
+
 export default function MatchPage() {
   const [user, setUser] = useState<any>(null);
   const [myProfile, setMyProfile] = useState<Player | null>(null);
   const [rawMatches, setRawMatches] = useState<Player[]>([]);
   const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
-  const [postcodeCoords, setPostcodeCoords] = useState<PostcodeCoords>({});
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<string>("score");
   const PAGE_SIZE = 10;
@@ -190,212 +208,255 @@ const [hideContacted, setHideContacted] = useState(true);
 const [refreshing, setRefreshing] = useState(false);
 const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
-const POSTCODES_CACHE_KEY = "tm_postcodes_coords_v1";
-const POSTCODES_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 const REFRESH_MIN_MS = 2 * 60 * 1000; // 2 minutes
 
-const loadPostcodeCoords = useCallback(async () => {
-  // 1) try session cache first
-  const cachedRaw = sessionStorage.getItem(POSTCODES_CACHE_KEY);
-  if (cachedRaw) {
-    try {
-      const cached = JSON.parse(cachedRaw);
-      if (
-        cached &&
-        typeof cached.ts === "number" &&
-        Date.now() - cached.ts < POSTCODES_CACHE_TTL_MS &&
-        cached.coords
-      ) {
-        setPostcodeCoords(cached.coords as PostcodeCoords);
-        return cached.coords as PostcodeCoords;
-      }
-    } catch {
-      // ignore cache errors
-    }
+const sentCacheKey = (uid: string) => `tm_sentRequests_v2_${uid}`;
+
+const readSentCache = (uid: string): { ts: number; ids: string[] } | null => {
+  try {
+    const raw = localStorage.getItem(sentCacheKey(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.ts !== "number" || !Array.isArray(parsed.ids)) return null;
+    return parsed;
+  } catch {
+    return null;
   }
+};
 
-  // 2) fetch once
-  const postcodeSnap = await getDocs(collection(db, "postcodes"));
-  const coords: PostcodeCoords = {};
-  postcodeSnap.forEach((d) => {
-    coords[d.id] = d.data() as { lat: number; lng: number };
-  });
+const writeSentCache = (uid: string, ids: Set<string>) => {
+  try {
+    localStorage.setItem(
+      sentCacheKey(uid),
+      JSON.stringify({ ts: Date.now(), ids: Array.from(ids) })
+    );
+  } catch {
+    // ignore
+  }
+};
 
-  setPostcodeCoords(coords);
-  sessionStorage.setItem(
-    POSTCODES_CACHE_KEY,
-    JSON.stringify({ ts: Date.now(), coords })
-  );
+const loadNearbyPlayers = useCallback(
+  async (myLat: number, myLng: number, radiusKm: number) => {
+    const bounds = geohashQueryBounds([myLat, myLng], radiusKm * 1000);
 
-  return coords;
-}, [POSTCODES_CACHE_KEY, POSTCODES_CACHE_TTL_MS, db]);
+    const seen = new Set<string>();
+    const out: Player[] = [];
+
+    await Promise.all(
+      bounds.map(async ([start, end]) => {
+        const q = query(
+          collection(db, "players"),
+          orderBy("geohash"),
+          startAt(start),
+          endAt(end),
+          limit(MAX_NEARBY_READS)
+        );
+
+        const snap = await getDocs(q);
+
+        snap.forEach((d) => {
+          if (seen.has(d.id)) return;
+          seen.add(d.id);
+
+          const data = d.data() as any;
+
+          const birthYear =
+            typeof data.birthYear === "number" && Number.isFinite(data.birthYear)
+              ? data.birthYear
+              : null;
+
+          const derivedAge = deriveAgeFromBirthYear(birthYear);
+          const legacyAge =
+            typeof data.age === "number" && Number.isFinite(data.age) ? data.age : null;
+
+          out.push({
+            ...(data as Player),
+            id: d.id,
+            birthYear,
+            age: derivedAge ?? legacyAge ?? null,
+            gender: typeof data.gender === "string" ? data.gender : null,
+            isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
+            lat: typeof data.lat === "number" ? data.lat : null,
+            lng: typeof data.lng === "number" ? data.lng : null,
+            geohash: typeof data.geohash === "string" ? data.geohash : null,
+          });
+        });
+      })
+    );
+
+    return out;
+  },
+  [db]
+);
 
 
 const refreshMatches = useCallback(async () => {
   if (!auth.currentUser) return;
 
-  // ✅ prevent duplicate refresh calls while one is already running
-  if (refreshingRef.current) return;
-refreshingRef.current = true;
-
-  // ✅ throttle refresh frequency
+  // ✅ throttle refresh frequency (do this BEFORE locking the ref)
   if (lastUpdated && Date.now() - lastUpdated < REFRESH_MIN_MS) {
     return;
   }
 
-  setRefreshing(true);
-  try {
+  // ✅ prevent duplicate refresh calls while one is already running
+  if (refreshingRef.current) return;
+  refreshingRef.current = true;
 
-    // 1) Ensure user/profile
+  setRefreshing(true);
+
+  try {
+    // 1) Load my profile
     const myRef = doc(db, "players", auth.currentUser.uid);
     const mySnap = await getDoc(myRef);
     if (!mySnap.exists()) return;
-    const myData = mySnap.data() as Player;
-    const myBirthYear = (myData as any)?.birthYear ?? null;
-const myAge = deriveAgeFromBirthYear(myBirthYear) ?? (typeof (myData as any)?.age === "number" ? (myData as any).age : null);
 
-    const hidden = (myData as any)?.isMatchable === false;
-setMyProfileHidden(hidden);
+    const myData = mySnap.data() as any;
 
-// If hidden, stop here — don't compute matches
-if (hidden) {
+    const myBirthYear =
+      typeof myData.birthYear === "number" && Number.isFinite(myData.birthYear)
+        ? myData.birthYear
+        : null;
+
+    const myAge =
+      deriveAgeFromBirthYear(myBirthYear) ??
+      (typeof myData.age === "number" && Number.isFinite(myData.age) ? myData.age : null);
+
+    const hidden = myData?.isMatchable === false;
+    setMyProfileHidden(hidden);
+
+    if (hidden) {
+      setRawMatches([]);
+      setLastUpdated(Date.now());
+      return;
+    }
+
+    const myLat = typeof myData.lat === "number" ? myData.lat : null;
+    const myLng = typeof myData.lng === "number" ? myData.lng : null;
+
+    const myBand = (
+      myData.skillBand ||
+      skillFromUTR((myData.skillRating ?? myData.utr) ?? null) ||
+      legacyToBand(myData.skillLevel) ||
+      ""
+    ) as SkillBand | "";
+
+    setMyProfile({
+      ...(myData as Player),
+      id: mySnap.id,
+      skillBand: myBand,
+      birthYear: myBirthYear,
+      age: myAge,
+      lat: myLat,
+      lng: myLng,
+      geohash: typeof myData.geohash === "string" ? myData.geohash : null,
+    });
+
+// 2) Sent requests (prefer local cache)
+let sentTo = new Set<string>();
+
+const cached = readSentCache(auth.currentUser.uid);
+if (cached && Date.now() - cached.ts < SENT_CACHE_TTL_MS) {
+  sentTo = new Set(cached.ids);
+} else {
+  const lookbackMs = SENT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+  const since = Timestamp.fromMillis(Date.now() - lookbackMs);
+
+  const reqQ = query(
+    collection(db, "match_requests"),
+    where("fromUserId", "==", auth.currentUser.uid),
+    where("timestamp", ">=", since)
+  );
+
+  const reqSnap = await getDocs(reqQ);
+
+  reqSnap.forEach((d) => {
+    const data = d.data() as any;
+    if (data.toUserId) sentTo.add(data.toUserId);
+  });
+
+  writeSentCache(auth.currentUser.uid, sentTo);
+}
+
+setSentRequests(sentTo);
+
+
+  // 3) Load nearby players only (geohash bounds)
+if (myLat == null || myLng == null) {
   setRawMatches([]);
   setLastUpdated(Date.now());
   return;
 }
 
-   const myBand = (
-  myData.skillBand ||
-  skillFromUTR((myData.skillRating ?? myData.utr) ?? null) ||
-  legacyToBand(myData.skillLevel) ||
-  ""
-) as SkillBand | "";
-setMyProfile({ ...myData, skillBand: myBand, birthYear: myBirthYear, age: myAge, id: mySnap.id });
+const allPlayers = await loadNearbyPlayers(myLat, myLng, MAX_DISTANCE_KM);
 
 
-   // 2) Postcode coords (cached)
-const coords = await loadPostcodeCoords();
+    const meRating = (myData.skillRating ?? myData.utr) ?? null;
 
-
-    // 3) Sent requests (limit to recent history to cut reads)
-const ninetyDaysAgo = Timestamp.fromMillis(Date.now() - 90 * 24 * 60 * 60 * 1000);
-const reqQ = query(
-  collection(db, "match_requests"),
-  where("fromUserId", "==", auth.currentUser.uid),
-  where("timestamp", ">=", ninetyDaysAgo)
-);
-const reqSnap = await getDocs(reqQ);
-
-    const sentTo = new Set<string>();
-    reqSnap.forEach((d) => { const data = d.data() as any; if (data.toUserId) sentTo.add(data.toUserId); });
-    setSentRequests(sentTo);
-
-    // 4) All players + score (mode-aware)
-    const snapshot = await getDocs(collection(db, "players"));
-const allPlayers = snapshot.docs.map((d) => {
-  const data = d.data() as any;
-
-  const birthYear =
-    typeof data.birthYear === "number" && Number.isFinite(data.birthYear)
-      ? data.birthYear
-      : null;
-
-  // ✅ Prefer birthYear-derived age; fallback to legacy data.age if present
-  const derivedAge = deriveAgeFromBirthYear(birthYear);
-  const legacyAge = typeof data.age === "number" && Number.isFinite(data.age) ? data.age : null;
-
-  return {
-    ...(data as Player),
-    id: d.id,
-    birthYear,
-    age: derivedAge ?? legacyAge ?? null,
-    gender: typeof data.gender === "string" ? data.gender : null,
-    // ✅ default to true so older profiles still show
-    isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
-  } as Player;
-});
-
-
-
-
-   const meBand   = myBand;
-const meRating = (myData.skillRating ?? myData.utr) ?? null; // ✅ prefer skillRating
-
-
+    // 4) Score + distance filter
     const scoredPlayers: ScoredPlayer[] = allPlayers
       .filter((p) => p.id !== auth.currentUser!.uid)
-      .filter((p) => p.isMatchable !== false) // ✅ NEW: hide users who turned it off
+      .filter((p) => p.isMatchable !== false)
       .map((p) => {
         let score = 0;
         let distance = Infinity;
-        const theirRating = (p.skillRating ?? p.utr) ?? null; // ✅ prefer skillRating
+
+        const theirRating = (p.skillRating ?? p.utr) ?? null;
         const theirBand: SkillBand | "" =
-  p.skillBand || skillFromUTR(theirRating) || legacyToBand(p.skillLevel) || "";
+          p.skillBand || skillFromUTR(theirRating) || legacyToBand(p.skillLevel) || "";
 
-const bDist = bandDistance(meBand, theirBand);
-const uGap  = utrDelta(meRating, theirRating);
+        const bDist = bandDistance(myBand, theirBand);
+        const uGap = utrDelta(meRating, theirRating);
 
-if (matchMode === "utr" && meRating != null) {
-  score += utrPoints(uGap);
-  score += bandPoints(bDist) * 0.5;
-} else if (matchMode === "skill") {
-  score += bandPoints(bDist);
-  score += utrPoints(uGap) * 0.5;
-} else {
-  if (meRating != null && theirRating != null) {
-    score += utrPoints(uGap);
-    score += bandPoints(bDist) * 0.5;
-  } else {
-    score += bandPoints(bDist);
-    score += utrPoints(uGap) * 0.5;
-  }
-}
-
+        if (matchMode === "utr" && meRating != null) {
+          score += utrPoints(uGap);
+          score += bandPoints(bDist) * 0.5;
+        } else if (matchMode === "skill") {
+          score += bandPoints(bDist);
+          score += utrPoints(uGap) * 0.5;
+        } else {
+          if (meRating != null && theirRating != null) {
+            score += utrPoints(uGap);
+            score += bandPoints(bDist) * 0.5;
+          } else {
+            score += bandPoints(bDist);
+            score += utrPoints(uGap) * 0.5;
+          }
+        }
 
         // Availability (cap 4)
-        const shared = A(p.availability).filter((a) =>
-          A(myData.availability).includes(a)
-        ).length;
+        const shared = A(p.availability).filter((a) => A(myData.availability).includes(a)).length;
         score += Math.min(shared, 4);
 
-        // Distance bonus
-      // Distance bonus + HARD FILTER (prevents interstate matches)
-const myC = coords[myData.postcode];
-const theirC = coords[p.postcode];
+        // Distance bonus + HARD FILTER
+        const theirLat = typeof p.lat === "number" ? p.lat : null;
+        const theirLng = typeof p.lng === "number" ? p.lng : null;
 
-if (myC && theirC) {
-  distance = getDistanceFromLatLonInKm(myC.lat, myC.lng, theirC.lat, theirC.lng);
+        if (myLat != null && myLng != null && theirLat != null && theirLng != null) {
+          distance = getDistanceFromLatLonInKm(myLat, myLng, theirLat, theirLng);
 
-  // 🚫 HARD FILTER: ignore players too far away
-  if (distance > MAX_DISTANCE_KM) {
-    return null;
-  }
+          if (distance > MAX_DISTANCE_KM) return null;
 
-  // Keep your local distance bonus
-  if (distance < 5) score += 3;
-  else if (distance < 10) score += 2;
-  else if (distance < 20) score += 1;
-} else {
-  // No coords => exclude to avoid weird far matches
-  return null;
-}
-
+          if (distance < 5) score += 3;
+          else if (distance < 10) score += 2;
+          else if (distance < 20) score += 1;
+        } else {
+          return null;
+        }
 
         return { ...p, score, distance, skillBand: theirBand };
-})
-.filter((p): p is ScoredPlayer => p !== null)
-.filter((p) => (p.score ?? 0) > 0);
-
+      })
+      .filter((p): p is ScoredPlayer => p !== null)
+      .filter((p) => (p.score ?? 0) > 0);
 
     setRawMatches(scoredPlayers);
     setLastUpdated(Date.now());
   } finally {
-  refreshingRef.current = false;
-  setRefreshing(false);
-}
+    refreshingRef.current = false;
+    setRefreshing(false);
+  }
+}, [matchMode, lastUpdated, loadNearbyPlayers]);
 
-}, [matchMode, lastUpdated, loadPostcodeCoords]);
 
   async function finalizeVerification() {
   if (!auth.currentUser) return;
@@ -588,7 +649,13 @@ void track("match_request_sent", {
       console.log("⚠️ Notification already exists, skipping duplicate.");
     }
 
-   setSentRequests((prev) => new Set(prev).add(match.id));
+   setSentRequests((prev) => {
+  const next = new Set(prev);
+  next.add(match.id);
+  writeSentCache(user.uid, next);
+  return next;
+});
+
 
 // 🔔 Notify onboarding tour
 window.dispatchEvent(new CustomEvent("tm:matchRequestSent"));

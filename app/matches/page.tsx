@@ -109,7 +109,20 @@ type Match = {
 };
 
 type PCMap = Record<string, { lat: number; lng: number }>;
-type PlayerLite = { postcode?: string; lat?: number; lng?: number; photoURL?: string; name?: string };
+type PlayerLite = {
+  postcode?: string;
+  lat?: number;
+  lng?: number;
+  photoURL?: string;
+  name?: string;
+
+  // ✅ new
+  skillBand?: string | null;
+  skillBandLabel?: string | null;
+  skillLevel?: string | null;          // legacy fallback
+  availability?: string[] | null;
+};
+
 
 function getDistanceFromLatLonInKm(
   lat1: number, lon1: number, lat2: number, lon2: number
@@ -322,28 +335,46 @@ const [unreadOnly, setUnreadOnly] = useState(false);
 const suggestingRef = useRef<Set<string>>(new Set());
 
 // 1) put this first
-const getOpponentPostcode = useCallback(async (opponentId: string): Promise<string | null> => {
-  // try cache first
-  const cached = oppCache[opponentId];
-  if (cached && cached.postcode) return cached.postcode || null;
+const oppCacheRef = useRef(oppCache);
+useEffect(() => {
+  oppCacheRef.current = oppCache;
+}, [oppCache]);
 
+const getOpponentPostcode = useCallback(async (opponentId: string): Promise<string | null> => {
   try {
+    const cached = oppCacheRef.current[opponentId];
+    if (cached?.postcode) return cached.postcode;
+
     const s = await getDoc(doc(db, "players", opponentId));
     const d = s.exists() ? (s.data() as any) : null;
     const pc = d?.postcode || null;
+
     setOppCache((prev) => ({
       ...prev,
       [opponentId]: d
-        ? { postcode: d.postcode, lat: d.lat, lng: d.lng, photoURL: d.photoURL, name: d.name }
+        ? {
+            postcode: d.postcode,
+            lat: d.lat,
+            lng: d.lng,
+            photoURL: d.photoURL ?? d.photoUrl ?? d.avatarUrl ?? null,
+            name: d.name,
+            skillBand: d.skillBand ?? null,
+            skillBandLabel: d.skillBandLabel ?? null,
+            skillLevel: d.skillLevel ?? null,
+            availability: Array.isArray(d.availability) ? d.availability : [],
+          }
         : null,
     }));
+
     return pc;
   } catch (e) {
     console.error("Failed to load opponent postcode", e);
     setOppCache((prev) => ({ ...prev, [opponentId]: null }));
     return null;
   }
-}, [oppCache]);
+}, []);
+
+
 
 // 2) then this
 const computeSuggestionSilently = useCallback(
@@ -392,6 +423,35 @@ const computeSuggestionSilently = useCallback(
   [currentUserId, myPlayer, getOpponentPostcode, setMatches]
 );
 
+const postcodeCoordsRef = useRef(postcodeCoords);
+useEffect(() => {
+  postcodeCoordsRef.current = postcodeCoords;
+}, [postcodeCoords]);
+
+const ensurePostcodeCoords = useCallback(async (postcode: string) => {
+  const pc = String(postcode || "").trim();
+  if (!pc) return;
+
+  if (postcodeCoordsRef.current[pc]) return;
+
+  try {
+    const snap = await getDoc(doc(db, "postcodes", pc));
+    if (!snap.exists()) return;
+
+    const d = snap.data() as any;
+    if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
+
+    setPostcodeCoords((prev) => ({
+      ...prev,
+      [pc]: { lat: d.lat, lng: d.lng },
+    }));
+  } catch (e) {
+    console.error("Failed to load postcode coords", pc, e);
+  }
+}, []);
+
+
+
 // put this near the top with your other refs
 const hydratingRef = useRef<Set<string>>(new Set());
 
@@ -400,16 +460,19 @@ useEffect(() => {
   // Find matches that have a court id but are missing exact lat/lng (or booking URL)
 const targets = matches
   .filter((m) => {
-    const missing = (
+    // ✅ Only hydrate for accepted matches
+    if (m.status !== "accepted") return false;
+
+    const missing =
       m.suggestedCourtLat == null ||
       m.suggestedCourtLng == null ||
       m.suggestedCourtBookingUrl == null ||
-      m.suggestedCourtAddress == null
-    );
-    // hydrate if: we have an ID OR at least a name — and something is missing
+      m.suggestedCourtAddress == null;
+
     return missing && (m.suggestedCourtId || m.suggestedCourtName);
   })
   .slice(0, 5);
+
 
 
   targets.forEach(async (m) => {
@@ -497,9 +560,31 @@ const resolvedId = found.resolvedId;
 // 3) then the effect that calls it
 useEffect(() => {
   if (!currentUserId || !myPlayer?.postcode || matches.length === 0) return;
-  const candidates = matches.filter((m) => !m.suggestedCourtName).slice(0, 3);
+
+  // ✅ Only suggest courts for accepted matches (and only if missing)
+  const candidates = matches
+    .filter((m) => m.status === "accepted" && !m.suggestedCourtName)
+    .slice(0, 3);
+
   candidates.forEach((m) => computeSuggestionSilently(m));
 }, [matches, currentUserId, myPlayer?.postcode, computeSuggestionSilently]);
+
+useEffect(() => {
+  if (!myPlayer?.postcode) return;
+
+  // always ensure mine
+  ensurePostcodeCoords(myPlayer.postcode);
+
+  // ensure opponents (from cache) for visible matches
+  const opponentPostcodes = new Set<string>();
+  matches.forEach((m) => {
+    const otherId = m.playerId === currentUserId ? m.opponentId : m.playerId;
+    const pc = oppCache[otherId]?.postcode;
+    if (pc) opponentPostcodes.add(pc);
+  });
+
+  opponentPostcodes.forEach((pc) => ensurePostcodeCoords(pc));
+}, [matches, currentUserId, myPlayer?.postcode, oppCache, ensurePostcodeCoords]);
 
 
 
@@ -530,6 +615,33 @@ useEffect(() => {
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+  if (!currentUserId) return;
+
+  (async () => {
+    try {
+      const snap = await getDoc(doc(db, "players", currentUserId));
+      if (!snap.exists()) {
+        setMyPlayer(null);
+        return;
+      }
+      const d = snap.data() as any;
+
+      setMyPlayer({
+        postcode: d.postcode ?? undefined,
+        lat: typeof d.lat === "number" ? d.lat : undefined,
+        lng: typeof d.lng === "number" ? d.lng : undefined,
+        name: d.name ?? undefined,
+        photoURL: d.photoURL ?? d.photoUrl ?? d.avatarUrl ?? undefined,
+      });
+    } catch (e) {
+      console.error("Failed to load my player", e);
+      setMyPlayer(null);
+    }
+  })();
+}, [currentUserId]);
+
 
 useEffect(() => {
   if (!currentUserId) return;
@@ -624,18 +736,25 @@ useEffect(() => {
       const photo =
         d?.photoURL ?? d?.photoUrl ?? d?.avatarUrl ?? null;
 
-      setOppCache((prev) => ({
-        ...prev,
-        [uid]: d
-          ? {
-              postcode: d.postcode,
-              lat: d.lat,
-              lng: d.lng,
-              photoURL: photo, // normalize to .photoURL
-              name: d.name,
-            }
-          : null,
-      }));
+setOppCache((prev) => ({
+  ...prev,
+  [uid]: d
+    ? {
+        postcode: d.postcode,
+        lat: d.lat,
+        lng: d.lng,
+        photoURL: photo,
+        name: d.name,
+
+        // ✅ add these
+        skillBand: d.skillBand ?? null,
+        skillBandLabel: d.skillBandLabel ?? null,
+        skillLevel: d.skillLevel ?? null,
+        availability: Array.isArray(d.availability) ? d.availability : [],
+      }
+    : null,
+}));
+
     } catch {
       setOppCache((prev) => ({ ...prev, [uid]: null }));
     }
@@ -847,6 +966,21 @@ const renderMatch = useCallback((match: Match) => {
   const isMine = match.playerId === currentUserId;
   const other  = isMine ? match.opponentId : match.playerId;
   const profileHref = `/players/${other}`;
+    // ✅ Opponent meta for pending card
+  const opp = oppCache[other];
+
+  const skillText =
+    opp?.skillBandLabel ||
+    opp?.skillLevel ||
+    (typeof opp?.skillBand === "string" ? opp.skillBand : null) ||
+    "—";
+
+  const availabilityText =
+    Array.isArray(opp?.availability) && opp.availability.length > 0
+      ? opp.availability.slice(0, 2).join(", ") +
+        (opp.availability.length > 2 ? ` +${opp.availability.length - 2}` : "")
+      : "—";
+
 const otherName =
   oppCache[other]?.name ??
   (isMine ? (match.toName || "Opponent") : (match.fromName || "Opponent"));
@@ -905,11 +1039,23 @@ const initials = (otherName || "?").trim().charAt(0).toUpperCase();
             const s = await getDoc(doc(db, "players", other));
             const d = s.exists() ? (s.data() as any) : null;
             setOppCache((prev) => ({
-              ...prev,
-              [other]: d
-                ? { postcode: d.postcode, lat: d.lat, lng: d.lng, photoURL: d.photoURL, name: d.name }
-                : null,
-            }));
+  ...prev,
+  [other]: d
+    ? {
+        postcode: d.postcode,
+        lat: d.lat,
+        lng: d.lng,
+        photoURL: d.photoURL ?? d.photoUrl ?? d.avatarUrl ?? null,
+        name: d.name,
+
+        skillBand: d.skillBand ?? null,
+        skillBandLabel: d.skillBandLabel ?? null,
+        skillLevel: d.skillLevel ?? null,
+        availability: Array.isArray(d.availability) ? d.availability : [],
+      }
+    : null,
+}));
+
           } catch {
             setOppCache((prev) => ({ ...prev, [other]: null }));
           }
@@ -1001,30 +1147,45 @@ return (
         <p className="mt-2 text-sm text-gray-700 overflow-hidden text-ellipsis whitespace-nowrap block w-full">
           {match.message || "No message"}
         </p>
+        {/* ✅ Pending-only meta chips (distance / skill / availability) */}
+{match.status !== "accepted" && (
+  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+    <span className="rounded-full bg-gray-100 px-2.5 py-1 ring-1 ring-gray-200">
+      Distance: {typeof distanceKm === "number" ? `${distanceKm} km` : "—"}
+    </span>
+
+    <span className="rounded-full bg-gray-100 px-2.5 py-1 ring-1 ring-gray-200">
+      Skill: {skillText}
+    </span>
+
+    <span className="rounded-full bg-gray-100 px-2.5 py-1 ring-1 ring-gray-200">
+      Availability: {availabilityText}
+    </span>
+  </div>
+)}
+
 
 {/* Meta — line 2 (court chip) */}
-<div className="mt-4 flex items-center justify-center w-full">
-  {match.suggestedCourtName ? (
-<CourtBadge
-  name={match.suggestedCourtName}
-  lat={match.suggestedCourtLat}
-  lng={match.suggestedCourtLng}
-  bookingUrl={
-    match.status === "accepted"
-      ? match.suggestedCourtBookingUrl
-      : undefined
-  }
-  address={match.suggestedCourtAddress}
-  courtId={match.suggestedCourtId}
-/>
+{match.status === "accepted" && (
+  <div className="mt-4 flex items-center justify-center w-full">
+    {match.suggestedCourtName ? (
+      <CourtBadge
+        name={match.suggestedCourtName}
+        lat={match.suggestedCourtLat}
+        lng={match.suggestedCourtLng}
+        bookingUrl={match.suggestedCourtBookingUrl}
+        address={match.suggestedCourtAddress}
+        courtId={match.suggestedCourtId}
+      />
+    ) : (
+      <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Finding court…
+      </span>
+    )}
+  </div>
+)}
 
-  ) : (
-    <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      Finding court…
-    </span>
-  )}
-</div>
 
 
       </div>
@@ -1188,6 +1349,7 @@ return (
   router,
   handleStartMatch,
   handleCompleteGame,
+  handleSuggestCourt,
   deleteMatch,
   myPlayer,
   postcodeCoords,
@@ -1314,7 +1476,6 @@ const visibleMatches = useMemo(() => {
 
   return enriched.map((e) => e.m);
 }, [matches, tab, direction, currentUserId, queryText, unreadOnly, sortBy, distanceFor]);
-
 
 
 return (
@@ -1514,6 +1675,7 @@ return (
     </div>
   </div>
 )}
+
 
 
   </div>
