@@ -161,7 +161,7 @@ await sendEmailVerification(auth.currentUser, {
     }}
     className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200"
   >
-    I verified — continue
+    I've verified my email — continue
   </button>
 </div>
 
