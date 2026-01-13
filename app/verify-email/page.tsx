@@ -8,12 +8,7 @@ import { onAuthStateChanged, sendEmailVerification, signOut } from "firebase/aut
 import { Mail, ShieldCheck, Loader2 } from "lucide-react";
 
 // Use your verified custom domain for email action links (Universal/App Links)
-const APP_ORIGIN =
   process.env.NEXT_PUBLIC_APP_ORIGIN || "https://tennis-mate.com.au";
-
-// After verification, send the user back into the app
-const buildVerifyReturnUrl = () => `${APP_ORIGIN}/auth/email-action?mode=verify`;
-
 
 export default function VerifyEmailPage() {
   const router = useRouter();
@@ -53,20 +48,11 @@ export default function VerifyEmailPage() {
     setSending(true);
 
     try {
-      const returnUrl = buildVerifyReturnUrl();
-
 await sendEmailVerification(auth.currentUser, {
-  url: returnUrl,
-  handleCodeInApp: true, // keeps the "tap link → open app" style flow
-
-  // App IDs MUST match your actual builds
-  iOS: { bundleId: "au.com.tennismatch.tennismate" },
-  android: {
-    packageName: "com.tennismate.app",
-    installApp: true,
-    minimumVersion: "1",
-  },
+  url: "https://tennis-mate.com.au/verified",
+  handleCodeInApp: false,
 });
+
 
 
       setCooldown(60);
