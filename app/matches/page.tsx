@@ -109,6 +109,27 @@ type Match = {
 };
 
 type PCMap = Record<string, { lat: number; lng: number }>;
+
+type LatLng = { lat: number; lng: number };
+
+const getPostcodeLatLng = async (postcode?: string | null): Promise<LatLng | null> => {
+  const pc = String(postcode || "").trim();
+  if (!pc) return null;
+
+  try {
+    const snap = await getDoc(doc(db, "postcodes", pc));
+    if (!snap.exists()) return null;
+
+    const d = snap.data() as any;
+    if (typeof d.lat !== "number" || typeof d.lng !== "number") return null;
+
+    return { lat: d.lat, lng: d.lng };
+  } catch (e) {
+    console.error("Failed to load postcode lat/lng:", pc, e);
+    return null;
+  }
+};
+
 type PlayerLite = {
   postcode?: string;
   lat?: number;
@@ -386,7 +407,13 @@ const computeSuggestionSilently = useCallback(
       const otherId = match.playerId === currentUserId ? match.opponentId : match.playerId;
       const oppPostcode = await getOpponentPostcode(otherId);
       if (!oppPostcode) return;
-      const res = await suggestCourt(myPlayer.postcode, oppPostcode, { maxResults: 1, searchRadiusKm: 15 });
+      const myLatLng = await getPostcodeLatLng(myPlayer.postcode);
+const oppLatLng = await getPostcodeLatLng(oppPostcode);
+
+if (!myLatLng || !oppLatLng) return;
+
+const res = await suggestCourt(myLatLng, oppLatLng, { maxResults: 1, searchRadiusKm: 15 });
+
       const top = res.results?.[0];
       if (!top) return;
 
@@ -899,10 +926,19 @@ const handleSuggestCourt = useCallback(async (match: Match) => {
     }
 
     // Ask the suggestor for the top result near the midpoint
-    const res = await suggestCourt(myPlayer.postcode, oppPostcode, {
-      maxResults: 3,
-      searchRadiusKm: 15,
-    });
+const myLatLng = await getPostcodeLatLng(myPlayer.postcode);
+const oppLatLng = await getPostcodeLatLng(oppPostcode);
+
+if (!myLatLng || !oppLatLng) {
+  alert("Could not find coordinates for one of the postcodes. Please check both profiles have valid postcodes.");
+  return;
+}
+
+const res = await suggestCourt(myLatLng, oppLatLng, {
+  maxResults: 3,
+  searchRadiusKm: 15,
+});
+
     const top = res.results?.[0];
     if (!top) {
       alert("No nearby courts found. Try widening the search radius later.");
