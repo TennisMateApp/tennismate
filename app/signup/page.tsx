@@ -290,14 +290,18 @@ if (isSupportedRegion) {
 
   try {
     const pcSnap = await getDoc(doc(db, "postcodes", formData.postcode));
-    if (pcSnap.exists()) {
-      const pc = pcSnap.data() as any;
-      if (typeof pc.lat === "number" && typeof pc.lng === "number") {
-        lat = pc.lat;
-        lng = pc.lng;
-        geohash = geohashForLocation([lat, lng]);
-      }
-    }
+   if (pcSnap.exists()) {
+  const pc = pcSnap.data() as any;
+
+  if (typeof pc.lat === "number" && typeof pc.lng === "number") {
+    lat = pc.lat;
+    lng = pc.lng;
+
+    // ✅ use the proven-number values directly
+    geohash = geohashForLocation([pc.lat, pc.lng]);
+  }
+}
+
   } catch (e) {
     console.warn("Postcode lookup failed; continuing without lat/lng/geohash", e);
   }
