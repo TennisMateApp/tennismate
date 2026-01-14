@@ -50,6 +50,7 @@ import GetTheAppPrompt from "@/components/growth/GetTheAppPrompt";
 import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { track, trackSetUserId } from "@/lib/track";
 import AgeGateModal from "@/components/AgeGateModal";
+import Image from "next/image";
 
 
 function useAppBootLoader() {
@@ -148,9 +149,10 @@ useEffect(() => {
 }, []);
 
 
-  const [user, setUser] = useState<any>(null);
-  const [photoURL, setPhotoURL] = useState<string | null>(null);
-  const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
+const [user, setUser] = useState<any>(null);
+const [photoURL, setPhotoURL] = useState<string | null>(null);
+const [photoThumbURL, setPhotoThumbURL] = useState<string | null>(null);
+const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
   const [unreadMessages, setUnreadMessages] = useState<any[]>([]);
   const [showSettings, setShowSettings] = useState(false);
@@ -271,8 +273,10 @@ unsubPlayer = onSnapshot(playerRef, (docSnap) => {
   if (docSnap.exists()) {
     const data = docSnap.data() as any;
 
-    setPhotoURL(typeof data.photoURL === "string" ? data.photoURL : null);
-    setProfileComplete(data.profileComplete === true);
+setPhotoURL(typeof data.photoURL === "string" ? data.photoURL : null);
+setPhotoThumbURL(typeof data.photoThumbURL === "string" ? data.photoThumbURL : null);
+setProfileComplete(data.profileComplete === true);
+
 
     // ✅ AGE GATE (birthYear): show modal if missing/invalid or under 18
     const birthYear =
@@ -299,7 +303,8 @@ unsubPlayer = onSnapshot(playerRef, (docSnap) => {
   } else {
     // No player doc
     setPhotoURL(null);
-    setProfileComplete(false);
+setPhotoThumbURL(null);
+setProfileComplete(false);
 
     if (canShowGate) {
       setShowAgeGate(true);
@@ -364,10 +369,11 @@ void track("logout");
 
   tourShownThisSession.current = false; // ✅ reset on logout
   
-  setUser(null);
-      setPhotoURL(null);
-      setShowTour(false);
-      setProfileComplete(null);
+setUser(null);
+setPhotoURL(null);
+setPhotoThumbURL(null);
+setShowTour(false);
+setProfileComplete(null);
     }
   });
 
@@ -637,17 +643,24 @@ if (shouldGateToVerify) {
                     <nav className="flex items-center space-x-6 text-sm">
               {user ? (
                 <>
-                  <Link href="/profile" title="Profile" data-tour="profile">
-                    {photoURL ? (
-                      <img
-                        src={photoURL}
-                        alt="Profile"
-                        className="w-8 h-8 rounded-full object-cover border border-green-600"
-                      />
-                    ) : (
-                      <User className="w-6 h-6 text-blue-600 hover:text-blue-800" />
-                    )}
-                  </Link>
+                <Link href="/profile" title="Profile" data-tour="profile">
+  {photoThumbURL || photoURL ? (
+    <div className="relative w-8 h-8 rounded-full overflow-hidden border border-green-600 bg-white">
+      {/* instant placeholder so it never feels “blank” */}
+      <div className="absolute inset-0 animate-pulse bg-gray-200" />
+      <Image
+        src={(photoThumbURL || photoURL) as string}
+        alt="Profile"
+        fill
+        sizes="32px"
+        className="object-cover"
+      />
+    </div>
+  ) : (
+    <User className="w-6 h-6 text-blue-600 hover:text-blue-800" />
+  )}
+</Link>
+
 
                   {/* Directory */}
                   <Link href="/directory" title="Directory" data-tour="directory">

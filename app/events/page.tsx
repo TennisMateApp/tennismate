@@ -32,7 +32,9 @@ type EventItem = {
 
 type Player = {
   name?: string;
-  photoURL?: string;
+  photoURL?: string | null;
+  photoThumbURL?: string | null; // ✅ NEW
+  avatar?: string | null;        // ✅ optional fallback if you have it
   skillLevel?: number | null;
 };
 
@@ -47,9 +49,33 @@ async function fetchPlayer(uid: string): Promise<Player | undefined> {
   if (playerCache.has(uid)) return playerCache.get(uid);
   const snap = await getDoc(doc(db, "players", uid));
   if (!snap.exists()) return undefined;
-  const data = snap.data() as Player;
-  playerCache.set(uid, data);
-  return data;
+const data = snap.data() as any;
+
+// ✅ prefer thumb, then full, then other legacy fields
+const photoThumbURL =
+  typeof data.photoThumbURL === "string" ? data.photoThumbURL : null;
+
+const photoURL =
+  typeof data.photoURL === "string" ? data.photoURL :
+  typeof data.photoUrl === "string" ? data.photoUrl :
+  null;
+
+const avatar =
+  typeof data.avatar === "string" ? data.avatar :
+  typeof data.avatarUrl === "string" ? data.avatarUrl :
+  null;
+
+const player: Player = {
+  name: typeof data.name === "string" ? data.name : undefined,
+  photoThumbURL,
+  photoURL,
+  avatar,
+  skillLevel: typeof data.skillLevel === "number" ? data.skillLevel : null,
+};
+
+playerCache.set(uid, player);
+return player;
+
 }
 
 type Filter = "all" | "singles" | "doubles" | "social" | "mine";
@@ -197,7 +223,8 @@ const ev: EnrichedEvent = { ...data, id: d.id };
     </main>
   );
 }
-
+const pickPlayerImg = (p?: Player) =>
+  p?.photoThumbURL || p?.photoURL || p?.avatar || "/default-avatar.png";
 /* ------------------------- Event Card ------------------------- */
 
 function EventCard({ ev }: { ev: EnrichedEvent }) {
@@ -232,10 +259,11 @@ function EventCard({ ev }: { ev: EnrichedEvent }) {
             {ev.host && (
               <>
                 <img
-                  src={ev.host.photoURL || "/default-avatar.png"}
-                  alt={ev.host.name || "Host"}
-                  className="h-8 w-8 rounded-full object-cover"
-                />
+  src={pickPlayerImg(ev.host)}
+  alt={ev.host.name || "Host"}
+  className="h-8 w-8 rounded-full object-cover"
+/>
+
                 <p className="text-sm text-gray-800">
                   Hosted by{" "}
                   <span className="font-medium">{ev.host.name || "Unknown"}</span>
@@ -247,12 +275,13 @@ function EventCard({ ev }: { ev: EnrichedEvent }) {
               <div className="ml-2 flex -space-x-2">
                 {ev.participantThumbs.map((p, i) => (
                   <img
-                    key={i}
-                    src={p.photoURL || "/default-avatar.png"}
-                    alt={p.name || "Player"}
-                    title={p.name || "Player"}
-                    className="h-7 w-7 rounded-full border-2 border-white object-cover"
-                  />
+  key={i}
+  src={pickPlayerImg(p)}
+  alt={p.name || "Player"}
+  title={p.name || "Player"}
+  className="h-7 w-7 rounded-full border-2 border-white object-cover"
+/>
+
                 ))}
               </div>
             )}

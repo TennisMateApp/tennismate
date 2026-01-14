@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { collection, doc, getDoc, getDocs, query, orderBy } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  orderBy,
+  runTransaction,
+  serverTimestamp,
+  increment,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseConfig";
 import { MapPin } from "lucide-react";
 
@@ -15,6 +25,15 @@ type CoachListItem = {
   coachingSkillLevels: string[];
   contactFirstForRate: boolean;
 };
+
+function dayKeyLocalAU(): string {
+  // Melbourne time: use local device time (good enough for MVP)
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}`; // e.g. 20260114
+}
 
 function isVicPostcode(postcode: unknown): boolean {
   if (typeof postcode !== "string") return false;
@@ -46,6 +65,64 @@ function formatCoachingExperience(raw: unknown): string {
 
   return `${s} years coaching`;
 }
+
+async function recordCoachProfileClickUnique(coachId: string) {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+
+  const dayKey = dayKeyLocalAU();
+
+  // Optional snapshot fields to help you analyse later
+  const playerSnap = await getDoc(doc(db, "players", uid));
+  const player = (playerSnap.data() as any) || {};
+  const viewerName = (player.name ?? player.displayName ?? "").toString();
+  const viewerPostcode = (player.postcode ?? "").toString();
+
+  const coachRef = doc(db, "coaches", coachId);
+
+  // Lifetime unique viewer doc
+  const viewerRef = doc(db, "coaches", coachId, "viewers", uid);
+
+  // Daily unique click doc (one per user per day)
+  const uniqueDayId = `${uid}_${dayKey}`;
+  const uniqueClickRef = doc(db, "coaches", coachId, "uniqueClicks", uniqueDayId);
+
+  await runTransaction(db, async (tx) => {
+    // Always increment total opens
+    tx.set(coachRef, { viewCount: increment(1) }, { merge: true });
+
+    // Lifetime unique viewers (increment only if first time ever)
+    const viewerSnap = await tx.get(viewerRef);
+    if (!viewerSnap.exists()) {
+      tx.set(viewerRef, {
+        viewerUid: uid,
+        viewerName: viewerName || null,
+        viewerPostcode: viewerPostcode || null,
+        firstViewedAt: serverTimestamp(),
+        lastViewedAt: serverTimestamp(),
+      });
+      tx.set(coachRef, { uniqueViewerCount: increment(1) }, { merge: true });
+    } else {
+      tx.update(viewerRef, {
+        lastViewedAt: serverTimestamp(),
+        viewerName: viewerName || null,
+        viewerPostcode: viewerPostcode || null,
+      });
+    }
+
+    // Daily unique clicks (increment only if first click today)
+    const uniqueSnap = await tx.get(uniqueClickRef);
+    if (!uniqueSnap.exists()) {
+      tx.set(uniqueClickRef, {
+        viewerUid: uid,
+        dayKey,
+        createdAt: serverTimestamp(),
+      });
+      tx.set(coachRef, { uniqueClickCount: increment(1) }, { merge: true });
+    }
+  });
+}
+
 
 export default function CoachesListPage() {
   const [loading, setLoading] = useState(true);
@@ -176,11 +253,12 @@ export default function CoachesListPage() {
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-3">
           {coaches.map((c) => (
-            <Link
-              key={c.id}
-              href={`/coaches/${c.id}`}
-              className="rounded-2xl border p-4 hover:bg-gray-50 transition"
-            >
+           <Link
+  key={c.id}
+  href={`/coaches/${c.id}`}
+  onClick={() => recordCoachProfileClickUnique(c.id)}
+  className="rounded-2xl border p-4 hover:bg-gray-50 transition"
+>
               <div className="flex gap-4">
                 <div className="h-14 w-14 rounded-full overflow-hidden border bg-white shrink-0">
                   {c.avatar ? (

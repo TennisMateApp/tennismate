@@ -135,6 +135,7 @@ type PlayerLite = {
   lat?: number;
   lng?: number;
   photoURL?: string;
+  photoThumbURL?: string; 
   name?: string;
 
   // ✅ new
@@ -378,6 +379,7 @@ const getOpponentPostcode = useCallback(async (opponentId: string): Promise<stri
             lat: d.lat,
             lng: d.lng,
             photoURL: d.photoURL ?? d.photoUrl ?? d.avatarUrl ?? null,
+            photoThumbURL: d.photoThumbURL ?? null,
             name: d.name,
             skillBand: d.skillBand ?? null,
             skillBandLabel: d.skillBandLabel ?? null,
@@ -582,7 +584,7 @@ const resolvedId = found.resolvedId;
       hydratingRef.current.delete(m.id);
     }
   });
-}, [matches, db]);
+}, [matches]);
 
 // 3) then the effect that calls it
 useEffect(() => {
@@ -661,6 +663,7 @@ useEffect(() => {
         lng: typeof d.lng === "number" ? d.lng : undefined,
         name: d.name ?? undefined,
         photoURL: d.photoURL ?? d.photoUrl ?? d.avatarUrl ?? undefined,
+        photoThumbURL: d.photoThumbURL ?? undefined,
       });
     } catch (e) {
       console.error("Failed to load my player", e);
@@ -760,8 +763,8 @@ useEffect(() => {
       const d = snap.exists() ? (snap.data() as any) : null;
 
       // Accept common field names for avatar
-      const photo =
-        d?.photoURL ?? d?.photoUrl ?? d?.avatarUrl ?? null;
+      const photo = d?.photoURL ?? d?.photoUrl ?? d?.avatarUrl ?? null;
+      const thumb = d?.photoThumbURL ?? null;
 
 setOppCache((prev) => ({
   ...prev,
@@ -771,6 +774,7 @@ setOppCache((prev) => ({
         lat: d.lat,
         lng: d.lng,
         photoURL: photo,
+        photoThumbURL: thumb,
         name: d.name,
 
         // ✅ add these
@@ -1021,8 +1025,13 @@ const otherName =
   oppCache[other]?.name ??
   (isMine ? (match.toName || "Opponent") : (match.fromName || "Opponent"));
 
-const avatarUrl = oppCache[other]?.photoURL || "";
+const avatarSrc =
+  oppCache[other]?.photoThumbURL ||
+  oppCache[other]?.photoURL ||
+  "";
+
 const initials = (otherName || "?").trim().charAt(0).toUpperCase();
+
 
   const inProgress = match.status === "accepted" && !!match.started;
 
@@ -1082,6 +1091,7 @@ const initials = (otherName || "?").trim().charAt(0).toUpperCase();
         lat: d.lat,
         lng: d.lng,
         photoURL: d.photoURL ?? d.photoUrl ?? d.avatarUrl ?? null,
+        photoThumbURL: d.photoThumbURL ?? null, // ✅ ADD
         name: d.name,
 
         skillBand: d.skillBand ?? null,
@@ -1091,6 +1101,7 @@ const initials = (otherName || "?").trim().charAt(0).toUpperCase();
       }
     : null,
 }));
+
 
           } catch {
             setOppCache((prev) => ({ ...prev, [other]: null }));
@@ -1135,17 +1146,27 @@ return (
       <div className="min-w-0 flex-1">
         {/* Header (opponent-first) */}
         <div className="flex items-start gap-3 pr-24 sm:pr-12">
-          {/* Avatar */}
-          <div className="h-10 w-10 rounded-full overflow-hidden bg-gray-100 ring-1 ring-black/5 shrink-0">
-            {avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatarUrl} alt={otherName} className="h-full w-full object-cover" />
-            ) : (
-              <div className="h-full w-full grid place-items-center text-sm text-gray-600">
-                {initials}
-              </div>
-            )}
-          </div>
+ {/* Avatar */}
+<div className="relative h-10 w-10 rounded-full overflow-hidden bg-gray-100 ring-1 ring-black/5 shrink-0">
+  {/* subtle placeholder while image loads/decodes */}
+  <div className="absolute inset-0 animate-pulse bg-gray-200" />
+
+  {avatarSrc ? (
+    <Image
+      src={avatarSrc}
+      alt={otherName}
+      fill
+      sizes="40px"
+      className="object-cover"
+    />
+  ) : (
+    <div className="relative h-full w-full grid place-items-center text-sm text-gray-600">
+      {initials}
+    </div>
+  )}
+</div>
+
+
 
           {/* Name + status */}
           <div className="min-w-0 flex-1">

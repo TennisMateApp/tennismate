@@ -43,6 +43,8 @@ interface Player {
   bio: string;
   email: string;
   photoURL?: string;
+  photoThumbURL?: string | null;
+  avatar?: string | null;
   birthYear?: number | null;
   age?: number | null;        // ✅ NEW
   gender?: string | null;     // ✅ NEW
@@ -270,6 +272,14 @@ const loadNearbyPlayers = useCallback(
           const legacyAge =
             typeof data.age === "number" && Number.isFinite(data.age) ? data.age : null;
 
+            const photoURL =
+            typeof data.photoThumbURL === "string" ? data.photoThumbURL :
+            typeof data.photoURL === "string" ? data.photoURL :
+            typeof data.photoUrl === "string" ? data.photoUrl :
+            typeof data.avatar === "string" ? data.avatar :
+            typeof data.avatarUrl === "string" ? data.avatarUrl :
+            null;
+
           out.push({
             ...(data as Player),
             id: d.id,
@@ -280,6 +290,9 @@ const loadNearbyPlayers = useCallback(
             lat: typeof data.lat === "number" ? data.lat : null,
             lng: typeof data.lng === "number" ? data.lng : null,
             geohash: typeof data.geohash === "string" ? data.geohash : null,
+            photoURL: photoURL ?? undefined,
+            photoThumbURL: typeof data.photoThumbURL === "string" ? data.photoThumbURL : null,
+            avatar: typeof data.avatar === "string" ? data.avatar : null,
           });
         });
       })
@@ -835,6 +848,8 @@ if (myProfileHidden) {
   );
 }
 
+
+
   return (
   <div
     className="max-w-2xl mx-auto p-4 pb-28 sm:p-6"
@@ -1021,6 +1036,8 @@ if (myProfileHidden) {
   <>
     <ul className="space-y-4">
           {visibleMatches.map((match, index) => {
+             const avatarSrc = match.photoThumbURL || match.photoURL || null;
+  const initials = (match.name || "?").trim().charAt(0).toUpperCase();
             const alreadySent = sentRequests.has(match.id);
             const isNew =
               match.timestamp &&
@@ -1028,185 +1045,185 @@ if (myProfileHidden) {
                 new Date(match.timestamp.toDate?.() || match.timestamp).getTime() <
                 3 * 24 * 60 * 60 * 1000;
 
-            return (
-<li
-  role="region"
-  aria-label={`${match.name} match card`}
-  key={match.id}
-  data-tour={index === 0 ? "top-match" : undefined}
-  className="rounded-2xl bg-white ring-1 ring-black/5 p-4 shadow-sm hover:shadow-md transition"
->
-
-  <div className="flex items-start gap-3">
-    {/* Avatar (smaller on mobile) */}
-    {match.photoURL ? (
-      <img
-        src={match.photoURL}
-        alt=""
-        className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover bg-gray-100"
-        loading="lazy"
-        decoding="async"
-      />
-    ) : (
-      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gray-200 flex items-center justify-center text-[11px] text-gray-600">
-        No Photo
-      </div>
-    )}
-
-    <div className="min-w-0 flex-1">
-      {/* Name + chips */}
-      <div className="flex flex-wrap items-center gap-2">
-       <h2 className="font-semibold text-gray-900 text-base sm:text-lg truncate max-w-[70%]">
-          {match.name}
-        </h2>
-
-        {typeof match.distance === "number" && (
-          <span className="text-[10px] sm:text-[11px] ml-auto px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-           {match.postcode} · ~{match.distance} km  
-          </span>
+return (
+  <li
+    role="region"
+    aria-label={`${match.name} match card`}
+    key={match.id}
+    data-tour={index === 0 ? "top-match" : undefined}
+    className="rounded-2xl bg-white ring-1 ring-black/5 p-4 shadow-sm hover:shadow-md transition"
+  >
+    <div className="flex items-start gap-3">
+      <div className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full overflow-hidden bg-gray-100 ring-1 ring-black/5 shrink-0">
+        {avatarSrc ? (
+          <Image
+            src={avatarSrc}
+            alt={match.name ? `${match.name} profile photo` : "Profile photo"}
+            fill
+            sizes="56px"
+            className="object-cover"
+          />
+        ) : (
+          <div className="h-full w-full grid place-items-center text-[11px] text-gray-600">
+            {initials}
+          </div>
         )}
       </div>
 
-      {/* Availability chips: limited on mobile, full on desktop */}
-      {(() => {
-        const avail = A(match.availability);
-        const visible = avail.slice(0, 2);
-        const remaining = avail.length - visible.length;
+      <div className="min-w-0 flex-1">
+        {/* Name + chips */}
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="font-semibold text-gray-900 text-base sm:text-lg truncate max-w-[70%]">
+            {match.name}
+          </h2>
 
-        return (
-          <>
-            {/* Mobile (limited) */}
-            <div className="mt-1 flex flex-wrap gap-1.5 sm:hidden">
-            <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-  Skill: {labelForBand(
-    match.skillBand ||
-      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
-      legacyToBand(match.skillLevel),
-    match.skillBandLabel // 👈 prefer pretty label from Firestore
-  )}
-</span>
-
-           {typeof (match.skillRating ?? match.utr) === "number" && (
-            <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-              TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
-              </span>
-              )}
-
-              {visible.map((slot) => {
-                const shared = myProfile
-                  ? A(myProfile.availability).includes(slot)
-                  : false;
-                return (
-                  <span
-                    key={slot}
-                    className={
-                      "text-[10px] px-2 py-[2px] rounded-full " +
-                      (shared
-                        ? "bg-green-50 text-green-700 ring-1 ring-green-200"
-                        : "bg-gray-100 text-gray-700")
-                    }
-                  >
-                    {slot}
-                  </span>
-                );
-              })}
-              {remaining > 0 && (
-                <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                  +{remaining} more
-                </span>
-              )}
-            </div>
-
-            {/* Desktop (full) */}
-            <div className="mt-1 hidden sm:flex flex-wrap gap-1.5">
-              <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-  Skill: {labelForBand(
-    match.skillBand ||
-      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
-      legacyToBand(match.skillLevel),
-    match.skillBandLabel // 👈 prefer pretty label from Firestore
-  )}
-</span>
-
-         {typeof (match.skillRating ?? match.utr) === "number" && (
-          <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-          TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
-          </span>
+          {typeof match.distance === "number" && (
+            <span className="text-[10px] sm:text-[11px] ml-auto px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+              {match.postcode} · ~{match.distance} km
+            </span>
           )}
+        </div>
 
-              {avail.map((slot) => {
-                const shared = myProfile
-                  ? A(myProfile.availability).includes(slot)
-                  : false;
-                return (
-                  <span
-                    key={slot}
-                    className={
-                      "text-[11px] px-2 py-[2px] rounded-full " +
-                      (shared
-                        ? "bg-green-50 text-green-700 ring-1 ring-green-200"
-                        : "bg-gray-100 text-gray-700")
-                    }
-                  >
-                    {slot}
+        {/* Availability chips: limited on mobile, full on desktop */}
+        {(() => {
+          const avail = A(match.availability);
+          const visible = avail.slice(0, 2);
+          const remaining = avail.length - visible.length;
+
+          return (
+            <>
+              {/* Mobile (limited) */}
+              <div className="mt-1 flex flex-wrap gap-1.5 sm:hidden">
+                <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+                  Skill:{" "}
+                  {labelForBand(
+                    match.skillBand ||
+                      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
+                      legacyToBand(match.skillLevel),
+                    match.skillBandLabel
+                  )}
+                </span>
+
+                {typeof (match.skillRating ?? match.utr) === "number" && (
+                  <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+                    TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
                   </span>
-                );
-              })}
-            </div>
-          </>
-        );
-      })()}
+                )}
 
-      {/* Bio */}
-      {match.bio && (
-        <p className="mt-1 text-sm text-gray-700">
-          {match.bio.slice(0, 160)}
-          {match.bio.length > 160 && "…"}
-        </p>
-      )}
+                {visible.map((slot) => {
+                  const shared = myProfile
+                    ? A(myProfile.availability).includes(slot)
+                    : false;
+                  return (
+                    <span
+                      key={slot}
+                      className={
+                        "text-[10px] px-2 py-[2px] rounded-full " +
+                        (shared
+                          ? "bg-green-50 text-green-700 ring-1 ring-green-200"
+                          : "bg-gray-100 text-gray-700")
+                      }
+                    >
+                      {slot}
+                    </span>
+                  );
+                })}
 
-      {/* Actions: full-width on mobile, inline on desktop */}
-      <div className="mt-3 flex flex-col sm:flex-row gap-2">
-        <Link
-          href={`/players/${match.id}`}
-          className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-center"
-        >
-          View Profile
-        </Link>
+                {remaining > 0 && (
+                  <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+                    +{remaining} more
+                  </span>
+                )}
+              </div>
 
-        {sentRequests.has(match.id) ? (
-  <span className="w-full sm:w-auto text-green-700 text-sm font-medium flex items-center justify-center">
-    ✅ Request Sent
-  </span>
-) : (
-  <button
-    onClick={() => {
-      // 📊 GA4: user clicked "Invite to Play"
-      void track("match_request_click", {
-        to_user_id: match.id,
-        distance_km: typeof match.distance === "number" ? match.distance : null,
-        match_mode: matchMode, // "auto" | "skill" | "utr"
-      });
+              {/* Desktop (full) */}
+              <div className="mt-1 hidden sm:flex flex-wrap gap-1.5">
+                <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+                  Skill:{" "}
+                  {labelForBand(
+                    match.skillBand ||
+                      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
+                      legacyToBand(match.skillLevel),
+                    match.skillBandLabel
+                  )}
+                </span>
 
-      handleMatchRequest(match);
-    }}
-    disabled={sendingIds.has(match.id)}
-    data-tour={index === 0 ? "send-request" : undefined}
-    className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-    aria-label={`Request to play with ${match.name}`}
+                {typeof (match.skillRating ?? match.utr) === "number" && (
+                  <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
+                    TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
+                  </span>
+                )}
 
->
-    {sendingIds.has(match.id) ? "Sending…" : "Invite to Play"}
-  </button>
-)}
+                {avail.map((slot) => {
+                  const shared = myProfile
+                    ? A(myProfile.availability).includes(slot)
+                    : false;
+                  return (
+                    <span
+                      key={slot}
+                      className={
+                        "text-[11px] px-2 py-[2px] rounded-full " +
+                        (shared
+                          ? "bg-green-50 text-green-700 ring-1 ring-green-200"
+                          : "bg-gray-100 text-gray-700")
+                      }
+                    >
+                      {slot}
+                    </span>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
 
+        {/* Bio */}
+        {match.bio && (
+          <p className="mt-1 text-sm text-gray-700">
+            {match.bio.slice(0, 160)}
+            {match.bio.length > 160 && "…"}
+          </p>
+        )}
 
+        {/* Actions */}
+        <div className="mt-3 flex flex-col sm:flex-row gap-2">
+          <Link
+            href={`/players/${match.id}`}
+            className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-center"
+          >
+            View Profile
+          </Link>
+
+          {sentRequests.has(match.id) ? (
+            <span className="w-full sm:w-auto text-green-700 text-sm font-medium flex items-center justify-center">
+              ✅ Request Sent
+            </span>
+          ) : (
+            <button
+              onClick={() => {
+                void track("match_request_click", {
+                  to_user_id: match.id,
+                  distance_km:
+                    typeof match.distance === "number" ? match.distance : null,
+                  match_mode: matchMode,
+                });
+
+                handleMatchRequest(match);
+              }}
+              disabled={sendingIds.has(match.id)}
+              data-tour={index === 0 ? "send-request" : undefined}
+              className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              aria-label={`Request to play with ${match.name}`}
+            >
+              {sendingIds.has(match.id) ? "Sending…" : "Invite to Play"}
+            </button>
+          )}
+        </div>
       </div>
     </div>
-  </div>
-</li>
+  </li>
+);
 
-            );
           })}
     </ul>
 
