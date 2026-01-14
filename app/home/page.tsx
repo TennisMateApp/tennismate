@@ -84,6 +84,7 @@ type Tile = {
   imageSrc?: string;
   imagePosition?: string;
   badge?: React.ReactNode;  
+  dataTour?: string; 
 };
 
 export default function HomeDashboard() {
@@ -155,6 +156,7 @@ badge: (
   status: 'live',
   imageSrc: '/images/view-tennis-court.jpg',
   imagePosition: 'center 60%',
+  dataTour: 'courts-tile',
 },
 
     {
@@ -166,6 +168,7 @@ badge: (
   status: "live",
   imageSrc: "/images/coach.jpg",
   imagePosition: "center 20%",
+  dataTour: "coaches-tile",
 },
 
 
@@ -197,8 +200,24 @@ badge: (
       <section aria-label="Primary actions">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {tiles.map(({ key, ...tileProps }) => (
-            <ActionTile key={key} {...tileProps} dataTour={key === "courts" ? "courts-tile" : undefined} />
-          ))}
+  <ActionTile
+    key={key}
+    {...tileProps}
+dataTour={
+  key === "find-match"
+    ? "match-me-tile"
+    : key === "events"
+    ? "events-tile"
+    : key === "courts"
+    ? "courts-tile"
+    : key === "find-coach"
+    ? "coaches-tile"
+    : undefined
+}
+
+  />
+))}
+
         </div>
       </section>
     </main>
@@ -241,14 +260,15 @@ const content = (
     {/* ↓↓↓ Background image for tiles that provide imageSrc */}
     {imageSrc && (
       <>
-        <Image
-          src={imageSrc}
-          alt={title}
-          fill
-          className="object-cover transition-transform duration-300 group-hover:scale-105"
-          priority={false}
-          style={imagePosition ? { objectPosition: imagePosition } : undefined} 
-        />
+     <Image
+  src={imageSrc}
+  alt={title}
+  fill
+  sizes="(max-width: 640px) 100vw, 50vw"
+  className="object-cover transition-transform duration-300 group-hover:scale-105"
+  priority={title === "Match Me"} // only if you want 1 tile to load first
+  style={imagePosition ? { objectPosition: imagePosition } : undefined}
+/>
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
       </>
     )}

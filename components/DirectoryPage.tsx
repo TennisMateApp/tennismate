@@ -19,6 +19,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { GiTennisBall } from "react-icons/gi";
 import { skillFromUTR, SKILL_OPTIONS } from "@/lib/skills";
+import Image from "next/image";
  // assumes this returns a label like "Upper Beginner"
 
 interface Player {
@@ -29,6 +30,7 @@ interface Player {
   availability?: string[];
   bio?: string;
   photoURL?: string;
+  photoThumbURL?: string;
   timestamp?: any;
   joinedAt?: any;  
   createdAt?: any;
@@ -164,6 +166,7 @@ export default function DirectoryPage() {
             postcode: v.postcode ?? "",
             skillLevel: getSkillLabel(v),  
             photoURL: v.photoURL ?? undefined,
+            photoThumbURL: v.photoThumbURL ?? undefined,
             timestamp: v.timestamp ?? undefined,
             joinedAt: v.joinedAt ?? undefined, 
             createdAt: v.createdAt ?? undefined, 
@@ -234,6 +237,7 @@ export default function DirectoryPage() {
           postcode: v.postcode ?? "",
           skillLevel: getSkillLabel(v),
           photoURL: v.photoURL ?? undefined,
+          photoThumbURL: v.photoThumbURL ?? undefined,
           timestamp: v.timestamp ?? undefined,
           joinedAt: v.joinedAt ?? undefined,
           createdAt: v.createdAt ?? undefined,
@@ -305,6 +309,7 @@ export default function DirectoryPage() {
             postcode: v.postcode ?? "",
             skillLevel: getSkillLabel(v),  
             photoURL: v.photoURL ?? undefined,
+            photoThumbURL: v.photoThumbURL ?? undefined,
             timestamp: v.timestamp ?? undefined,
             joinedAt: v.joinedAt ?? undefined, 
             createdAt: v.createdAt ?? undefined, 
@@ -384,6 +389,7 @@ export default function DirectoryPage() {
           postcode: v.postcode ?? "",
           skillLevel: getSkillLabel(v),
           photoURL: v.photoURL ?? undefined,
+          photoThumbURL: v.photoThumbURL ?? undefined,
           timestamp: v.timestamp ?? undefined,
           joinedAt: v.joinedAt ?? undefined,
           createdAt: v.createdAt ?? undefined,
@@ -503,13 +509,19 @@ const isNew = createdMs > 0 && ageMs >= 0 && ageMs < ONE_WEEK;
                     aria-labelledby={`player-${player.id}-name`}
                   >
                     <div className="flex gap-4">
-                      <img
-                        src={player.photoURL || "/images/avatar-fallback.svg"}
-                        onError={onImgError}
-                        alt=""
-                        loading="lazy"
-                        className="w-14 h-14 rounded-full object-cover bg-gray-100"
-                      />
+                      <div className="relative w-14 h-14 rounded-full overflow-hidden bg-gray-100 shrink-0">
+  {/* ✅ instant placeholder (so it doesn't feel "last") */}
+  <div className="absolute inset-0 animate-pulse bg-gray-200" />
+
+  <Image
+    src={player.photoThumbURL || player.photoURL || "/images/avatar-fallback.svg"}
+    alt=""
+    fill
+    sizes="56px"
+    className="object-cover"
+  />
+</div>
+
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <h3 id={`player-${player.id}-name`} className="font-semibold truncate">

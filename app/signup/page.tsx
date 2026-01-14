@@ -33,6 +33,36 @@ function toSkillLabel(value: string | null | undefined) {
     .join(" ");
 }
 
+async function makeAvatarThumb(file: File, size = 160, quality = 0.72): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas not supported");
+
+  // Center crop to square
+  const srcW = bitmap.width;
+  const srcH = bitmap.height;
+  const srcSize = Math.min(srcW, srcH);
+  const sx = Math.floor((srcW - srcSize) / 2);
+  const sy = Math.floor((srcH - srcSize) / 2);
+
+  ctx.drawImage(bitmap, sx, sy, srcSize, srcSize, 0, 0, size, size);
+
+  const blob: Blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("Failed to create thumbnail blob"))),
+      "image/jpeg",
+      quality
+    );
+  });
+
+  return new File([blob], "avatar_thumb.jpg", { type: "image/jpeg" });
+}
+
 
 export default function SignupPage() {
   const [showEmailExistsModal, setShowEmailExistsModal] = useState(false);
@@ -255,16 +285,27 @@ const userCredential = await createUserWithEmailAndPassword(
 
       const user = userCredential.user;
 
-      // 2) Upload REQUIRED profile photo
-      if (!croppedImage) {
-        setErrors((prev) => ({ ...prev, photo: "Please add a profile photo." }));
-        setStatus("");
-        return;
-      }
-      let photoURL = DEFAULT_AVATAR;
-      const imageRef = ref(storage, `profile_pictures/${user.uid}/profile.jpg`);
-      await uploadBytes(imageRef, croppedImage);
-      photoURL = await getDownloadURL(imageRef);
+// 2) Upload REQUIRED profile photo (FULL + THUMB)
+if (!croppedImage) {
+  setErrors((prev) => ({ ...prev, photo: "Please add a profile photo." }));
+  setStatus("");
+  return;
+}
+
+let photoURL = DEFAULT_AVATAR;
+let photoThumbURL: string | null = null;
+
+// Full-size (for profile pages)
+const fullRef = ref(storage, `profile_pictures/${user.uid}/avatar_full.jpg`);
+await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
+photoURL = await getDownloadURL(fullRef);
+
+// Thumbnail (for lists/messages)
+const thumbFile = await makeAvatarThumb(croppedImage, 160, 0.72);
+const thumbRef = ref(storage, `profile_pictures/${user.uid}/avatar_thumb.jpg`);
+await uploadBytes(thumbRef, thumbFile, { contentType: "image/jpeg" });
+photoThumbURL = await getDownloadURL(thumbRef);
+
 
       // 3) users/{uid}
       await setDoc(
@@ -272,6 +313,8 @@ const userCredential = await createUserWithEmailAndPassword(
         {
           name: formData.name,
           email,
+          photoURL,
+          photoThumbURL,
           requireVerification: true,
           createdAt: serverTimestamp(),
         },
@@ -330,6 +373,7 @@ if (isSupportedRegion) {
       availability: formData.availability,
       bio: formData.bio,
       photoURL,
+      photoThumbURL,
       profileComplete: true,
       timestamp: serverTimestamp(),
     },

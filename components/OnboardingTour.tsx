@@ -55,6 +55,28 @@ const STEPS: TourStep[] = [
   },
 
   {
+  key: "match-me-home",
+  title: "Match Me",
+  body: "Start here to find compatible players based on skill, location, and availability.",
+  target: '[data-tour="match-me-tile"]',
+  placement: "top",
+  waitForTarget: true,
+  requireRoute: "/home",
+},
+
+{
+  key: "events-home",
+  title: "Events",
+  body: "Join social hits and local games — or host your own event and invite others.",
+  target: '[data-tour="events-tile"]',
+  placement: "top",
+  waitForTarget: true,
+  requireRoute: "/home",
+},
+
+
+
+  {
     key: "courts-intro",
     title: "Find Courts",
     body: "Browse tennis courts near you, see distances, and quickly find places to play.",
@@ -65,12 +87,14 @@ const STEPS: TourStep[] = [
   },
 
   {
-    key: "match-me",
-    title: "Match Me",
-    body: "Use Match Me to find compatible players based on skill, location, and availability.",
-    target: '[data-tour="match-me"]',
-    placement: "top",
-  },
+  key: "coaches-intro",
+  title: "Find Coaches",
+  body: "Looking for lessons? Browse local coaches, see their experience, and reach out directly from their profile.",
+  target: '[data-tour="coaches-tile"]',
+  placement: "top",
+  waitForTarget: true,
+  requireRoute: "/home",
+},
 
   {
     key: "matches",
@@ -218,11 +242,19 @@ if (el) {
 useEffect(() => {
   if (!open) return;
 
-  // ✅ Force navigation for Courts step
-  if (step.key === "courts-intro" && !pathname.startsWith("/home")) {
+  // ✅ Force navigation for Home tiles (Match Me tile, Courts, Coaches)
+const needsHome =
+  step.key === "match-me-home" ||
+  step.key === "events-home" ||   // ✅ add this
+  step.key === "courts-intro" ||
+  step.key === "coaches-intro";
+
+
+  if (needsHome && !pathname.startsWith("/home")) {
     router.push("/home");
   }
 }, [open, step.key, pathname, router]);
+
 
 
 
