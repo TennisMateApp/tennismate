@@ -97,6 +97,19 @@ const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
   }, []);
 }
 
+function shouldPingLastActive(uid: string) {
+  if (typeof window === "undefined") return false;
+
+  const key = `tm_lastActivePing_${uid}`;
+  const last = Number(localStorage.getItem(key) || "0");
+  const now = Date.now();
+
+  const THROTTLE_MS = 1000 * 60 * 30; // 30 mins (tweak: 15–60 mins)
+  if (now - last < THROTTLE_MS) return false;
+
+  localStorage.setItem(key, String(now));
+  return true;
+}
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   useSystemTheme(); // <-- Call the hook at the top of your component
@@ -194,6 +207,30 @@ const isActive = (href: string) =>
 const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
 
 const [showAgeGate, setShowAgeGate] = useState(false);
+
+// --- Update players/{uid}.lastActiveAt (throttled) ---
+useEffect(() => {
+  // Only run when we know the logged-in user
+  if (!user?.uid) return;
+
+  // Don't write on public routes or verify flow
+  if (PUBLIC_ROUTES.has(pathname || "")) return;
+  if (pathname?.startsWith("/verify-email")) return;
+
+  // Optional: don't write while age gate modal is blocking
+  if (showAgeGate) return;
+
+  // Throttle writes to avoid cost + spam
+  if (!shouldPingLastActive(user.uid)) return;
+
+  // Use setDoc(merge) so it works even if player doc doesn't exist yet
+  setDoc(
+    doc(db, "players", user.uid),
+    { lastActiveAt: serverTimestamp() },
+    { merge: true }
+  ).catch(() => {});
+}, [user?.uid, pathname, showAgeGate]);
+
 
 // Show "Matches" instead of "Events" when the user is in the match flow
 const inMatchFlow =
