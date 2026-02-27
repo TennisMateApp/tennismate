@@ -1496,46 +1496,7 @@ const byDirection = base.filter((m) => {
 }, [matches, tab, direction, currentUserId, queryText, unreadOnly, sortBy, distanceFor]);
 
 if (isDesktop) {
-  return (
-    <DesktopMatches
-      // ✅ user + sidebar identity
-      userName={myPlayer?.name ?? "Me"}
-      levelLabel={
-        (myPlayer as any)?.skillBandLabel ??
-        (myPlayer as any)?.skillLevel ??
-        "—"
-      }
-      avatarUrl={myPlayer?.photoThumbURL ?? myPlayer?.photoURL ?? null}
-
-      // ✅ data + caches
-      matches={matches}
-      visibleMatches={visibleMatches}
-      loading={loading}
-      tab={tab}
-      setTab={setTab}
-      direction={direction}
-      setDirection={setDirection}
-      queryText={queryText}
-      setQueryText={setQueryText}
-      sortBy={sortBy}
-      setSortBy={setSortBy}
-      unreadOnly={unreadOnly}
-      setUnreadOnly={setUnreadOnly}
-      oppCache={oppCache}
-      myUid={currentUserId}
-
-      // ✅ actions
-      onAccept={(id) => currentUserId && acceptMatch(id, currentUserId)}
-      onDecline={(id) => deleteMatch(id)}
-      onUnmatch={(m, otherName, otherUserId) => unmatchMatch(m, otherName, otherUserId)}
-      onOpenChat={(otherId) => {
-        const sortedIDs = [currentUserId!, otherId].sort().join("_");
-        router.push(`/messages/${sortedIDs}`);
-      }}
-      onViewProfile={(id) => handleViewProfile(id)}
-      router={router}
-    />
-  );
+  return <DesktopMatches />;
 }
 
 return (
