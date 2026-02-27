@@ -6,7 +6,7 @@ import { doc, getDoc, addDoc, collection, serverTimestamp } from "firebase/fires
 import { auth, db } from "@/lib/firebaseConfig";
 import { Phone, MessageSquare, MapPin, ArrowLeft, X } from "lucide-react";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
-import TMDesktopCoachProfile from "@/components/coachprofile/TMDesktopCoachProfile";
+import TMDesktopCoachProfile from "@/components/coachProfile/TMDesktopCoachProfile";
 import { onAuthStateChanged } from "firebase/auth";
 
 type GalleryPhoto = { url: string; path?: string; createdAt?: number };
