@@ -53,6 +53,9 @@ type EventDoc = {
 minSkillLabel?: string | null; // FROM
 maxSkillLabel?: string | null; // TO
 
+// ✅ legacy (keep so old events don't break)
+minSkill?: number | null;
+
   spotsTotal?: number;
   spotsFilled?: number;
   status?: "open" | "full" | "cancelled" | "completed";
