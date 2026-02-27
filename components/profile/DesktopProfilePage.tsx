@@ -553,7 +553,7 @@ return (
             {badge.title}
           </div>
           <div className="text-[11px] font-semibold" style={{ color: "rgba(11,61,46,0.55)" }}>
-            {badge.subtitle}
+            {badge.subtitle ?? (unlocked ? "Unlocked" : "Locked")}
           </div>
         </div>
       );
