@@ -34,85 +34,29 @@ import {
 } from "lucide-react";
 import { ensureEventConversation } from "@/lib/conversations";
 
-import DesktopEventDetailsPage from "@/components/events/DesktopEventDetailsPage";
+import type {
+  EventDoc,
+  Player,
+  JoinRequest,
+} from "@/components/events/DesktopEventDetailsPage";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
+import DesktopEventDetailsPage from "@/components/events/DesktopEventDetailsPage";
 
 
-/* ----------------------------- Types / helpers ---------------------------- */
-
-type EventDoc = {
-  title?: string;
-  type?: "singles" | "doubles" | "social";
-  location?: string;
-  start?: string; // ISO
-  end?: string;   // ISO
-  durationMins?: number;
-
-// ✅ Skill range (matches create page + Firestore)
-minSkillLabel?: string | null; // FROM
-maxSkillLabel?: string | null; // TO
-
-// ✅ legacy (keep so old events don't break)
-minSkill?: number | null;
-
-  spotsTotal?: number;
-  spotsFilled?: number;
-  status?: "open" | "full" | "cancelled" | "completed";
-  hostId?: string;
-  participants?: string[];
-  description?: string | null;
-
-    // ✅ court object (so desktop details can render map + booking button)
-  court?: {
-    id?: string | null;
-    name?: string | null;
-    nameLower?: string | null;
-    address?: string | null;
-    suburb?: string | null;
-    state?: string | null;
-    postcode?: string | null;
-    bookingUrl?: string | null;
-    lat?: number | null;
-    lng?: number | null;
-  } | null;
-
-  // ✅ booking confirmation (host marks court booked)
-  bookingConfirmed?: boolean;
-  bookingConfirmedAt?: any;     // Firestore Timestamp
-  bookingConfirmedBy?: string;  // uid
-  
-};
-
-
-
-
-type UserProfile = {
-  name?: string;
-  photoURL?: string;
-  skillLevel?: number;
-  // alternates we normalize:
-  skill?: number;
-  rating?: number;
-  ntrp?: number;
-};
-
-type JoinRequest = {
-  id: string;
-  userId: string;
-  status: "pending" | "accepted" | "declined" | "left";
-  profile?: UserProfile;
-};
-
-function getSkill(profile?: Partial<UserProfile> | null): number | null {
+function getSkill(profile?: any | null): number | null {
   if (!profile) return null;
-  return (
-    (profile.skillLevel as number | undefined) ??
-    (profile.skill as number | undefined) ??
-    (profile.rating as number | undefined) ??
-    (profile.ntrp as number | undefined) ??
-    null
-  );
+
+  const v =
+    profile.skillLevel ??
+    profile.skill ??
+    profile.rating ??
+    profile.ntrp ??
+    profile.utr ??
+    profile.skillRating ??
+    null;
+
+  return typeof v === "number" ? v : null;
 }
 
 function toTitleCase(input: string) {
@@ -226,10 +170,11 @@ useEffect(() => {
 
   // Data
   const [event, setEvent] = useState<EventDoc | null>(null);
-  const [hostProfile, setHostProfile] = useState<UserProfile | null>(null);
-  const [participantProfiles, setParticipantProfiles] = useState<
-    Record<string, UserProfile | undefined>
-  >({});
+ const [hostProfile, setHostProfile] = useState<Player | null>(null);
+
+const [participantProfiles, setParticipantProfiles] = useState<
+  Record<string, Player | undefined>
+>({});
 
   // UI / state
   const [loading, setLoading] = useState(true);
@@ -269,7 +214,7 @@ const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
   useEffect(() => {
     if (!event?.hostId) return;
     const unsub = onSnapshot(doc(db, "players", event.hostId), (snap) => {
-      if (snap.exists()) setHostProfile(snap.data() as UserProfile);
+      if (snap.exists()) setHostProfile(snap.data() as Player);
       else setHostProfile(null);
     });
     return () => unsub();
@@ -291,7 +236,7 @@ const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
         ids.map(async (uid) => {
           try {
             const s = await getDoc(doc(db, "players", uid));
-            return [uid, s.exists() ? (s.data() as UserProfile) : undefined] as const;
+            return [uid, s.exists() ? (s.data() as Player) : undefined] as const;
           } catch {
             return [uid, undefined] as const;
           }
@@ -333,10 +278,10 @@ useEffect(() => {
   userId: string;
   status: "pending" | "accepted" | "declined" | "left";
 };
-          let profile: UserProfile | undefined;
+          let profile: Player | undefined;
           try {
             const profSnap = await getDoc(doc(db, "players", data.userId));
-            if (profSnap.exists()) profile = profSnap.data() as UserProfile;
+            if (profSnap.exists()) profile = profSnap.data() as Player;
           } catch {}
           return { id: d.id, userId: data.userId, status: data.status, profile };
         })

@@ -17,7 +17,7 @@ import {
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 
 
-type EventDoc = {
+export type EventDoc = {
   title?: string;
   type?: string;
   location?: string;
@@ -25,11 +25,12 @@ type EventDoc = {
   end?: string; // ISO
   durationMins?: number;
 
+  // ✅ keep legacy numeric for older events
   minSkill?: number | null;
 
-  // ✅ Range labels
+  // ✅ Range labels (new)
   minSkillLabel?: string | null; // FROM
-  maxSkillLabel?: string | null; // TO  (NEW)
+  maxSkillLabel?: string | null; // TO
 
   spotsTotal?: number;
   spotsFilled?: number;
@@ -38,7 +39,6 @@ type EventDoc = {
   participants?: string[];
   description?: string | null;
 
-    // ✅ Court object saved from create/edit pages
   court?: {
     id?: string | null;
     name?: string | null;
@@ -51,21 +51,20 @@ type EventDoc = {
     lng?: number | null;
   } | null;
 
-  // ✅ Booking confirmation (host toggles this)
   bookingConfirmed?: boolean;
-  bookingConfirmedAt?: any;     // Firestore Timestamp
-  bookingConfirmedBy?: string;  // uid
+  bookingConfirmedAt?: any;
+  bookingConfirmedBy?: string;
 };
 
-
-type Player = {
+export type Player = {
   name?: string;
+  // ✅ allow null because Firestore / auth sometimes gives nulls
   photoURL?: string | null;
   photoThumbURL?: string | null;
   avatar?: string | null;
 };
 
-type JoinRequest = {
+export type JoinRequest = {
   id: string;
   userId: string;
   status: "pending" | "accepted" | "declined" | "left";
