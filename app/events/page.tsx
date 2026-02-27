@@ -14,6 +14,8 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseConfig";
 import { CalendarDays, MapPin, Users, Plus, CircleCheck } from "lucide-react";
+import DesktopEventsPage from "@/components/events/DesktopEventsPage";
+import { useIsDesktop } from "@/lib/useIsDesktop";
 
 type EventItem = {
   id: string;
@@ -85,6 +87,7 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [uid, setUid] = useState<string | null>(null);
+    const isDesktop = useIsDesktop();
 
   useEffect(() => {
     const off = auth.onAuthStateChanged((u) => setUid(u?.uid ?? null));
@@ -128,41 +131,85 @@ const ev: EnrichedEvent = { ...data, id: d.id };
     return events.filter((e) => (e.type || "").toLowerCase() === filter);
   }, [events, filter, uid]);
 
+    // ✅ Desktop version
+  if (isDesktop) {
+    return <DesktopEventsPage events={filtered} loading={loading} />;
+  }
+
+
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-6">
-    {/* HERO HEADER (match events/[id]) */}
-<section className="mb-6 relative overflow-hidden rounded-2xl border p-5 shadow-sm">
-  {/* background image */}
-  <div className="absolute inset-0 z-0">
-    <img
-      src="/images/events.jpg"
-      alt=""
-      className="h-full w-full object-cover"
-      loading="lazy"
-      fetchPriority="low"
-    />
-    <div className="absolute inset-0 bg-black/30" />
-    <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/35 to-transparent" />
-  </div>
-
-  {/* content */}
-  <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]">
-    <div>
-      <h1 className="text-2xl font-bold leading-tight">Events</h1>
-      <span className="mt-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-100/90 px-2 py-0.5 text-xs font-semibold text-amber-900">
-        Premium
-      </span>
+{/* HEADER (matches screenshot) */}
+<section className="mb-6">
+  {/* Top row: icon + title (NO human icon) */}
+  <div className="flex items-center gap-2 px-1">
+    <div
+      className="h-7 w-7 rounded-full grid place-items-center"
+      style={{ background: "#39FF14" }} // TM neon
+      aria-hidden="true"
+    >
+      {/* simple “events” glyph */}
+      <CalendarDays className="h-4 w-4" style={{ color: "#0B3D2E" }} />
     </div>
 
-    <Link
-      href="/events/new"
-      className="inline-flex items-center gap-2 rounded-xl bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-black/20"
+    <div className="text-[15px] font-extrabold" style={{ color: "#111827" }}>
+      Tennis Events
+    </div>
+  </div>
+
+  {/* Promo card */}
+  <div className="mt-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-black/5">
+    <div
+      className="relative overflow-hidden rounded-2xl p-5"
+      style={{
+        background:
+          "radial-gradient(120% 120% at 10% 0%, rgba(57,255,20,0.20) 0%, rgba(57,255,20,0.00) 45%), linear-gradient(180deg, #0B3D2E 0%, #071B15 100%)",
+      }}
     >
-      <Plus className="h-4 w-4" />
-      Create Event
-    </Link>
+      <div className="max-w-[26rem]">
+        <div
+          className="text-[11px] font-extrabold tracking-[0.16em]"
+          style={{ color: "#39FF14" }}
+        >
+          HOST A MATCH
+        </div>
+
+        <h1 className="mt-2 text-[26px] leading-tight font-extrabold text-white">
+          Create Your Event
+        </h1>
+
+        <p className="mt-2 text-[13px] leading-snug text-white/75">
+          Find players for your court time
+          <br />
+          and level up your game.
+        </p>
+
+        <Link
+          href="/events/new"
+          className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-[13px] font-extrabold"
+          style={{
+            background: "#39FF14",
+            color: "#0B3D2E",
+            boxShadow: "0 10px 28px rgba(57,255,20,0.22)",
+          }}
+        >
+          <span
+            className="h-6 w-6 rounded-full grid place-items-center"
+            style={{
+              background: "rgba(11,61,46,0.14)",
+              border: "1px solid rgba(11,61,46,0.18)",
+            }}
+            aria-hidden="true"
+          >
+            <Plus className="h-4 w-4" />
+          </span>
+          Create Now
+        </Link>
+      </div>
+    </div>
   </div>
 </section>
+
 
 
       {/* Filters */}

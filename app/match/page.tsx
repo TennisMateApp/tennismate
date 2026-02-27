@@ -22,16 +22,30 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged, applyActionCode } from "firebase/auth";
 import Link from "next/link";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, SlidersHorizontal, CalendarDays, MapPin, ArrowLeft } from "lucide-react";
 import Image from "next/image";
 import { track } from "@/lib/track";
 import { geohashQueryBounds } from "geofire-common";
+import PlayerProfileView from "@/components/players/PlayerProfileView";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import DesktopMatchPage from "@/components/match/DesktopMatchPage";
+import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
+
+
 
 // import { getContinueUrl } from "@/lib/auth/getContinueUrl";
 
 
 interface Player {
+  // ✅ "id" SHOULD be the UID / players docId
   id: string;
+  userId?: string;
+
+  // ✅ debug-only fields (safe to leave in; won’t break anything)
+  docId?: string | null;
+  dataId?: string | null;
+  
+
   name: string;
   postcode: string;
   skillLevel?: string;
@@ -46,10 +60,11 @@ interface Player {
   photoThumbURL?: string | null;
   avatar?: string | null;
   birthYear?: number | null;
-  age?: number | null;        // ✅ NEW
-  gender?: string | null;     // ✅ NEW
-  isMatchable?: boolean | null; // ✅ NEW
+  age?: number | null;
+  gender?: string | null;
+  isMatchable?: boolean | null;
   timestamp?: any;
+  lastActiveAt?: any;
   score?: number;
   distance?: number;
   lat?: number | null;
@@ -77,6 +92,7 @@ const deriveAgeFromBirthYear = (birthYear: unknown) => {
 
   return age;
 };
+
 
 
 // ---- Skill band + UTR helpers ----
@@ -174,6 +190,48 @@ const SENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const SENT_LOOKBACK_DAYS = 14; // when cache expires, only read last 14 days
 
 
+type LastActiveMeta =
+  | { label: string; level: "hot" | "warm" | "cool" }
+  | null;
+
+const getLastActiveMeta = (ts: any): LastActiveMeta => {
+  if (!ts) return null;
+
+  const d: Date =
+    typeof ts?.toDate === "function" ? ts.toDate() :
+    ts instanceof Date ? ts :
+    new Date(ts);
+
+  const diffMs = Date.now() - d.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return null;
+
+  const mins = Math.floor(diffMs / 60000);
+  const hrs = Math.floor(mins / 60);
+  const days = Math.floor(hrs / 24);
+
+  // ✅ Hide if older than 3 days
+  if (days > 3) return null;
+
+  // ✅ CTA tiers
+if (mins <= 5) return { label: "ONLINE NOW", level: "hot" };
+if (mins < 30) return { label: `ACTIVE ${mins}M AGO`, level: "hot" };
+  if (mins < 120) return { label: `Active ${mins}m ago`, level: "warm" };
+  if (hrs < 24) return { label: `Active ${hrs}h ago`, level: "cool" };
+  if (days === 1) return { label: "Active yesterday", level: "cool" };
+  return { label: `Active ${days}d ago`, level: "cool" };
+};
+
+const formatAvailability = (slots: string[] | undefined | null) => {
+  const a = Array.isArray(slots) ? slots : [];
+  if (a.length === 0) return "Availability unknown";
+
+  // show up to 2 slots like the screenshot
+  const shown = a.slice(0, 2).join(" & ");
+  const more = a.length > 2 ? ` +${a.length - 2}` : "";
+  return `${shown}${more}`;
+};
+
+
 export default function MatchPage() {
   const [user, setUser] = useState<any>(null);
   const [myProfile, setMyProfile] = useState<Player | null>(null);
@@ -187,6 +245,9 @@ export default function MatchPage() {
   const [matchMode, setMatchMode] = useState<"auto"|"skill"|"utr">("auto");
   const [myProfileHidden, setMyProfileHidden] = useState(false);
   const refreshingRef = useRef(false);
+  const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
+  const isDesktop = useIsDesktop();
+
 
 type GenderFilter = "" | "Male" | "Female" | "Non-binary" | "Other";
 
@@ -238,6 +299,69 @@ const writeSentCache = (uid: string, ids: Set<string>) => {
   }
 };
 
+const [filtersOpen, setFiltersOpen] = useState(false);
+
+const filtersActive =
+  sortBy !== "score" ||
+  matchMode !== "auto" ||
+  ageBand !== "" ||
+  genderFilter !== "" ||
+  hideContacted !== true;
+
+  useEffect(() => {
+  if (typeof window === "undefined") return;
+
+  // expose for DevTools
+  (window as any).__TM_DB__ = db;
+  (window as any).__TM_AUTH__ = auth;
+
+  console.log("[TM DEBUG] projectId:", (db as any)?.app?.options?.projectId);
+  console.log("[TM DEBUG] authDomain:", (auth as any)?.app?.options?.authDomain);
+  console.log("[TM DEBUG] firestoreHost:", (db as any)?._settings?.host);
+  console.log("[TM DEBUG] currentUser:", auth.currentUser?.uid);
+}, []);
+
+// Close filters OR profile modal on Escape
+useEffect(() => {
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+
+    // close profile first (higher priority)
+    if (profileOpenId) {
+      setProfileOpenId(null);
+      return;
+    }
+
+    // otherwise close filters
+    if (filtersOpen) {
+      setFiltersOpen(false);
+    }
+  };
+
+  document.addEventListener("keydown", onKey);
+  return () => document.removeEventListener("keydown", onKey);
+}, [filtersOpen, profileOpenId]);
+
+
+// lock page scroll while profile modal is open
+useEffect(() => {
+  if (!profileOpenId) return;
+
+  const prevOverflow = document.body.style.overflow;
+  const prevTouch = document.body.style.touchAction;
+
+  document.body.style.overflow = "hidden";
+  document.body.style.touchAction = "none";
+
+  return () => {
+    document.body.style.overflow = prevOverflow;
+    document.body.style.touchAction = prevTouch;
+  };
+}, [profileOpenId]);
+
+
+
+
 const loadNearbyPlayers = useCallback(
   async (myLat: number, myLng: number, radiusKm: number) => {
     const bounds = geohashQueryBounds([myLat, myLng], radiusKm * 1000);
@@ -280,20 +404,41 @@ const loadNearbyPlayers = useCallback(
             typeof data.avatarUrl === "string" ? data.avatarUrl :
             null;
 
-          out.push({
-            ...(data as Player),
-            id: d.id,
-            birthYear,
-            age: derivedAge ?? legacyAge ?? null,
-            gender: typeof data.gender === "string" ? data.gender : null,
-            isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
-            lat: typeof data.lat === "number" ? data.lat : null,
-            lng: typeof data.lng === "number" ? data.lng : null,
-            geohash: typeof data.geohash === "string" ? data.geohash : null,
-            photoURL: photoURL ?? undefined,
-            photoThumbURL: typeof data.photoThumbURL === "string" ? data.photoThumbURL : null,
-            avatar: typeof data.avatar === "string" ? data.avatar : null,
-          });
+  const docId = d.id;
+
+// if the firestore data itself contains an "id" field, keep it but DO NOT let it override docId
+const dataId =
+  typeof (data as any)?.id === "string" ? (data as any).id : null;
+
+  // ✅ IMPORTANT: auth uid used by match_requests (prod expects this)
+const userId =
+  typeof (data as any)?.userId === "string" ? (data as any).userId :
+  typeof (data as any)?.uid === "string" ? (data as any).uid :
+  docId; // fallback if your players doc id == auth uid
+
+out.push({
+  ...(data as Player),
+
+  // keep a copy for debugging only (optional)
+  docId,
+  dataId,
+    userId,
+
+  birthYear,
+  age: derivedAge ?? legacyAge ?? null,
+  gender: typeof data.gender === "string" ? data.gender : null,
+  lastActiveAt: data.lastActiveAt ?? null,
+  isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
+  lat: typeof data.lat === "number" ? data.lat : null,
+  lng: typeof data.lng === "number" ? data.lng : null,
+  geohash: typeof data.geohash === "string" ? data.geohash : null,
+  photoURL: photoURL ?? undefined,
+  photoThumbURL: typeof data.photoThumbURL === "string" ? data.photoThumbURL : null,
+  avatar: typeof data.avatar === "string" ? data.avatar : null,
+
+  // ✅ CRITICAL: force the true uid/doc id LAST so nothing can overwrite it
+  id: docId,
+});
         });
       })
     );
@@ -365,44 +510,42 @@ const refreshMatches = useCallback(async () => {
       geohash: typeof myData.geohash === "string" ? myData.geohash : null,
     });
 
-// 2) Sent requests (prefer local cache)
-let sentTo = new Set<string>();
+    // 2) Sent requests (prefer local cache)
+    let sentTo = new Set<string>();
 
-const cached = readSentCache(auth.currentUser.uid);
-if (cached && Date.now() - cached.ts < SENT_CACHE_TTL_MS) {
-  sentTo = new Set(cached.ids);
-} else {
-  const lookbackMs = SENT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
-  const since = Timestamp.fromMillis(Date.now() - lookbackMs);
+    const cached = readSentCache(auth.currentUser.uid);
+    if (cached && Date.now() - cached.ts < SENT_CACHE_TTL_MS) {
+      sentTo = new Set(cached.ids);
+    } else {
+      const lookbackMs = SENT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+      const since = Timestamp.fromMillis(Date.now() - lookbackMs);
 
-  const reqQ = query(
-    collection(db, "match_requests"),
-    where("fromUserId", "==", auth.currentUser.uid),
-    where("timestamp", ">=", since)
-  );
+      const reqQ = query(
+        collection(db, "match_requests"),
+        where("fromUserId", "==", auth.currentUser.uid),
+        where("timestamp", ">=", since)
+      );
 
-  const reqSnap = await getDocs(reqQ);
+      const reqSnap = await getDocs(reqQ);
 
-  reqSnap.forEach((d) => {
-    const data = d.data() as any;
-    if (data.toUserId) sentTo.add(data.toUserId);
-  });
+      reqSnap.forEach((d) => {
+        const data = d.data() as any;
+        if (data.toUserId) sentTo.add(data.toUserId);
+      });
 
-  writeSentCache(auth.currentUser.uid, sentTo);
-}
+      writeSentCache(auth.currentUser.uid, sentTo);
+    }
 
-setSentRequests(sentTo);
+    setSentRequests(sentTo);
 
+    // 3) Load nearby players only (geohash bounds)
+    if (myLat == null || myLng == null) {
+      setRawMatches([]);
+      setLastUpdated(Date.now());
+      return;
+    }
 
-  // 3) Load nearby players only (geohash bounds)
-if (myLat == null || myLng == null) {
-  setRawMatches([]);
-  setLastUpdated(Date.now());
-  return;
-}
-
-const allPlayers = await loadNearbyPlayers(myLat, myLng, MAX_DISTANCE_KM);
-
+    const allPlayers = await loadNearbyPlayers(myLat, myLng, MAX_DISTANCE_KM);
 
     const meRating = (myData.skillRating ?? myData.utr) ?? null;
 
@@ -462,6 +605,17 @@ const allPlayers = await loadNearbyPlayers(myLat, myLng, MAX_DISTANCE_KM);
       .filter((p): p is ScoredPlayer => p !== null)
       .filter((p) => (p.score ?? 0) > 0);
 
+    // Check for bad ID mismatch now, after scoredPlayers is created
+    const bad = scoredPlayers.find((p: any) => p?.docId && p?.id !== p?.docId);
+    if (bad) {
+      console.warn("[MATCH] BAD ID MISMATCH (id !== docId)", {
+        name: bad?.name,
+        id: bad?.id,
+        docId: bad?.docId,
+        dataId: bad?.dataId,
+      });
+    }
+
     setRawMatches(scoredPlayers);
     setLastUpdated(Date.now());
   } finally {
@@ -469,6 +623,8 @@ const allPlayers = await loadNearbyPlayers(myLat, myLng, MAX_DISTANCE_KM);
     setRefreshing(false);
   }
 }, [matchMode, lastUpdated, loadNearbyPlayers]);
+
+
 
 
   async function finalizeVerification() {
@@ -612,107 +768,140 @@ useEffect(() => {
 
 const [sendingIds, setSendingIds] = useState<Set<string>>(new Set());
 
-// replace your current handler with this
-const handleMatchRequest = async (match: Player) => {
-  if (!myProfile || !user) return;
-  // don't double-submit the same card
-  if (sendingIds.has(match.id)) return;
+// ✅ Always use AUTH UID for match_requests (matches production)
+const uidOf = (p: any): string | null => {
+  if (!p) return null;
 
-  // mark THIS card as "sending…"
-  setSendingIds((s) => new Set(s).add(match.id));
+  // if already a uid string
+  if (typeof p === "string") return p.trim() || null;
+
+  // ✅ prefer explicit auth uid fields
+  const uid = p?.userId || p?.uid;
+
+  // fallback only if your players doc id == auth uid
+  const fallback = p?.id;
+
+  const finalUid = (typeof uid === "string" && uid.trim())
+    ? uid.trim()
+    : (typeof fallback === "string" && fallback.trim())
+    ? fallback.trim()
+    : null;
+
+  console.log("[TM] Derived AUTH UID from player:", {
+    name: p?.name,
+    userId: p?.userId,
+    uid: p?.uid,
+    id: p?.id,
+    final: finalUid,
+  });
+
+  return finalUid;
+};
+
+const resolveRecipientUid = (target: Player | string): string | null => {
+  return uidOf(target);
+};
+  // don't double-submit the same card
+const handleMatchRequest = async (target: Player | string) => {
+  if (!myProfile || !user) return;
+
+  const toUid = resolveRecipientUid(target);
+  if (!toUid) {
+    console.error("[TM] Missing recipient UID", { target });
+    alert("Could not send request (missing recipient id). Please refresh.");
+    return;
+  }
+
+  // Prevent self-send
+  if (toUid === user.uid) return;
+
+  // Don't double-submit
+  if (sendingIds.has(toUid)) return;
+
+  setSendingIds((s) => new Set(s).add(toUid));
 
   try {
-    const matchRef = await addDoc(collection(db, "match_requests"), {
-      fromUserId: user.uid,
-      toUserId: match.id,
-      fromName: myProfile.name,
-      fromEmail: myProfile.email,
-      toName: match.name,
-      message: `Hey ${match.name}, I’d love to play sometime soon!`,
-      status: "unread",
-      timestamp: serverTimestamp(),
-      nudgeSent: false,
+    // Optional: if Player object provided, use for display fields
+    const matchPlayer = typeof target === "string" ? null : target;
+
+    console.log("[TM] Creating match request", {
+      from: user.uid,
+      to: toUid,
+      emailVerified: auth.currentUser?.emailVerified,
+      match_name: matchPlayer?.name,
+      match_id: matchPlayer?.id,
+      match_docId: matchPlayer?.docId,
+      match_dataId: matchPlayer?.dataId,
     });
 
-    // ✅ GA4: track match request sent
-void track("match_request_sent", {
-  match_id: matchRef.id,
-  from_user_id: user.uid,
-  to_user_id: match.id,
-  distance_km: typeof match.distance === "number" ? match.distance : null,
-  from_postcode: myProfile.postcode ?? null,
-  to_postcode: match.postcode ?? null,
-  match_mode: matchMode, // "auto" | "skill" | "utr"
-  skill_band_me: myProfile.skillBand || null,
-  skill_band_them: match.skillBand || null,
-  tmr_me: typeof (myProfile.skillRating ?? myProfile.utr) === "number" ? (myProfile.skillRating ?? myProfile.utr) : null,
-  tmr_them: typeof (match.skillRating ?? match.utr) === "number" ? (match.skillRating ?? match.utr) : null,
+    // ✅ Create match request doc
+const ref = await addDoc(collection(db, "match_requests"), {
+  fromUserId: user.uid,
+  toUserId: toUid,
+  status: "pending",
+  timestamp: serverTimestamp(),
+
+  // nice-to-have fields (safe if your rules allow)
+  fromName: myProfile?.name ?? null,
+  fromPostcode: myProfile?.postcode ?? null,
+  fromPhotoURL:
+    myProfile?.photoThumbURL || myProfile?.photoURL || myProfile?.avatar || null,
+
+  toName: matchPlayer?.name ?? null,
+  toPostcode: matchPlayer?.postcode ?? null,
+  toPhotoURL:
+    matchPlayer?.photoThumbURL || matchPlayer?.photoURL || matchPlayer?.avatar || null,
 });
 
+console.log("[TM] ✅ match_requests created:", ref.id, { toUid });
 
-
-    // de-dupe notif for this match
-    const notifQuery = query(
-      collection(db, "notifications"),
-      where("matchId", "==", matchRef.id),
-      where("recipientId", "==", match.id)
-    );
-    const existingNotifs = await getDocs(notifQuery);
-    if (!existingNotifs.empty) {
-      console.log("⚠️ Notification already exists, skipping duplicate.");
-    }
-
-   setSentRequests((prev) => {
+    // ✅ Update local state so UI immediately shows "sent"
+setSentRequests((prev) => {
   const next = new Set(prev);
-  next.add(match.id);
-  writeSentCache(user.uid, next);
+  next.add(toUid);
+
+  if (auth.currentUser?.uid) {
+    writeSentCache(auth.currentUser.uid, next);
+  }
+
   return next;
 });
 
+    // ✅ Update localStorage cache so hideContacted works instantly
+    if (auth.currentUser?.uid) {
+      const merged = new Set(sentRequests);
+      merged.add(toUid);
+      writeSentCache(auth.currentUser.uid, merged);
+    }
 
-// 🔔 Notify onboarding tour
-window.dispatchEvent(new CustomEvent("tm:matchRequestSent"));
-
-alert(`✅ Request sent to ${match.name}`);
-
-  } catch (err) {
+  } catch (err: any) {
     console.error("Failed to send match request:", err);
-    alert("❌ Could not send request. Try again.");
+    alert(`❌ Could not send request: ${err?.message ?? String(err)}`);
   } finally {
-    // clear "sending…" for THIS card only
     setSendingIds((s) => {
       const n = new Set(s);
-      n.delete(match.id);
+      n.delete(toUid);
       return n;
     });
   }
 };
 
-
   // Sort matches based on user choice
-// Filter + sort matches
 const filteredMatches = useMemo(() => {
   if (!myProfile) return rawMatches;
 
   return rawMatches.filter((m) => {
+  const toUid = uidOf(m);
+  if (!toUid) return false;
+
     // Hide already contacted?
-    if (hideContacted && sentRequests.has(m.id)) return false;
+    if (hideContacted && sentRequests.has(toUid)) return false;
 
-    // ✅ Gender filter:
-    // - If "Any" (""), include everyone (including unknown gender)
-    // - If specific gender chosen, only include exact matches (unknown excluded)
-    if (genderFilter !== "") {
-      if (!m.gender) return false;
-      if (m.gender !== genderFilter) return false;
-    }
+    // Gender filter
+    if (genderFilter !== "" && m.gender !== genderFilter) return false;
 
-    // ✅ Age filter:
-    // - If "Any" (""), include everyone (including unknown age)
-    // - If specific band chosen, only include ages within band (unknown excluded)
-    if (ageBand !== "") {
-      if (typeof m.age !== "number") return false;
-      if (!inAgeBand(m.age, ageBand)) return false;
-    }
+    // Age filter
+    if (ageBand !== "" && (m.age === undefined || !inAgeBand(m.age, ageBand))) return false;
 
     return true;
   });
@@ -799,10 +988,36 @@ useEffect(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []); // run once on mount
 
+const TM = {
+  forest: "#0B3D2E",
+  neon: "#39FF14",
+  ink: "#EAF7F0",
+  sub: "rgba(234,247,240,0.75)",
+};
+
+const TILE_STYLE = {
+  background: "#F1F3F5",                  // ✅ light grey card
+  border: "1px solid rgba(15,23,42,0.10)", // subtle border
+  boxShadow: "0 6px 18px rgba(15,23,42,0.08)",
+};
+
+const selectStyle: React.CSSProperties = {
+  backgroundColor: "rgba(0,0,0,0.62)", // ✅ darker = clearer
+  border: "1px solid rgba(255,255,255,0.18)",
+  color: "rgba(234,247,240,0.95)",
+  outline: "none",
+};
+
+
+const optionStyle: React.CSSProperties = {
+  backgroundColor: "#071B15",   // deep green-black
+  color: "#EAF7F0",            // TM.ink
+};
+
 
 if (loading) {
   return (
-    <div className="max-w-2xl mx-auto p-6 space-y-3">
+    <div className="w-full min-h-screen px-4 pb-28 pt-6 space-y-3 bg-white">
       {[...Array(4)].map((_, i) => (
         <div key={i} className="rounded-xl bg-white ring-1 ring-black/5 p-4 animate-pulse">
           <div className="flex items-start gap-3">
@@ -821,7 +1036,7 @@ if (loading) {
 
 if (myProfileHidden) {
   return (
-    <div className="max-w-2xl mx-auto p-4 pb-28 sm:p-6">
+    <div className="w-full min-h-screen px-4 pb-28 pt-4 bg-white">
       <div className="rounded-2xl border bg-white p-5 shadow-sm">
         <h1 className="text-xl font-semibold">Match Me is turned off</h1>
         <p className="mt-2 text-sm text-gray-700">
@@ -848,35 +1063,267 @@ if (myProfileHidden) {
   );
 }
 
-
-
+if (isDesktop) {
   return (
-  <div
-    className="max-w-2xl mx-auto p-4 pb-28 sm:p-6"
-    data-tour="match-page"
-  >
+    <div className="min-h-screen bg-[#f6f7f8]">
+      <div className="w-full px-4 lg:px-8 2xl:px-12 py-6">
+        <div className="flex items-start gap-6">
+          <TMDesktopSidebar player={myProfile} />
+          <div className="flex-1 min-w-0">
+            <DesktopMatchPage
+              loading={loading}
+              myProfileHidden={myProfileHidden}
+              sortedMatches={sortedMatches}
+              visibleMatches={visibleMatches}
+              visibleCount={visibleCount}
+              pageSize={PAGE_SIZE}
+              refreshing={refreshing}
+              filtersActive={filtersActive}
+              filtersOpen={filtersOpen}
+              setFiltersOpen={setFiltersOpen}
+              // filters
+              sortBy={sortBy}
+              setSortBy={setSortBy}
+              matchMode={matchMode}
+              setMatchMode={setMatchMode}
+              ageBand={ageBand}
+              setAgeBand={setAgeBand}
+              genderFilter={genderFilter}
+              setGenderFilter={setGenderFilter}
+              hideContacted={hideContacted}
+              setHideContacted={setHideContacted}
+              // actions
+              onLoadMore={() => setVisibleCount((c) => c + PAGE_SIZE)}
+              onInvite={(match) => handleMatchRequest(match)}
+              onViewProfile={(id) => setProfileOpenId(id)}
 
-     {/* Header hero tile */}
-<div className="-mx-4 sm:-mx-6 mb-4">
-  <div className="relative h-40 sm:h-56 md:h-64 overflow-hidden rounded-2xl">
-    <Image
-      src="/images/match.jpg"
-      alt="Tennis players getting matched for a game"
-      fill
-      priority
-      className="object-cover"
-    />
-    <div className="absolute inset-0 bg-black/40" />
-    <div className="absolute inset-0 flex items-center justify-center px-4">
-      <div className="text-center text-white">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Find Your Next Match</h1>
-        <p className="mt-1 text-sm sm:text-base opacity-90">
-          Smart matching by skill, TMR &amp; availability near {myProfile?.postcode ?? "you"}
-        </p>
+              profileOpenId={profileOpenId}
+  setProfileOpenId={setProfileOpenId}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+return (
+  <div className="w-full min-h-screen bg-white">
+    <div
+      className="w-full min-h-screen px-4 pb-28 pt-4 sm:px-6 bg-white"
+      data-tour="match-page"
+    >
+
+
+
+
+
+{/* Mobile header (matches screenshot vibe) */}
+<div
+  className="-mx-4 sm:-mx-6 px-4 sm:px-6 pt-3 pb-4 sticky top-0 z-20"
+  style={{
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.78) 55%, #ffffff 100%)",
+    backdropFilter: "blur(10px)",
+  }}
+>
+  <div className="flex items-center justify-between">
+    {/* Back */}
+    <button
+      onClick={() => router.push("/home")}
+      className="h-10 w-10 rounded-full grid place-items-center"
+      style={{
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.10)",
+      }}
+      aria-label="Back"
+    >
+      <ArrowLeft size={22} strokeWidth={3} style={{ color: TM.forest }} />
+    </button>
+
+    {/* Center title + subtitle */}
+    <div className="text-center">
+      <div
+        className="font-black tracking-tight text-[20px] leading-none"
+        style={{ color: TM.forest }}
+      >
+        Find a Match
+      </div>
+      <div
+        className="text-[13px] font-semibold mt-1"
+        style={{ color: "rgba(11,61,46,0.70)" }}
+      >
+        {sortedMatches.length} players nearby
+      </div>
+    </div>
+
+    {/* Filters (circle) */}
+    <button
+      onClick={() => setFiltersOpen((v) => !v)}
+      className="relative h-10 w-10 rounded-full grid place-items-center"
+      style={{
+        background: "rgba(11,61,46,0.08)",
+        border: "1.5px solid rgba(11,61,46,0.22)",
+        boxShadow: "0 6px 18px rgba(11,61,46,0.10)",
+      }}
+      aria-label="Filters"
+      title="Filters"
+    >
+      <SlidersHorizontal size={18} strokeWidth={2.6} style={{ color: TM.forest }} />
+
+      {filtersActive && (
+        <span
+          className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full"
+          style={{ background: TM.neon, boxShadow: `0 0 10px ${TM.neon}` }}
+        />
+      )}
+    </button>
+  </div>
+</div>
+
+
+{/* Filters overlay (floats, blurs background, doesn't push content) */}
+{filtersOpen && (
+  <div className="fixed inset-0 z-[60]">
+{/* Backdrop: tint + blur. Clicking it closes */}
+<div
+  className="absolute inset-0"
+  onMouseDown={() => setFiltersOpen(false)}
+  style={{
+    background: "rgba(0,0,0,0.35)",
+    backdropFilter: "blur(8px)",
+    WebkitBackdropFilter: "blur(8px)",
+  }}
+/>
+
+
+    {/* Panel: anchored near top-right (below header) */}
+    <div className="absolute right-4 sm:right-6 top-[76px] w-[calc(100%-2rem)] sm:w-[420px] max-w-[420px]">
+      <div
+        className="rounded-2xl p-3 shadow-2xl"
+        style={{
+          // ✅ darker “card” so controls pop (fixes washed-out white)
+          background: "rgba(11,61,46,0.94)", // TM.forest with opacity
+          border: "1px solid rgba(255,255,255,0.12)",
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
+        }}
+        onMouseDown={(e) => e.stopPropagation()} // keep clicks inside panel from closing
+      >
+        <div className="space-y-3">
+          {/* Row 1: Count */}
+          <div className="text-sm text-white/80">
+            Showing {Math.min(visibleCount, sortedMatches.length)} of {sortedMatches.length} match
+            {sortedMatches.length === 1 ? "" : "es"}
+          </div>
+
+          {/* Row 2: Dropdowns */}
+          <div className="grid grid-cols-2 gap-3 sm:flex sm:items-end sm:gap-4">
+            <div className="min-w-0">
+              <label className="block text-xs font-medium text-white/80 mb-1">Filter</label>
+              <select
+                value={sortBy}
+                onChange={(e) => {
+                  setSortBy(e.target.value);
+                  setQuery("sort", e.target.value);
+                }}
+                className="w-full text-sm rounded-lg px-2 py-2 text-white appearance-none"
+                style={selectStyle}
+              >
+                <option value="score" style={optionStyle}>Best match</option>
+                <option value="availability" style={optionStyle}>Availability</option>
+                <option value="skill" style={optionStyle}>Skill level</option>
+                <option value="distance" style={optionStyle}>Distance</option>
+              </select>
+            </div>
+
+            <div className="min-w-0">
+              <label className="block text-xs font-medium text-white/80 mb-1">Match by</label>
+              <select
+                value={matchMode}
+                onChange={(e) => {
+                  const val = e.target.value as "auto" | "skill" | "utr";
+                  setMatchMode(val);
+                  setQuery("mode", val);
+                  refreshMatches();
+                }}
+                className="w-full text-sm rounded-lg px-2 py-2 text-white appearance-none"
+                style={selectStyle}
+              >
+                <option value="auto" style={optionStyle}>Auto</option>
+                <option value="skill" style={optionStyle}>Skill level</option>
+                <option value="utr" style={optionStyle}>TMR</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Row 3: Age/Gender */}
+          <div className="grid grid-cols-2 gap-3 sm:flex sm:items-end sm:gap-4">
+            <div className="min-w-0">
+              <label className="block text-xs font-medium text-white/80 mb-1">Age</label>
+              <select
+                value={ageBand}
+                onChange={(e) => setAgeBand(e.target.value as any)}
+                className="w-full text-sm rounded-lg px-2 py-2 text-white appearance-none"
+                style={selectStyle}
+              >
+                <option value="" style={optionStyle}>Any</option>
+                <option value="18-24" style={optionStyle}>18–24</option>
+                <option value="25-34" style={optionStyle}>25–34</option>
+                <option value="35-44" style={optionStyle}>35–44</option>
+                <option value="45-54" style={optionStyle}>45–54</option>
+                <option value="55+" style={optionStyle}>55+</option>
+              </select>
+            </div>
+
+            <div className="min-w-0">
+              <label className="block text-xs font-medium text-white/80 mb-1">Gender</label>
+              <select
+                value={genderFilter}
+                onChange={(e) => setGenderFilter(e.target.value as any)}
+                className="w-full text-sm rounded-lg px-2 py-2 text-white appearance-none"
+                style={selectStyle}
+              >
+                <option value="" style={optionStyle}>Any</option>
+                <option value="Male" style={optionStyle}>Male</option>
+                <option value="Female" style={optionStyle}>Female</option>
+                <option value="Non-binary" style={optionStyle}>Non-binary</option>
+                <option value="Other" style={optionStyle}>Other</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Row 4: Toggle + Done */}
+          <div className="flex items-center justify-between gap-3">
+            <label className="flex items-center gap-2 text-sm text-white/90">
+              <input
+                type="checkbox"
+                className="accent-[#39FF14]"
+                checked={hideContacted}
+                onChange={(e) => {
+                  setHideContacted(e.target.checked);
+                  setQuery("hide", e.target.checked ? "1" : "0");
+                }}
+              />
+              Hide contacted
+            </label>
+
+            <button
+              onClick={() => setFiltersOpen(false)}
+              className="rounded-lg px-3 py-2 text-xs font-extrabold"
+              style={{ background: TM.neon, color: TM.forest }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
-</div>
+)}
+
 
 
 
@@ -922,306 +1369,220 @@ if (myProfileHidden) {
   </div>
 )}
 
-{/* Sticky controls (mobile-first) */}
-<div className="sticky top-[56px] z-10 mb-3 rounded-xl bg-white/90 backdrop-blur ring-1 ring-black/5 p-3">
-  <div className="space-y-3">
-    {/* Row 1: Count */}
-    <div className="text-sm text-gray-600">
-      Showing {Math.min(visibleCount, sortedMatches.length)} of {sortedMatches.length} match
-      {sortedMatches.length === 1 ? "" : "es"}
-    </div>
+{/* Profile overlay modal */}
+{profileOpenId && (
+  <div className="fixed inset-0 z-[9999]">
+    {/* Backdrop */}
+    <div
+      className="absolute inset-0 bg-black/60"
+      onMouseDown={() => setProfileOpenId(null)}
+    />
 
-    {/* Row 2: Dropdowns */}
-    <div className="grid grid-cols-2 gap-3 sm:flex sm:items-end sm:gap-4">
-      <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          Filter
-        </label>
-        <select
-          value={sortBy}
-          onChange={(e) => {
-            setSortBy(e.target.value);
-            setQuery("sort", e.target.value);
+    {/* Panel (tall modal, NOT full screen) */}
+    <div className="absolute inset-0 flex items-start justify-center px-3 pt-3 pb-4 sm:items-center sm:p-6">
+      <div
+        className="w-full max-w-[560px] rounded-2xl shadow-2xl overflow-hidden"
+        style={{ background: "#071B15" }} // TM.forestDark
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {/* ✅ Taller than before, but capped so it doesn't feel full screen */}
+        <div
+          style={{
+            height: "min(88dvh, 820px)",   // tweak: 84dvh/780px if you want smaller
+            maxHeight: "min(88dvh, 820px)",
           }}
-          className="w-full text-sm border rounded-lg px-2 py-2"
         >
-          <option value="score">Best match</option>
-          <option value="availability">Availability</option>
-          <option value="skill">Skill level</option>
-          <option value="distance">Distance</option>
-        </select>
-      </div>
-
-      <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          Match by
-        </label>
-        <select
-          value={matchMode}
-          onChange={(e) => {
-            const val = e.target.value as "auto" | "skill" | "utr";
-            setMatchMode(val);
-            setQuery("mode", val);
-            refreshMatches();
-          }}
-          className="w-full text-sm border rounded-lg px-2 py-2"
-          title="Primary matching method"
-        >
-          <option value="auto">Auto</option>
-          <option value="skill">Skill level</option>
-          <option value="utr">TMR</option>
-        </select>
+          {/* IMPORTANT: PlayerProfileView manages its own scroll */}
+          <PlayerProfileView
+            playerId={profileOpenId}
+            onClose={() => setProfileOpenId(null)}
+          />
+        </div>
       </div>
     </div>
-
-        {/* Row 2.5: Age/Gender filters */}
-<div className="grid grid-cols-2 gap-3 sm:flex sm:items-end sm:gap-4">
-  <div className="min-w-0">
-    <label className="block text-xs font-medium text-gray-600 mb-1">
-      Age
-    </label>
-    <select
-      value={ageBand}
-      onChange={(e) => setAgeBand(e.target.value as any)}
-      className="w-full text-sm border rounded-lg px-2 py-2"
-    >
-      <option value="">Any</option>
-      <option value="18-24">18–24</option>
-      <option value="25-34">25–34</option>
-      <option value="35-44">35–44</option>
-      <option value="45-54">45–54</option>
-      <option value="55+">55+</option>
-    </select>
   </div>
+)}
 
-  <div className="min-w-0">
-    <label className="block text-xs font-medium text-gray-600 mb-1">
-      Gender
-    </label>
-    <select
-      value={genderFilter}
-      onChange={(e) => setGenderFilter(e.target.value as any)}
-      className="w-full text-sm border rounded-lg px-2 py-2"
-    >
-      <option value="">Any</option>
-      <option value="Male">Male</option>
-      <option value="Female">Female</option>
-      <option value="Non-binary">Non-binary</option>
-      <option value="Other">Other</option>
-    </select>
-  </div>
-</div>
 
-    {/* Row 3: Toggle */}
-    <label className="flex items-center gap-2 text-sm">
-      <input
-        type="checkbox"
-        className="accent-green-600"
-        checked={hideContacted}
-        onChange={(e) => {
-          setHideContacted(e.target.checked);
-          setQuery("hide", e.target.checked ? "1" : "0");
-        }}
-      />
-      Hide contacted
-    </label>
-
-  </div>
-</div>
 
 
  {sortedMatches.length === 0 ? (
 <p>No matches found yet. Try adjusting your availability or skill level.</p>
 ) : (
   <>
-    <ul className="space-y-4">
+    <ul className="space-y-3">
           {visibleMatches.map((match, index) => {
              const avatarSrc = match.photoThumbURL || match.photoURL || null;
   const initials = (match.name || "?").trim().charAt(0).toUpperCase();
-            const alreadySent = sentRequests.has(match.id);
+            const toUid = uidOf(match); // ✅ auth uid (prod)
+            if (!toUid) return null; // safety: skip broken entries
+const alreadySent = sentRequests.has(toUid);
             const isNew =
               match.timestamp &&
               Date.now() -
                 new Date(match.timestamp.toDate?.() || match.timestamp).getTime() <
                 3 * 24 * 60 * 60 * 1000;
 
+
 return (
-  <li
-    role="region"
-    aria-label={`${match.name} match card`}
-    key={match.id}
-    data-tour={index === 0 ? "top-match" : undefined}
-    className="rounded-2xl bg-white ring-1 ring-black/5 p-4 shadow-sm hover:shadow-md transition"
-  >
-    <div className="flex items-start gap-3">
-      <div className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full overflow-hidden bg-gray-100 ring-1 ring-black/5 shrink-0">
-        {avatarSrc ? (
-          <Image
-            src={avatarSrc}
-            alt={match.name ? `${match.name} profile photo` : "Profile photo"}
-            fill
-            sizes="56px"
-            className="object-cover"
-          />
-        ) : (
-          <div className="h-full w-full grid place-items-center text-[11px] text-gray-600">
-            {initials}
-          </div>
-        )}
+ <li
+  role="region"
+  aria-label={`${match.name} match card`}
+  key={match.id}
+  data-tour={index === 0 ? "top-match" : undefined}
+className="rounded-3xl p-5 shadow-sm relative"
+style={{
+  background: "#FFFFFF",
+  border: "1px solid rgba(15,23,42,0.10)",
+  boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
+}}
+>
+  {/* Avatar top-right */}
+<div
+  className="absolute top-5 left-5 w-16 h-16 rounded-full overflow-hidden"
+  style={{
+    background: "rgba(15,23,42,0.06)",
+    border: "1px solid rgba(15,23,42,0.10)",
+  }}
+>
+    {avatarSrc ? (
+      <Image
+        src={avatarSrc}
+        alt={match.name ? `${match.name} profile photo` : "Profile photo"}
+        fill
+        sizes="64px"
+        className="object-cover"
+      />
+    ) : (
+      <div className="h-full w-full grid place-items-center text-[13px] font-bold text-white/80">
+        {initials}
       </div>
+    )}
+  </div>
 
-      <div className="min-w-0 flex-1">
-        {/* Name + chips */}
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-semibold text-gray-900 text-base sm:text-lg truncate max-w-[70%]">
-            {match.name}
-          </h2>
-
-          {typeof match.distance === "number" && (
-            <span className="text-[10px] sm:text-[11px] ml-auto px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-              {match.postcode} · ~{match.distance} km
-            </span>
-          )}
-        </div>
-
-        {/* Availability chips: limited on mobile, full on desktop */}
-        {(() => {
-          const avail = A(match.availability);
-          const visible = avail.slice(0, 2);
-          const remaining = avail.length - visible.length;
-
-          return (
-            <>
-              {/* Mobile (limited) */}
-              <div className="mt-1 flex flex-wrap gap-1.5 sm:hidden">
-                <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                  Skill:{" "}
-                  {labelForBand(
-                    match.skillBand ||
-                      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
-                      legacyToBand(match.skillLevel),
-                    match.skillBandLabel
-                  )}
-                </span>
-
-                {typeof (match.skillRating ?? match.utr) === "number" && (
-                  <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                    TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
-                  </span>
-                )}
-
-                {visible.map((slot) => {
-                  const shared = myProfile
-                    ? A(myProfile.availability).includes(slot)
-                    : false;
-                  return (
-                    <span
-                      key={slot}
-                      className={
-                        "text-[10px] px-2 py-[2px] rounded-full " +
-                        (shared
-                          ? "bg-green-50 text-green-700 ring-1 ring-green-200"
-                          : "bg-gray-100 text-gray-700")
-                      }
-                    >
-                      {slot}
-                    </span>
-                  );
-                })}
-
-                {remaining > 0 && (
-                  <span className="text-[10px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                    +{remaining} more
-                  </span>
-                )}
-              </div>
-
-              {/* Desktop (full) */}
-              <div className="mt-1 hidden sm:flex flex-wrap gap-1.5">
-                <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                  Skill:{" "}
-                  {labelForBand(
-                    match.skillBand ||
-                      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
-                      legacyToBand(match.skillLevel),
-                    match.skillBandLabel
-                  )}
-                </span>
-
-                {typeof (match.skillRating ?? match.utr) === "number" && (
-                  <span className="text-[11px] px-2 py-[2px] rounded-full bg-gray-100 text-gray-700">
-                    TMR: {(match.skillRating ?? match.utr)!.toFixed(2)}
-                  </span>
-                )}
-
-                {avail.map((slot) => {
-                  const shared = myProfile
-                    ? A(myProfile.availability).includes(slot)
-                    : false;
-                  return (
-                    <span
-                      key={slot}
-                      className={
-                        "text-[11px] px-2 py-[2px] rounded-full " +
-                        (shared
-                          ? "bg-green-50 text-green-700 ring-1 ring-green-200"
-                          : "bg-gray-100 text-gray-700")
-                      }
-                    >
-                      {slot}
-                    </span>
-                  );
-                })}
-              </div>
-            </>
-          );
-        })()}
-
-        {/* Bio */}
-        {match.bio && (
-          <p className="mt-1 text-sm text-gray-700">
-            {match.bio.slice(0, 160)}
-            {match.bio.length > 160 && "…"}
-          </p>
-        )}
-
-        {/* Actions */}
-        <div className="mt-3 flex flex-col sm:flex-row gap-2">
-          <Link
-            href={`/players/${match.id}`}
-            className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-center"
-          >
-            View Profile
-          </Link>
-
-          {sentRequests.has(match.id) ? (
-            <span className="w-full sm:w-auto text-green-700 text-sm font-medium flex items-center justify-center">
-              ✅ Request Sent
-            </span>
-          ) : (
-            <button
-              onClick={() => {
-                void track("match_request_click", {
-                  to_user_id: match.id,
-                  distance_km:
-                    typeof match.distance === "number" ? match.distance : null,
-                  match_mode: matchMode,
-                });
-
-                handleMatchRequest(match);
-              }}
-              disabled={sendingIds.has(match.id)}
-              data-tour={index === 0 ? "send-request" : undefined}
-              className="text-sm w-full sm:w-auto px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-              aria-label={`Request to play with ${match.name}`}
-            >
-              {sendingIds.has(match.id) ? "Sending…" : "Invite to Play"}
-            </button>
-          )}
-        </div>
-      </div>
+  {/* Content area (pad-right so text doesn't go under avatar) */}
+  <div className="pl-24">
+    {/* Name */}
+    <div className="text-[16px] font-extrabold truncate" style={{ color: TM.forest }}>
+      {match.name}
     </div>
-  </li>
+
+{(() => {
+  const numeric =
+    typeof (match.skillRating ?? match.utr) === "number"
+      ? (match.skillRating ?? match.utr)!
+      : null;
+
+  const bandLabel = labelForBand(
+    match.skillBand ||
+      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
+      legacyToBand(match.skillLevel),
+    match.skillBandLabel
+  );
+
+  const levelText = numeric != null ? numeric.toFixed(1) : bandLabel.toUpperCase();
+
+  const distText =
+    typeof match.distance === "number" ? `${match.distance} KM away` : null;
+
+  const pcText = match.postcode ? String(match.postcode) : null;
+
+  return (
+    <div className="mt-2 flex items-center gap-2 flex-wrap">
+      {/* Skill pill */}
+      <span
+        className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-extrabold"
+        style={{
+          background: "rgba(57,255,20,0.14)",
+          border: "1px solid rgba(57,255,20,0.35)",
+          color: TM.forest,
+        }}
+      >
+        LEVEL {levelText}
+      </span>
+
+      {/* Distance + postcode */}
+      <span
+        className="text-[12px] font-semibold"
+        style={{ color: "rgba(15,23,42,0.65)" }}
+      >
+        {distText ? distText : ""}
+        {distText && pcText ? " • " : ""}
+        {pcText ? pcText : ""}
+      </span>
+    </div>
+  );
+})()}
+
+
+<div
+  className="mt-1 text-[12px]"
+  style={{ color: "rgba(15,23,42,0.65)" }}
+>
+  Availability: {formatAvailability(match.availability)}
+</div>
+
+
+    {/* CTA full width */}
+    <div className="mt-3">
+      {alreadySent ? (
+  <div
+    className="w-full rounded-xl py-2.5 text-center text-[13px] font-extrabold"
+    style={{
+      color: TM.neon,
+      background: "rgba(57,255,20,0.10)",
+      border: "1px solid rgba(57,255,20,0.20)",
+    }}
+  >
+    ✅ Request Sent
+  </div>
+) : (
+  <button
+    onClick={() => {
+      void track("match_request_click", {
+        to_user_id: toUid,
+        distance_km: typeof match.distance === "number" ? match.distance : null,
+        match_mode: matchMode,
+      });
+      handleMatchRequest(match); // still fine
+    }}
+    disabled={sendingIds.has(toUid)}
+    data-tour={index === 0 ? "send-request" : undefined}
+    className="w-full rounded-full py-3.5 text-[14px] font-extrabold disabled:opacity-60"
+    style={{
+      background: TM.neon,
+      color: TM.forest,
+      boxShadow: "0 10px 30px rgba(57,255,20,0.18)",
+    }}
+  >
+    {sendingIds.has(toUid) ? "Sending…" : "Invite to Play"}
+  </button>
+)}
+    </div>
+
+<div className="mt-3">
+  <button
+    type="button"
+    onClick={() => setProfileOpenId(match.id)}
+    className="w-full rounded-full py-3.5 text-[14px] font-extrabold"
+    style={{
+      background: "#EEF0F2",
+      color: "#0F172A",
+      border: "1px solid rgba(15,23,42,0.10)",
+      boxShadow: "0 6px 18px rgba(15,23,42,0.06)",
+    }}
+  >
+    View Profile
+  </button>
+</div>
+
+
+
+  </div>
+</li>
+
+
+
 );
 
           })}
@@ -1242,6 +1603,7 @@ return (
   </>
 )}
 
+    </div>
   </div>
 );
 }

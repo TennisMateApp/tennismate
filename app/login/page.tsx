@@ -19,7 +19,12 @@ import { auth, db } from "@/lib/firebaseConfig";
 import { Capacitor } from "@capacitor/core";
 import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import dynamic from "next/dynamic";
 
+const DesktopSignIn = dynamic(
+  () => import("../../components/signIn/DesktopSignIn").then((m) => m.default),
+  { ssr: false }
+);
 
 
 export default function LoginPage() {
@@ -29,11 +34,23 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const [isDesktop, setIsDesktop] = useState(false);
+
+useEffect(() => {
+  // Tailwind "lg" breakpoint (desktop)
+  const mq = window.matchMedia("(min-width: 1024px)");
+
+  const apply = () => setIsDesktop(mq.matches);
+  apply();
+
+  mq.addEventListener?.("change", apply);
+  return () => mq.removeEventListener?.("change", apply);
+}, []);
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams?.get("next") || "/home";
   const isNative = Capacitor.isNativePlatform();
-
 
   // If already signed in, go to /home (or next) immediately
   useEffect(() => {
@@ -51,7 +68,6 @@ export default function LoginPage() {
       await signInWithEmailAndPassword(auth, email, password);
       router.replace(next);
     } catch (err: any) {
-      // Friendlier Firebase auth error messages
       const code = err?.code || "";
       if (code.includes("user-not-found") || code.includes("wrong-password")) {
         setError("Invalid email or password.");
@@ -67,202 +83,225 @@ export default function LoginPage() {
     }
   };
 
-const handleGoogleSignIn = async () => {
-  setError("");
-  setLoading(true);
+  // Kept (functionality preserved), but NOT rendered in UI per your request
+  const handleGoogleSignIn = async () => {
+    setError("");
+    setLoading(true);
 
-  try {
-    // ✅ 1) Sign in (native vs web)
-    if (Capacitor.isNativePlatform()) {
-      const res = await GoogleAuth.signIn();
-      const idToken = res.authentication?.idToken;
-      if (!idToken) throw new Error("Missing Google idToken");
+    try {
+      if (Capacitor.isNativePlatform()) {
+        const res = await GoogleAuth.signIn();
+        const idToken = res.authentication?.idToken;
+        if (!idToken) throw new Error("Missing Google idToken");
 
-      const credential = GoogleAuthProvider.credential(idToken);
-      await signInWithCredential(auth, credential);
-    } else {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
-      await signInWithPopup(auth, provider);
+        const credential = GoogleAuthProvider.credential(idToken);
+        await signInWithCredential(auth, credential);
+      } else {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
+        await signInWithPopup(auth, provider);
+      }
+
+      await auth.currentUser?.reload();
+
+      const u = auth.currentUser;
+      if (!u) throw new Error("No Firebase user after Google sign-in");
+
+      const rawPhoto =
+        u.providerData?.find((p) => p.providerId === "google.com")?.photoURL ||
+        u.photoURL ||
+        "";
+
+      const fixedPhotoURL = rawPhoto
+        ? rawPhoto.replace(/=s\d+(-c)?$/, "=s256-c")
+        : "";
+
+      await setDoc(
+        doc(db, "players", u.uid),
+        {
+          name: u.displayName || "",
+          email: u.email || "",
+          googlePhotoURL: fixedPhotoURL,
+          photoURL: "",
+          profileComplete: false,
+          timestamp: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      router.replace("/profile?edit=true");
+    } catch (err: any) {
+      console.error("Google sign-in failed:", err);
+
+      const msg =
+        err?.message ||
+        err?.errorMessage ||
+        (typeof err === "string" ? err : "") ||
+        JSON.stringify(err);
+
+      setError(`Google sign-in failed: ${msg}`);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    // ✅ 2) ALWAYS reload after sign-in (native + web)
-    await auth.currentUser?.reload();
-
-    // ✅ 3) Build a robust photo URL
-    const u = auth.currentUser;
-    if (!u) throw new Error("No Firebase user after Google sign-in");
-
-    const rawPhoto =
-      u.providerData?.find((p) => p.providerId === "google.com")?.photoURL ||
-      u.photoURL ||
-      "";
-
-    const fixedPhotoURL = rawPhoto
-      ? rawPhoto.replace(/=s\d+(-c)?$/, "=s256-c")
-      : "";
-
-    // ✅ 4) Write into players/{uid} because Profile reads players
-await setDoc(doc(db, "players", u.uid), {
-  name: u.displayName || "",
-  email: u.email || "",
-  googlePhotoURL: fixedPhotoURL, // keep it if you want
-  photoURL: "",              // force upload
-  profileComplete: false,
-  timestamp: serverTimestamp(),
-}, { merge: true });
+  const forgotHref = "/forgot-password";
+const signupHref = `/signup${next ? `?next=${encodeURIComponent(next)}` : ""}`;
 
 
-    // ✅ 5) Force them into profile completion
-    router.replace("/profile?edit=true");
-} catch (err: any) {
-  console.error("Google sign-in failed:", err);
-
-  const msg =
-    err?.message ||
-    err?.errorMessage ||
-    (typeof err === "string" ? err : "") ||
-    JSON.stringify(err);
-
-  setError(`Google sign-in failed: ${msg}`);
-}
- finally {
-    setLoading(false);
-  }
-};
-
-
-
-
+if (isDesktop) {
   return (
-    <div className="relative min-h-[100dvh] overflow-hidden">
-  {/* Background */}
-<div className="fixed inset-0 z-0">
-  <div className="relative h-full w-full">
-    <Image
-      src="/images/login-tennis-court.jpg"
-      alt=""
-      fill
-      priority
-      className="object-cover"
+    <DesktopSignIn
+      email={email}
+      setEmail={setEmail}
+      password={password}
+      setPassword={setPassword}
+      showPassword={showPassword}
+      setShowPassword={setShowPassword}
+      loading={loading}
+      error={error}
+      onSubmit={handleSubmit}
+      forgotHref={forgotHref}
+      signupHref={signupHref}
     />
-  </div>
-  <div className="absolute inset-0 bg-black/40" />
-</div>
+  );
+}
 
-      {/* Content */}
-      <div className="relative z-10 min-h-screen flex items-center justify-center px-4">
-        <div className="w-full max-w-md bg-white/95 backdrop-blur-md p-8 rounded-2xl shadow-xl ring-1 ring-black/5">
-          <div className="flex justify-center mb-5">
-            <Image
-              src="/logo.png"
-              alt="TennisMate"
-              width={96}
-              height={96}
-              className="rounded-full border p-1"
-            />
-          </div>
+return (
+  <div className="relative h-[100dvh] overflow-hidden">
+    {/* Background */}
+    <div className="absolute inset-0 z-0">
+      <Image
+        src="/images/login-tennis-court.jpg"
+        alt=""
+        fill
+        priority
+        className="object-cover"
+      />
+      <div className="absolute inset-0 bg-black/55" />
+    </div>
 
-          <h1 className="text-3xl font-semibold tracking-tight mb-2 text-center">
-            Find your TennisMate
-          </h1>
-          <p className="text-sm text-gray-600 mb-6 text-center">
-            Match by <strong>availability</strong>, <strong>skill</strong>, and <strong>location</strong>.
-          </p>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="relative">
-              <Mail className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" aria-hidden />
-              <input
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="Email"
-                className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                aria-label="Email"
+    {/* Content */}
+    <div className="relative z-10 h-[100dvh] flex items-center justify-center px-4">
+      <div className="w-full max-w-sm">
+        {/* Logo */}
+        <div className="flex justify-center mb-8">
+          <div className="h-28 w-28 rounded-full bg-white/20 ring-8 ring-white/30 backdrop-blur-md shadow-lg flex items-center justify-center">
+            <div className="relative h-24 w-24 rounded-full overflow-hidden bg-white">
+              <Image
+                src="/logo.png"
+                alt="TennisMate"
+                fill
+                priority
+                className="object-cover"
               />
             </div>
+          </div>
+        </div>
 
-            <div className="relative">
-              <Lock className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" aria-hidden />
-              <input
-                type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                placeholder="Password"
-                className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                aria-label="Password"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((s) => !s)}
-                className="absolute right-3 top-2.5 p-1 text-gray-400 hover:text-gray-600"
-                aria-label={showPassword ? "Hide password" : "Show password"}
-              >
-                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-              </button>
+        {/* Headings */}
+        <h1 className="text-center text-2xl font-semibold text-white">
+          TennisMate
+        </h1>
+        <h2 className="text-center text-2xl font-semibold text-white mt-4">
+          Welcome Back
+        </h2>
+        <p className="text-center text-sm text-gray-200 mt-2">
+          Sign in to find your next match
+        </p>
+
+        {/* Card */}
+        <div className="mt-6 rounded-2xl bg-white/95 backdrop-blur-md border border-white/20 shadow-2xl p-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Email */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Email
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="Enter your email"
+                  className="w-full h-11 rounded-xl border border-gray-200 bg-white pl-10 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#39FF14]/40 focus:border-[#39FF14]"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Password
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  className="w-full h-11 rounded-xl border border-gray-200 bg-white pl-10 pr-10 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#39FF14]/40 focus:border-[#39FF14]"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((s) => !s)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+
+              <div className="mt-2 flex justify-end">
+                <Link
+                  href="/forgot-password"
+                  className="text-xs font-medium text-[#39FF14] hover:underline"
+                >
+                  Forgot Password?
+                </Link>
+              </div>
             </div>
 
             {error && (
-              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
                 {error}
               </div>
             )}
 
-
             <button
               type="submit"
               disabled={loading}
-              className="w-full inline-flex items-center justify-center bg-green-600 text-white py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-70 disabled:cursor-not-allowed transition"
+              className="w-full h-11 rounded-xl bg-[#39FF14] text-gray-900 font-semibold shadow-md hover:brightness-95 active:brightness-90 disabled:opacity-70 disabled:cursor-not-allowed transition"
             >
-              {loading ? "Logging in…" : "Log In"}
+              {loading ? "Signing in…" : "Sign In"}
             </button>
 
-          <div className="relative my-4">
-  <div className="h-px bg-gray-200" />
-  <span className="absolute left-1/2 -translate-x-1/2 -top-2 bg-white px-2 text-xs text-gray-500">
-    or
-  </span>
-</div>
-
-{!isNative && (
-  <button
-    type="button"
-    onClick={handleGoogleSignIn}
-    disabled={loading}
-    className="w-full border border-gray-300 bg-white text-gray-900 py-2.5 rounded-lg hover:bg-gray-50 transition disabled:opacity-70 disabled:cursor-not-allowed"
-  >
-    {loading ? "Opening Google…" : "Continue with Google"}
-  </button>
-)}
-
-          </form>
-
-          <div className="mt-4 flex flex-col items-center gap-3">
-            <Link
-              href="/forgot-password"
-              className="text-sm text-green-700 hover:underline"
-            >
-              Forgot Password?
-            </Link>
-
-            {/* Preserve ?next= for signup path too */}
-            <Link href={`/signup${next ? `?next=${encodeURIComponent(next)}` : ""}`} className="w-full">
-              <button
-                type="button"
-                className="w-full border border-gray-300 text-gray-800 py-2.5 rounded-lg hover:bg-gray-50 transition"
+            <p className="text-center text-xs text-gray-500 pt-2">
+              Don&apos;t have an account?{" "}
+              <Link
+                href={`/signup${next ? `?next=${encodeURIComponent(next)}` : ""}`}
+                className="font-semibold text-[#39FF14] hover:underline"
               >
-                Create an account
-              </button>
-            </Link>
-          </div>
+                Sign Up
+              </Link>
+            </p>
+          </form>
         </div>
       </div>
     </div>
-  );
+  </div>
+);
+
+
+
 }

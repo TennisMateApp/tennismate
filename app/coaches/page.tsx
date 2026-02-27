@@ -12,9 +12,18 @@ import {
   runTransaction,
   serverTimestamp,
   increment,
+  addDoc,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseConfig";
-import { MapPin } from "lucide-react";
+import { MapPin, Search, ChevronLeft } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+// ✅ ADD: desktop component
+import { TMDesktopCoachDirectory } from "@/components/coachdirectory/TMDesktopCoachDirectory";
+
+import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
+
+
 
 type CoachListItem = {
   id: string;
@@ -27,12 +36,11 @@ type CoachListItem = {
 };
 
 function dayKeyLocalAU(): string {
-  // Melbourne time: use local device time (good enough for MVP)
   const d = new Date();
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}${mm}${dd}`; // e.g. 20260114
+  return `${yyyy}${mm}${dd}`;
 }
 
 function isVicPostcode(postcode: unknown): boolean {
@@ -41,29 +49,48 @@ function isVicPostcode(postcode: unknown): boolean {
   return p.length > 0 && p.startsWith("3");
 }
 
-// Converts "5" -> "5 years coaching", "1" -> "1 year coaching"
-// Leaves non-numeric strings alone, but still appends "years coaching" when reasonable.
 function formatCoachingExperience(raw: unknown): string {
   if (raw == null) return "";
   const s = String(raw).trim();
   if (!s) return "";
 
-  // Try parse number
   const n = Number(s);
   if (!Number.isNaN(n) && Number.isFinite(n)) {
-    // show as integer if it is one, else show as-is
     const isInt = Number.isInteger(n);
     const display = isInt ? String(n) : s;
     const label = n === 1 ? "year coaching" : "years coaching";
     return `${display} ${label}`;
   }
 
-  // If they typed "5 years" already, keep it.
-  // Otherwise add "years coaching" for clarity.
   const lower = s.toLowerCase();
   if (lower.includes("year")) return s;
 
   return `${s} years coaching`;
+}
+
+// ✅ ADD: desktop detection hook
+function useIsDesktop(breakpointPx = 1024) {
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${breakpointPx}px)`);
+
+    const apply = () => setIsDesktop(mq.matches);
+    apply();
+
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    } else {
+      // Safari fallback
+      // @ts-ignore
+      mq.addListener(apply);
+      // @ts-ignore
+      return () => mq.removeListener(apply);
+    }
+  }, [breakpointPx]);
+
+  return isDesktop;
 }
 
 async function recordCoachProfileClickUnique(coachId: string) {
@@ -72,27 +99,25 @@ async function recordCoachProfileClickUnique(coachId: string) {
 
   const dayKey = dayKeyLocalAU();
 
-  // Optional snapshot fields to help you analyse later
   const playerSnap = await getDoc(doc(db, "players", uid));
   const player = (playerSnap.data() as any) || {};
   const viewerName = (player.name ?? player.displayName ?? "").toString();
   const viewerPostcode = (player.postcode ?? "").toString();
 
   const coachRef = doc(db, "coaches", coachId);
-
-  // Lifetime unique viewer doc
   const viewerRef = doc(db, "coaches", coachId, "viewers", uid);
 
-  // Daily unique click doc (one per user per day)
   const uniqueDayId = `${uid}_${dayKey}`;
   const uniqueClickRef = doc(db, "coaches", coachId, "uniqueClicks", uniqueDayId);
 
   await runTransaction(db, async (tx) => {
-    // Always increment total opens
+    // ✅ READS FIRST
+    const viewerSnap = await tx.get(viewerRef);
+    const uniqueSnap = await tx.get(uniqueClickRef);
+
+    // ✅ WRITES AFTER READS
     tx.set(coachRef, { viewCount: increment(1) }, { merge: true });
 
-    // Lifetime unique viewers (increment only if first time ever)
-    const viewerSnap = await tx.get(viewerRef);
     if (!viewerSnap.exists()) {
       tx.set(viewerRef, {
         viewerUid: uid,
@@ -110,8 +135,6 @@ async function recordCoachProfileClickUnique(coachId: string) {
       });
     }
 
-    // Daily unique clicks (increment only if first click today)
-    const uniqueSnap = await tx.get(uniqueClickRef);
     if (!uniqueSnap.exists()) {
       tx.set(uniqueClickRef, {
         viewerUid: uid,
@@ -123,14 +146,76 @@ async function recordCoachProfileClickUnique(coachId: string) {
   });
 }
 
+function normalizePhone(raw: unknown): string {
+  if (raw == null) return "";
+  return String(raw).replace(/[^\d+]/g, "").trim();
+}
+
+async function recordCoachContactEvent(args: {
+  action: "call" | "text";
+  coachId: string;
+  phoneProvided: boolean;
+}) {
+  const viewerUid = auth.currentUser?.uid || null;
+
+  await addDoc(collection(db, "coach_contact_events"), {
+    action: args.action,
+    coachId: args.coachId,
+    viewerUid,
+    phoneProvided: args.phoneProvided,
+    createdAt: serverTimestamp(),
+    source: "coach_directory",
+  });
+}
+
+async function handleContactCoach(coachId: string) {
+  const coachSnap = await getDoc(doc(db, "coaches", coachId));
+  const coach = (coachSnap.data() as any) || {};
+
+  // ⚠️ keep the right one and delete the rest once confirmed
+  const phoneRaw =
+    coach.mobileNumber ||
+    coach.mobile ||
+    coach.phone ||
+    coach.phoneNumber ||
+    "";
+
+  const phone = normalizePhone(phoneRaw);
+  const hasPhone = !!phone;
+
+  await recordCoachContactEvent({
+    action: "call",
+    coachId,
+    phoneProvided: hasPhone,
+  });
+
+  if (hasPhone) {
+    window.location.href = `tel:${phone}`;
+  } else {
+    alert("This coach hasn’t provided a mobile number yet.");
+  }
+}
 
 export default function CoachesListPage() {
+  const router = useRouter();
+  const isDesktop = useIsDesktop(1024);
+
   const [loading, setLoading] = useState(true);
   const [coaches, setCoaches] = useState<CoachListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  // NEW: visibility gate for VIC-only
   const [canSeeCoaches, setCanSeeCoaches] = useState<boolean>(true);
+  const [search, setSearch] = useState("");
+
+  // ✅ MUST be here (top-level hook)
+  const [sidebarPlayer, setSidebarPlayer] = useState<{
+    name: string;
+    skillLevel: string;
+    avatarUrl: string | null;
+  }>({
+    name: "Player",
+    skillLevel: "",
+    avatarUrl: null,
+  });
 
   const coachesCol = useMemo(() => collection(db, "coaches"), []);
 
@@ -144,7 +229,6 @@ export default function CoachesListPage() {
       try {
         const uid = auth.currentUser?.uid;
 
-        // If not signed in, treat as not eligible (you can change this later if desired)
         if (!uid) {
           if (!cancelled) {
             setCanSeeCoaches(false);
@@ -153,11 +237,19 @@ export default function CoachesListPage() {
           return;
         }
 
-        // 1) Read viewer postcode from players/{uid}
         const playerSnap = await getDoc(doc(db, "players", uid));
-        const viewerPostcode = (playerSnap.data() as any)?.postcode;
+        const p = (playerSnap.data() as any) || {};
+        const viewerPostcode = p?.postcode;
 
-        // 2) Simple VIC-only rule
+        // ✅ sidebar info
+        if (!cancelled) {
+          setSidebarPlayer({
+            name: (p.name ?? p.displayName ?? "Player").toString(),
+            skillLevel: (p.skillLevel ?? p.skillBandLabel ?? "").toString(),
+            avatarUrl: (p.photoThumbURL ?? p.photoURL ?? p.avatar ?? null) as string | null,
+          });
+        }
+
         const allowed = isVicPostcode(viewerPostcode);
 
         if (!allowed) {
@@ -170,7 +262,6 @@ export default function CoachesListPage() {
 
         if (!cancelled) setCanSeeCoaches(true);
 
-        // 3) Allowed → load coaches
         const q = query(coachesCol, orderBy("name"));
         const snap = await getDocs(q);
 
@@ -182,16 +273,12 @@ export default function CoachesListPage() {
             avatar: data?.avatar ?? null,
             coachingExperience: data?.coachingExperience ?? "",
             courtAddress: data?.courtAddress ?? "",
-            coachingSkillLevels: Array.isArray(data?.coachingSkillLevels)
-              ? data.coachingSkillLevels
-              : [],
+            coachingSkillLevels: Array.isArray(data?.coachingSkillLevels) ? data.coachingSkillLevels : [],
             contactFirstForRate: !!data?.contactFirstForRate,
           };
         });
 
-        // Optional: hide empty stub coaches with no name yet
         const filtered = rows.filter((c) => c.name.trim().length > 0);
-
         if (!cancelled) setCoaches(filtered);
       } catch (e: any) {
         if (!cancelled) setError(e?.message ?? "Failed to load coaches");
@@ -205,117 +292,269 @@ export default function CoachesListPage() {
     };
   }, [coachesCol]);
 
+
+  const visibleCoaches = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    if (!s) return coaches;
+
+    return coaches.filter((c) => {
+      const name = (c.name || "").toLowerCase();
+      const addr = (c.courtAddress || "").toLowerCase();
+      const skills = (c.coachingSkillLevels || []).join(" ").toLowerCase();
+      const exp = (c.coachingExperience || "").toLowerCase();
+      return (
+        name.includes(s) ||
+        addr.includes(s) ||
+        skills.includes(s) ||
+        exp.includes(s)
+      );
+    });
+  }, [coaches, search]);
+
+ if (!loading && !error && canSeeCoaches && isDesktop) {
+  return (
+    <div className="min-h-screen" style={{ background: "#F7FAF8" }}>
+      <div className="w-full px-8 2xl:px-12 py-8">
+        <div className="grid gap-4 xl:grid-cols-[280px_1fr]">
+          {/* Sidebar */}
+          <TMDesktopSidebar
+            active="Search"  // or "Home" if your sidebar doesn’t support Coaches yet
+            player={{
+              name: sidebarPlayer.name,
+              skillLevel: sidebarPlayer.skillLevel,
+              photoURL: sidebarPlayer.avatarUrl,
+              photoThumbURL: sidebarPlayer.avatarUrl,
+              avatar: sidebarPlayer.avatarUrl,
+            }}
+          />
+
+          {/* Main */}
+          <main className="min-w-0">
+            <div className="mx-auto max-w-6xl">
+            <TMDesktopCoachDirectory
+  loading={loading}
+  coaches={visibleCoaches}
+  totalCoaches={coaches.length} // or null if you don’t want it
+  search={search}
+  setSearch={setSearch}
+  onViewProfile={(coachId) => recordCoachProfileClickUnique(coachId)}
+  onContactCoach={(coachId) => handleContactCoach(coachId)}
+/>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+  // ----- Existing Loading / Error / Mobile UI below -----
+
   if (loading) {
     return (
-      <div className="max-w-4xl mx-auto p-4">
-        <h1 className="text-xl font-semibold">Find a Coach</h1>
-        <div className="mt-3 text-sm opacity-70">Loading coaches…</div>
+      <div className="min-h-screen bg-[#F7FAF8]">
+        <div className="mx-auto max-w-4xl px-4 pb-24">
+          <div className="sticky top-0 z-10 bg-[#F7FAF8] pt-4 pb-3">
+            <div className="flex items-center justify-center relative">
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="absolute left-0 inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
+                aria-label="Back"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <div className="text-base font-semibold">Coach Directory</div>
+            </div>
+            <div className="mt-3">
+              <div className="flex items-center gap-2 rounded-2xl border bg-white px-3 py-2">
+                <Search size={18} className="opacity-60" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Find a coach near you…"
+                  className="w-full bg-transparent text-sm outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 text-sm opacity-70">Loading coaches…</div>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="max-w-4xl mx-auto p-4">
-        <h1 className="text-xl font-semibold">Find a Coach</h1>
-        <div className="mt-3 rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+      <div className="min-h-screen bg-[#F7FAF8]">
+        <div className="mx-auto max-w-4xl px-4 pb-24">
+          <div className="sticky top-0 z-10 bg-[#F7FAF8] pt-4 pb-3">
+            <div className="flex items-center justify-center relative">
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="absolute left-0 inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
+                aria-label="Back"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <div className="text-base font-semibold">Coach Directory</div>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-4 pb-24">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">Find a Coach</h1>
-          <p className="mt-1 text-sm opacity-70">
-            Browse local coaches and contact them directly.
-          </p>
-        </div>
-      </div>
+    <div className="min-h-screen bg-[#F7FAF8]">
+      <div className="mx-auto max-w-4xl px-4 pb-24">
+        <div className="sticky top-0 z-10 bg-[#F7FAF8] pt-4 pb-3">
+          <div className="flex items-center justify-center relative">
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="absolute left-0 inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
+              aria-label="Back"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <div className="text-base font-semibold">Coach Directory</div>
+          </div>
 
-      {/* NEW: VIC-only message */}
-      {!canSeeCoaches ? (
-        <div className="mt-6 rounded-2xl border p-4 bg-white">
-          <div className="text-sm text-gray-800 font-medium">
-            Coaching is currently available in Victoria only.
-          </div>
-          <div className="mt-1 text-sm text-gray-600">
-            Update your postcode to a Victorian postcode (starting with 3) to view coaches.
+          <div className="mt-3">
+            <div className="flex items-center gap-2 rounded-2xl border bg-white px-3 py-2 shadow-sm">
+              <Search size={18} className="opacity-60" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Find a coach near you…"
+                className="w-full bg-transparent text-sm outline-none"
+              />
+            </div>
           </div>
         </div>
-      ) : coaches.length === 0 ? (
-        <div className="mt-6 rounded-2xl border p-4">
-          <div className="text-sm opacity-80">No coaches published yet.</div>
-        </div>
-      ) : (
-        <div className="mt-6 grid grid-cols-1 gap-3">
-          {coaches.map((c) => (
-           <Link
-  key={c.id}
-  href={`/coaches/${c.id}`}
-  onClick={() => recordCoachProfileClickUnique(c.id)}
-  className="rounded-2xl border p-4 hover:bg-gray-50 transition"
->
-              <div className="flex gap-4">
-                <div className="h-14 w-14 rounded-full overflow-hidden border bg-white shrink-0">
-                  {c.avatar ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={c.avatar} alt={c.name} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="h-full w-full flex items-center justify-center text-[10px] opacity-60">
-                      No photo
+
+        {!canSeeCoaches ? (
+          <div className="mt-6 rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-sm font-medium text-gray-800">
+              Coaching is currently available in Victoria only.
+            </div>
+            <div className="mt-1 text-sm text-gray-600">
+              Update your postcode to a Victorian postcode (starting with 3) to view coaches.
+            </div>
+          </div>
+        ) : visibleCoaches.length === 0 ? (
+          <div className="mt-6 rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-sm text-gray-700">
+              {coaches.length === 0
+                ? "No coaches published yet."
+                : "No coaches match your search."}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            {visibleCoaches.map((c) => {
+              const exp = String(c.coachingExperience || "").trim()
+                ? formatCoachingExperience(c.coachingExperience)
+                : "";
+
+              return (
+                <div
+                  key={c.id}
+                  className="overflow-hidden rounded-2xl border bg-white shadow-sm"
+                >
+                  <div className="p-4">
+                    <div className="flex gap-4">
+                      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full border bg-white">
+                        {c.avatar ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={c.avatar}
+                            alt={c.name}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[10px] opacity-60">
+                            No photo
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="truncate text-[15px] font-semibold text-gray-900">
+                            {c.name}
+                          </div>
+
+                          {c.contactFirstForRate && (
+                            <span className="rounded-full bg-black/5 px-2.5 py-1 text-[11px] text-gray-700">
+                              Contact for rates
+                            </span>
+                          )}
+                        </div>
+
+                        {exp && (
+                          <div className="mt-1 text-sm text-gray-700">{exp}</div>
+                        )}
+
+                        {c.coachingSkillLevels?.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {c.coachingSkillLevels.slice(0, 3).map((lvl) => (
+                              <span
+                                key={lvl}
+                                className="rounded-full bg-[#EAF7F0] px-2.5 py-1 text-[11px] text-gray-800"
+                              >
+                                {lvl}
+                              </span>
+                            ))}
+                            {c.coachingSkillLevels.length > 3 && (
+                              <span className="rounded-full bg-black/5 px-2.5 py-1 text-[11px] text-gray-700">
+                                +{c.coachingSkillLevels.length - 3} more
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {c.courtAddress?.trim() && (
+                          <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+                            <MapPin size={16} className="shrink-0" />
+                            <span className="line-clamp-1">{c.courtAddress}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  )}
-                </div>
-
-                <div className="flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="font-semibold">{c.name}</div>
-
-                    {c.contactFirstForRate && (
-                      <span className="rounded-full border px-2.5 py-1 text-[11px]">
-                        Contact for rates
-                      </span>
-                    )}
                   </div>
 
-                  {/* UPDATED: coaching experience label */}
-                  {String(c.coachingExperience || "").trim() && (
-                    <div className="mt-1 text-sm opacity-80">
-                      {formatCoachingExperience(c.coachingExperience)}
-                    </div>
-                  )}
+                  <div className="grid grid-cols-2 border-t">
+                    <Link
+                      href={`/coaches/${c.id}`}
+                      onClick={() => recordCoachProfileClickUnique(c.id)}
+                      className="flex items-center justify-center px-3 py-3 text-sm font-semibold text-gray-900 hover:bg-black/5"
+                    >
+                      View Profile
+                    </Link>
 
-                  {c.courtAddress?.trim() && (
-                    <div className="mt-2 flex items-center gap-2 text-sm opacity-75">
-                      <MapPin size={16} />
-                      <span className="line-clamp-1">{c.courtAddress}</span>
-                    </div>
-                  )}
-
-                  {c.coachingSkillLevels?.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {c.coachingSkillLevels.slice(0, 4).map((lvl) => (
-                        <span key={lvl} className="rounded-full border px-2.5 py-1 text-[11px]">
-                          {lvl}
-                        </span>
-                      ))}
-                      {c.coachingSkillLevels.length > 4 && (
-                        <span className="rounded-full border px-2.5 py-1 text-[11px] opacity-70">
-                          +{c.coachingSkillLevels.length - 4} more
-                        </span>
-                      )}
-                    </div>
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => handleContactCoach(c.id)}
+                      className="flex items-center justify-center bg-[#39FF14] px-3 py-3 text-sm font-semibold text-[#0B3D2E] hover:brightness-95"
+                    >
+                      Contact Coach
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

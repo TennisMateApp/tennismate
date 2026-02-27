@@ -27,9 +27,17 @@ type Notification = {
   body?: string;
   message?: string;
   type?: string;
+
+  // ids
   matchId?: string;
   conversationId?: string;
   eventId?: string;
+  inviteId?: string;
+
+  // routing
+  route?: string; // e.g. "/invites/abc"
+  url?: string;   // e.g. "https://tennismate.vercel.app/invites/abc"
+
   timestamp?: any; // Firestore Timestamp
   recipientId?: string;
 };
@@ -214,21 +222,64 @@ export default function NotificationBell() {
 
   const unreadCount = items.length;
 
-  const handleItemClick = async (n: Notification) => {
-    setOpen(false);
+  function resolveNotificationRoute(n: Notification): string {
+  // ✅ 1) Prefer explicit route if present
+  if (typeof n.route === "string" && n.route.startsWith("/")) return n.route;
 
+  // ✅ 2) Next: derive from full URL if present
+  if (typeof n.url === "string" && n.url) {
     try {
-      await updateDoc(doc(db, "notifications", n.id), { read: true });
-    } catch (e) {
-      console.warn("Failed to mark read:", e);
+      return new URL(n.url).pathname || "/matches";
+    } catch {
+      if (n.url.startsWith("/")) return n.url;
     }
+  }
 
-    if (n.matchId) return router.push(`/matches?matchId=${n.matchId}`);
-    if (n.type === "message" && n.conversationId)
-      return router.push(`/messages/${n.conversationId}`);
-    if (n.eventId) return router.push(`/events/${n.eventId}`);
-    return router.push("/matches");
-  };
+  // ✅ 3) Type-based rules (your desired behaviour)
+  const t = (n.type || "").toLowerCase();
+
+  // Match invite → invite details page
+  if (t === "match_invite") {
+    if (n.inviteId) return `/invites/${n.inviteId}`;
+    // If your invite notifications are keyed like invite_<inviteId>_uid, this at least avoids /matches
+    return "/invites";
+  }
+
+  // Match request received → matches page
+  if (t === "match_request") return "/matches";
+
+  // Match request accepted → matches accepted section
+  if (t === "match_accepted") return "/matches?tab=accepted";
+
+  // Event notifications → events (or specific event)
+  if (t.includes("event")) {
+    if (n.eventId) return `/events/${n.eventId}`;
+    return "/events";
+  }
+
+  // Messages (you said these are fine, but we’ll keep it correct)
+  if (t === "message" && n.conversationId) return `/messages/${n.conversationId}`;
+
+  // ✅ 4) Old fallback behaviour
+  // If matchId exists but type isn't invite, keep your old deep link
+  if (n.matchId) return `/matches?matchId=${n.matchId}`;
+
+  // Final fallback
+  return "/matches";
+}
+
+const handleItemClick = async (n: Notification) => {
+  setOpen(false);
+
+  try {
+    await updateDoc(doc(db, "notifications", n.id), { read: true });
+  } catch (e) {
+    console.warn("Failed to mark read:", e);
+  }
+
+  const target = resolveNotificationRoute(n);
+  return router.push(target);
+};
 
   const clearAll = async () => {
     if (!items.length) return;

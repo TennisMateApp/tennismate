@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { doc, getDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseConfig";
 import { Phone, MessageSquare, MapPin, ArrowLeft, X } from "lucide-react";
+import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
+import TMDesktopCoachProfile from "@/components/coachprofile/TMDesktopCoachProfile";
 import { onAuthStateChanged } from "firebase/auth";
 
 type GalleryPhoto = { url: string; path?: string; createdAt?: number };
@@ -35,6 +37,31 @@ function uniq(arr: string[]) {
   return Array.from(new Set(arr.filter(Boolean)));
 }
 
+function useIsDesktop(breakpointPx = 1024) {
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${breakpointPx}px)`);
+
+    const apply = () => setIsDesktop(mq.matches);
+    apply();
+
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    } else {
+      // Safari fallback
+      // @ts-ignore
+      mq.addListener(apply);
+      // @ts-ignore
+      return () => mq.removeListener(apply);
+    }
+  }, [breakpointPx]);
+
+  return isDesktop;
+}
+
+
 export default function PublicCoachProfilePage() {
   const router = useRouter();
   const params = useParams();
@@ -44,6 +71,19 @@ export default function PublicCoachProfilePage() {
   const [coach, setCoach] = useState<CoachProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [authedUid, setAuthedUid] = useState<string | null>(null);
+
+  const isDesktop = useIsDesktop(1024);
+
+const [sidebarPlayer, setSidebarPlayer] = useState<{
+  name: string;
+  skillLevel: string;
+  avatarUrl: string | null;
+}>({
+  name: "Player",
+  skillLevel: "",
+  avatarUrl: null,
+});
+
 
   // UI state
   const [activePhotoIdx, setActivePhotoIdx] = useState(0);
@@ -105,13 +145,31 @@ export default function PublicCoachProfilePage() {
     })();
   }, [coachRef]);
 
-  // Auth UID (owner controls)
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      setAuthedUid(user?.uid ?? null);
-    });
-    return () => unsub();
-  }, []);
+useEffect(() => {
+  const unsub = onAuthStateChanged(auth, async (user) => {
+    setAuthedUid(user?.uid ?? null);
+
+    // ✅ Sidebar info (desktop)
+    try {
+      if (!user?.uid) return;
+
+      const snap = await getDoc(doc(db, "players", user.uid));
+      const p = (snap.data() as any) || {};
+
+      setSidebarPlayer({
+        name: (p.name ?? p.displayName ?? "Player").toString(),
+        skillLevel: (p.skillLevel ?? p.skillBandLabel ?? "").toString(),
+        avatarUrl: (p.photoThumbURL ?? p.photoURL ?? p.avatar ?? null) as string | null,
+      });
+    } catch (e) {
+      // don’t block page if sidebar load fails
+      console.warn("[CoachProfile] sidebar player load failed", e);
+    }
+  });
+
+  return () => unsub();
+}, []);
+
 
   // ✅ Lightbox keyboard navigation — always defined, guarded inside
   useEffect(() => {
@@ -152,6 +210,13 @@ useEffect(() => {
         )}`
       : null;
 
+      const mapsEmbedUrl =
+  coach?.courtAddress?.trim()
+    ? `https://www.google.com/maps?q=${encodeURIComponent(
+        coach.courtAddress
+      )}&output=embed`
+    : null;
+
   const coachingLevels =
     Array.isArray(coach?.coachingSkillLevels) && coach!.coachingSkillLevels.length > 0
       ? coach!.coachingSkillLevels
@@ -191,15 +256,9 @@ useEffect(() => {
 
 
   // ✅ Single return to avoid hook-order issues
-  return (
-    <div className="max-w-3xl mx-auto p-4 pb-20">
-      <button
-        onClick={() => router.back()}
-        className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-gray-50"
-      >
-        <ArrowLeft size={16} />
-        Back
-      </button>
+return (
+  <div className="min-h-screen bg-[#F7FAF8]">
+
 
       {/* Loading */}
       {loading && (
@@ -216,306 +275,334 @@ useEffect(() => {
       )}
 
       {/* Content */}
-      {!loading && !error && coach && (
-        <>
-          {/* HERO / CAROUSEL */}
-          <div className="mt-4 relative">
-           <div className="relative rounded-2xl border bg-gray-100 overflow-visible">
-  {/* Inner wrapper clips ONLY the image */}
-  <div className="relative overflow-hidden rounded-2xl">
-    {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img
-      src={activeHeroUrl || heroFallback}
-      alt="Coach photo"
-      className="h-56 sm:h-72 w-full object-cover cursor-pointer"
-      onClick={() => setLightboxOpen(true)}
-      onError={(e) => {
-        (e.currentTarget as HTMLImageElement).src = heroFallback;
-      }}
-    />
+{/* Content */}
+{!loading && !error && coach && (
+  <>
+    {isDesktop ? (
+      // =========================
+      // ✅ DESKTOP LAYOUT
+      // =========================
+      <div className="w-full px-8 2xl:px-12 py-8">
+        <div className="grid gap-3 xl:grid-cols-[300px_1fr]">
+          {/* LEFT: Sidebar */}
+          <TMDesktopSidebar
+            active="Search"
+            player={{
+              name: sidebarPlayer.name,
+              skillLevel: sidebarPlayer.skillLevel,
+              photoURL: sidebarPlayer.avatarUrl,
+              photoThumbURL: sidebarPlayer.avatarUrl,
+              avatar: sidebarPlayer.avatarUrl,
+            }}
+          />
 
-    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/40 via-black/0 to-black/0" />
-
-    {/* your arrows + dots stay inside this inner wrapper */}
-    {heroImages.length > 1 && (
-      <>
-        <button
-          type="button"
-          onClick={() => setActivePhotoIdx((i) => Math.max(i - 1, 0))}
-          disabled={safeActiveIdx === 0}
-          className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 px-3 py-2 text-sm border hover:bg-white disabled:opacity-50"
-          aria-label="Previous photo"
-        >
-          ‹
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActivePhotoIdx((i) => Math.min(i + 1, heroImages.length - 1))}
-          disabled={safeActiveIdx === heroImages.length - 1}
-          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 px-3 py-2 text-sm border hover:bg-white disabled:opacity-50"
-          aria-label="Next photo"
-        >
-          ›
-        </button>
-
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
-          {heroImages.map((_, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => setActivePhotoIdx(idx)}
-              className={[
-                "h-2 w-2 rounded-full border",
-                idx === safeActiveIdx ? "bg-white border-white" : "bg-white/40 border-white/60",
-              ].join(" ")}
-              aria-label={`Go to photo ${idx + 1}`}
+          {/* RIGHT: Main */}
+          <main className="min-w-0">
+            <TMDesktopCoachProfile
+              coach={coach}
+              hasPhone={hasPhone}
+              phoneForLink={phoneForLink}
+              mapsUrl={mapsUrl}
+              onCall={async () => {
+                if (!hasPhone) return;
+                await trackContactClick("call");
+                window.location.href = `tel:${phoneForLink}`;
+              }}
+              onText={async () => {
+                if (!hasPhone) return;
+                await trackContactClick("text");
+                window.location.href = `sms:${phoneForLink}`;
+              }}
             />
+          </main>
+        </div>
+      </div>
+    ) : (
+      // =========================
+      // ✅ MOBILE LAYOUT (your existing UI)
+      // =========================
+        <div className="mx-auto max-w-md px-4 pb-24">
+
+    {/* Top bar like screenshot */}
+    <div className="mt-3 flex items-center justify-between">
+      <button
+        onClick={() => router.back()}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
+        aria-label="Back"
+      >
+        <ArrowLeft size={18} />
+      </button>
+
+      <div className="text-sm font-semibold text-gray-900">Coach Profile</div>
+
+      <div className="h-9 w-9" />
+    </div>
+
+    {/* Profile Card */}
+    <div className="mt-3 rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="flex flex-col items-center text-center">
+        {/* Avatar (rounded square like screenshot) */}
+        <div
+          className="relative aspect-square w-[110px] overflow-hidden rounded-2xl"
+          style={{
+            background: "rgba(0,0,0,0.04)",
+            border: "1px solid rgba(0,0,0,0.10)",
+          }}
+        >
+          <img
+            src={coach.avatar || "/default-avatar.png"}
+            alt={coach.name || "Coach"}
+            className="h-full w-full object-cover object-center"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = "/default-avatar.png";
+            }}
+          />
+        </div>
+
+        <div className="mt-3 text-lg font-extrabold text-gray-900">
+          {coach.name?.trim() ? coach.name : "Coach"}
+        </div>
+
+        <div className="mt-0.5 text-xs font-semibold text-gray-600">
+          {coach.contactFirstForRate
+            ? "Contact for rates"
+            : coach.coachingExperience?.trim()
+              ? `${coach.coachingExperience} years coaching`
+              : "Coach"}
+        </div>
+
+        {/* Contact buttons near top ✅ (NO Book Lesson) */}
+        <div className="mt-3 grid w-full grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={!hasPhone}
+            className={[
+              "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-extrabold",
+              hasPhone
+                ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                : "bg-gray-200 text-gray-500 cursor-not-allowed",
+            ].join(" ")}
+            onClick={async () => {
+              if (!hasPhone) return;
+              await trackContactClick("call");
+              window.location.href = `tel:${phoneForLink}`;
+            }}
+          >
+            <Phone size={16} />
+            Contact
+          </button>
+
+          <button
+            type="button"
+            disabled={!hasPhone}
+            className={[
+              "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-extrabold border",
+              hasPhone
+                ? "bg-white hover:bg-black/5 border-black/10 text-gray-900"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed border-black/5",
+            ].join(" ")}
+            onClick={async () => {
+              if (!hasPhone) return;
+              await trackContactClick("text");
+              window.location.href = `sms:${phoneForLink}`;
+            }}
+          >
+            <MessageSquare size={16} />
+            Text
+          </button>
+        </div>
+
+        {!hasPhone && (
+          <div className="mt-2 text-xs text-gray-500">
+            This coach hasn’t provided a mobile number yet.
+          </div>
+        )}
+      </div>
+    </div>
+
+    {/* Bio */}
+    {bioText && (
+      <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-extrabold text-gray-900">Bio</div>
+          {bioText.length > 220 && (
+            <button
+              type="button"
+              onClick={() => setExpandBio((v) => !v)}
+              className="text-xs font-semibold text-emerald-700 hover:underline"
+            >
+              {expandBio ? "Show less" : "Read more"}
+            </button>
+          )}
+        </div>
+
+        <div className="mt-2 text-sm leading-relaxed text-gray-700 whitespace-pre-wrap">
+          {expandBio ? bioText : clampText(bioText, 260)}
+        </div>
+      </div>
+    )}
+
+    {/* Coaching Levels */}
+    {coachingLevels.length > 0 && (
+      <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="text-sm font-extrabold text-gray-900">Coaching Levels</div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {coachingLevels.map((lvl) => (
+            <span
+              key={lvl}
+              className="rounded-full px-3 py-1.5 text-xs font-extrabold"
+              style={{
+                background: "rgba(57,255,20,0.18)",
+                color: "#0B3D2E",
+                border: "1px solid rgba(11,61,46,0.12)",
+              }}
+            >
+              {lvl}
+            </span>
           ))}
         </div>
-      </>
+      </div>
     )}
-  </div>
 
-  {/* Floating avatar now NOT clipped */}
-  <div className="absolute -bottom-8 left-4 sm:left-6">
-    <div className="h-20 w-20 rounded-full overflow-hidden ring-4 ring-white bg-white border">
-      {coach.avatar ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={coach.avatar}
-          alt={`${coach.name || "Coach"} avatar`}
-          className="h-full w-full object-cover"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).src = "/default-avatar.png";
+    {/* Coaching Locations */}
+    {coach.courtAddress?.trim() && (
+      <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="text-sm font-extrabold text-gray-900">Coaching Locations</div>
+
+        <div
+          className="mt-3 rounded-xl border p-3"
+          style={{
+            borderColor: "rgba(11,61,46,0.12)",
+            background: "rgba(247,250,248,0.65)",
           }}
-        />
-      ) : (
-        <div className="h-full w-full flex items-center justify-center text-xs opacity-60">
-          No photo
-        </div>
-      )}
-    </div>
-  </div>
-</div>
-
-
-            {/* Name + chips under hero */}
-            <div className="mt-10 sm:mt-12 rounded-2xl border bg-white p-4 sm:p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="text-xl sm:text-2xl font-semibold">
-                      {coach.name?.trim() ? coach.name : "Coach"}
-                    </h1>
-
-                    {coach.contactFirstForRate && (
-                      <span className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-1 text-xs font-medium">
-                        Contact for rates
-                      </span>
-                    )}
-                  </div>
-
-                  {trustLine && <div className="mt-1 text-sm text-gray-600">{trustLine}</div>}
-
-                </div>
-
-                {isOwner && (
-                  <button
-                    onClick={() => router.push("/coach/profile")}
-                    className="shrink-0 inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm hover:bg-gray-50"
-                  >
-                    Edit profile
-                  </button>
-                )}
-              </div>
-
-        {/* Who I coach (no icons) */}
-{coachingLevels.length > 0 && (
-  <div className="mt-4">
-    <div className="text-sm font-semibold text-gray-900">Who I coach</div>
-    <div className="mt-2 flex flex-wrap gap-2">
-      {coachingLevels.map((lvl) => (
-        <span
-          key={lvl}
-          className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-800"
         >
-          {lvl}
-        </span>
-      ))}
-    </div>
-  </div>
-)}
-
-{/* Contact buttons (under the coach info card) */}
-<div className="mt-4">
-  <div className="text-sm font-semibold text-gray-900">Contact</div>
-
-  <div className="mt-2 flex flex-wrap gap-2">
- <a
-  href={hasPhone ? `tel:${phoneForLink}` : undefined}
-  className={[
-    "flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold",
-    hasPhone
-      ? "bg-emerald-600 text-white hover:bg-emerald-700"
-      : "bg-gray-200 text-gray-500 cursor-not-allowed",
-  ].join(" ")}
-  onClick={async (e) => {
-    if (!hasPhone) {
-      e.preventDefault();
-      return;
-    }
-
-    // ensure tracking logs before leaving the page
-    e.preventDefault();
-    await trackContactClick("call");
-    window.location.href = `tel:${phoneForLink}`;
-  }}
->
-  <Phone size={16} />
-  Call
-</a>
-
-
- <a
-  href={hasPhone ? `sms:${phoneForLink}` : undefined}
-  className={[
-    "flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold border",
-    hasPhone ? "hover:bg-gray-50" : "bg-gray-100 text-gray-400 cursor-not-allowed",
-  ].join(" ")}
-  onClick={async (e) => {
-    if (!hasPhone) {
-      e.preventDefault();
-      return;
-    }
-
-    e.preventDefault();
-    await trackContactClick("text");
-    window.location.href = `sms:${phoneForLink}`;
-  }}
->
-  <MessageSquare size={16} />
-  Text
-</a>
-
-  </div>
-
-  {!hasPhone && (
-    <div className="mt-2 text-xs text-gray-500">Phone not provided by this coach.</div>
-  )}
-</div>
-
+          <div className="flex items-start gap-2">
+            <MapPin size={18} className="mt-0.5 shrink-0 text-emerald-700" />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-gray-900 line-clamp-2">
+                {coach.courtAddress}
+              </div>
+              <div className="mt-0.5 text-xs text-gray-600">
+                Tap below to open directions
+              </div>
             </div>
           </div>
 
-          {/* Court location (standalone) */}
-{coach.courtAddress?.trim() && (
-  <div className="mt-6 rounded-2xl border bg-white p-4 sm:p-5 shadow-sm">
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <div className="text-sm font-semibold text-gray-900">Court location</div>
-
-        <div className="mt-2 flex items-start gap-2 text-sm text-gray-800">
-          <MapPin size={18} className="mt-0.5 shrink-0 text-emerald-700" />
-          <span className="break-words whitespace-pre-wrap">{coach.courtAddress}</span>
-        </div>
-
-        <div className="mt-2 text-xs text-gray-500">
-          Tip: Confirm exact court/meeting point when you reach out.
-        </div>
-      </div>
-
-      {mapsUrl && (
-        <a
-          href={mapsUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="shrink-0 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
-        >
-          Open in Maps
-        </a>
-      )}
-    </div>
+          {mapsEmbedUrl && (
+  <div
+    className="mt-3 overflow-hidden rounded-2xl border"
+    style={{ borderColor: "rgba(11,61,46,0.12)" }}
+  >
+    <iframe
+      src={mapsEmbedUrl}
+      width="100%"
+      height="260"
+      loading="lazy"
+      referrerPolicy="no-referrer-when-downgrade"
+      className="block w-full"
+    />
   </div>
 )}
 
 
-          {/* Playing background */}
-          {playingText && (
-            <div className="mt-6 rounded-2xl border bg-white p-4 sm:p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="font-semibold">Playing background</h2>
-                {playingText.length > 220 && (
-                  <button
-                    type="button"
-                    onClick={() => setExpandPlaying((v) => !v)}
-                    className="text-sm text-emerald-700 hover:underline"
-                  >
-                    {expandPlaying ? "Show less" : "Read more"}
-                  </button>
-                )}
-              </div>
-
-              <p className="mt-2 text-sm whitespace-pre-wrap text-gray-800 leading-relaxed">
-                {expandPlaying ? playingText : clampText(playingText, 260)}
-              </p>
-            </div>
-          )}
-
-          {/* About */}
-          {bioText && (
-            <div className="mt-6 rounded-2xl border bg-white p-4 sm:p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="font-semibold">About</h2>
-                {bioText.length > 220 && (
-                  <button
-                    type="button"
-                    onClick={() => setExpandBio((v) => !v)}
-                    className="text-sm text-emerald-700 hover:underline"
-                  >
-                    {expandBio ? "Show less" : "Read more"}
-                  </button>
-                )}
-              </div>
-
-              <p className="mt-2 text-sm whitespace-pre-wrap text-gray-800 leading-relaxed">
-                {expandBio ? bioText : clampText(bioText, 260)}
-              </p>
-            </div>
-          )}
-
-
-          {/* Lightbox */}
-          {lightboxOpen && (
-            <div
-              className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-              onClick={() => setLightboxOpen(false)}
-              role="dialog"
-              aria-modal="true"
+          {mapsUrl && (
+            <a
+              href={mapsUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-extrabold hover:bg-black/5"
+              style={{
+                borderColor: "rgba(11,61,46,0.12)",
+                color: "#0B3D2E",
+              }}
             >
-              <div className="relative w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  onClick={() => setLightboxOpen(false)}
-                  className="absolute -top-12 right-0 inline-flex items-center gap-2 rounded-lg bg-white/90 px-3 py-2 text-sm border hover:bg-white"
-                >
-                  <X size={16} />
-                  Close
-                </button>
-
-                <div className="relative overflow-hidden rounded-2xl bg-black">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={activeHeroUrl || heroFallback}
-                    alt="Coach photo"
-                    className="max-h-[78vh] w-full object-contain bg-black"
-                  />
-                </div>
-              </div>
-            </div>
+              Open in Maps
+            </a>
           )}
-        </>
-      )}
-    </div>
-  );
+        </div>
+      </div>
+    )}
+
+    {/* Playing Background */}
+    {playingText && (
+      <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-extrabold text-gray-900">Playing Background</div>
+          {playingText.length > 220 && (
+            <button
+              type="button"
+              onClick={() => setExpandPlaying((v) => !v)}
+              className="text-xs font-semibold text-emerald-700 hover:underline"
+            >
+              {expandPlaying ? "Show less" : "Read more"}
+            </button>
+          )}
+        </div>
+
+        <div className="mt-2 text-sm leading-relaxed text-gray-700 whitespace-pre-wrap">
+          {expandPlaying ? playingText : clampText(playingText, 260)}
+        </div>
+      </div>
+    )}
+
+    {/* Gallery (optional) */}
+    {heroImages.length > 0 && (
+      <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="text-sm font-extrabold text-gray-900">Gallery</div>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {heroImages.slice(0, 6).map((url, idx) => (
+            <button
+              key={`${url}-${idx}`}
+              type="button"
+              className="relative aspect-[4/3] overflow-hidden rounded-xl border"
+              style={{ borderColor: "rgba(0,0,0,0.10)", background: "rgba(0,0,0,0.04)" }}
+              onClick={() => {
+                setActivePhotoIdx(idx);
+                setLightboxOpen(true);
+              }}
+            >
+              <img src={url} alt="Gallery" className="h-full w-full object-cover" />
+            </button>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {/* Lightbox (keep your existing one) */}
+    {lightboxOpen && (
+      <div
+        className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+        onClick={() => setLightboxOpen(false)}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="relative w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => setLightboxOpen(false)}
+            className="absolute -top-12 right-0 inline-flex items-center gap-2 rounded-lg bg-white/90 px-3 py-2 text-sm border hover:bg-white"
+          >
+            <X size={16} />
+            Close
+          </button>
+
+          <div className="relative overflow-hidden rounded-2xl bg-black">
+            <img
+              src={activeHeroUrl || heroFallback}
+              alt="Coach photo"
+              className="max-h-[78vh] w-full object-contain bg-black"
+            />
+          </div>
+        </div>
+      </div>
+    )}
+       </div>
+  )}
+  </>
+)}
+
+  </div>
+);
 }

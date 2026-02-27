@@ -1,16 +1,18 @@
-// /app/profile/page.tsx
 "use client";
 
-import dynamic from "next/dynamic";
-import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import ProfileContent from "./ProfileContent";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import DesktopProfilePage from "@/components/profile/DesktopProfilePage";
+import DesktopProfileEditPage from "./DesktopProfileEditPage";
 
-// Dynamically load the profile content component
-const ProfileContent = dynamic(() => import("./ProfileContent"), { ssr: false });
+export default function ProfilePage() {
+  const searchParams = useSearchParams();
+  const isDesktop = useIsDesktop();
+  const editMode = searchParams.get("edit") === "true";
 
-export default function ProfilePageWrapper() {
-  return (
-    <Suspense fallback={<div className="p-6">Loading profile...</div>}>
-      <ProfileContent />
-    </Suspense>
-  );
+  if (isDesktop && editMode) return <DesktopProfileEditPage />;
+  if (isDesktop && !editMode) return <DesktopProfilePage />;
+
+  return <ProfileContent />;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useLayoutEffect } from "react";
 import { useRouter } from "next/navigation";
 import { User, MessageCircle, Search, Settings } from "lucide-react";
 import { GiTennisCourt, GiTennisBall } from "react-icons/gi";
@@ -18,6 +18,13 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<number>(0);
 
   const router = useRouter();
+
+  useLayoutEffect(() => {
+  // match your wrapper background
+  document.documentElement.style.backgroundColor = "#F3F4F6"; // gray-100
+  document.body.style.backgroundColor = "#F3F4F6";            // gray-100
+  document.body.style.margin = "0";
+}, []);
 
   useEffect(() => {
     let unsubAuth = () => {};
@@ -64,7 +71,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   };
 
   return (
-    <div className="bg-gray-100 min-h-screen text-gray-900">
+    <div className="bg-gray-100 min-h-screen w-full overflow-x-hidden text-gray-900">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white border-b shadow-sm p-4 pt-[var(--safe-top,0px)]">
         <div className="max-w-5xl mx-auto flex justify-between items-center">

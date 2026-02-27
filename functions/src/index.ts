@@ -15,6 +15,55 @@ if (admin.apps.length === 0) {
 }
 const db = admin.firestore();
 
+// -------------------- MATCH INVITE → CALENDAR SYNC HELPERS --------------------
+
+function computeEndISO(startISO: string, durationMins: number): string {
+  const start = new Date(startISO);
+  if (isNaN(start.getTime())) return startISO; // keep as-is if invalid
+  return new Date(start.getTime() + durationMins * 60 * 1000).toISOString();
+}
+
+function pickInviteFields(after: any): {
+  startISO: string | null;
+  endISO: string | null;
+  durationMins: number | null;
+  title: string;
+  courtName: string | null;
+} {
+  const invite = after?.invite || {};
+
+  const startISO =
+    (typeof invite?.startISO === "string" && invite.startISO) ||
+    (typeof after?.inviteStart === "string" && after.inviteStart) ||
+    null;
+
+  const durationMins =
+    (typeof invite?.durationMins === "number" && invite.durationMins) ||
+    (typeof after?.inviteDurationMins === "number" && after.inviteDurationMins) ||
+    null;
+
+  const endISO =
+    (typeof invite?.endISO === "string" && invite.endISO) ||
+    (typeof after?.inviteEnd === "string" && after.inviteEnd) ||
+    (startISO && typeof durationMins === "number"
+      ? computeEndISO(startISO, durationMins)
+      : null);
+
+  const title =
+    (typeof invite?.title === "string" && invite.title) ||
+    (typeof after?.inviteTitle === "string" && after.inviteTitle) ||
+    "Match Invite";
+
+    const courtName =
+    (typeof invite?.courtName === "string" && invite.courtName) ||
+    (typeof invite?.court?.name === "string" && invite.court.name) ||     // ✅ NEW (matches your UI)
+    (typeof invite?.location === "string" && invite.location) ||           // ✅ fallback
+    (typeof after?.courtName === "string" && after.courtName) ||
+    null;
+
+  return { startISO, endISO, durationMins, title, courtName };
+}
+
 // ---------- EVENT AUTO-DELETE (end time + 1 hour) ----------
 function computeDeleteAfterFromEndISO(endISO: unknown): admin.firestore.Timestamp | null {
   if (typeof endISO !== "string" || !endISO) return null;
@@ -855,12 +904,229 @@ const requesterNameFromPlayers = await getPlayerName(requesterId);
   }
 );
 
+// ============================================================
+// ✅ EVENT NOTIFICATIONS (Bell + Push)
+// Requirement:
+// 1) When a user requests to join -> notify host
+// 2) When request accepted -> notify requester
+// 3) When event cancelled -> notify participants + delete group chat
+// ============================================================
+
+// Helper: delete conversation + messages
+async function deleteConversationDeep(conversationId: string) {
+  const convoRef = db.collection("conversations").doc(conversationId);
+
+  // 1) delete messages in batches
+  const messagesRef = convoRef.collection("messages");
+  while (true) {
+    const batchSnap = await messagesRef.limit(400).get();
+    if (batchSnap.empty) break;
+
+    const batch = db.batch();
+    batchSnap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+
+  // 2) delete conversation doc
+  await convoRef.delete().catch(() => {});
+}
+
+// 1) Join request CREATED -> notify host (bell + push)
+export const notifyHostOnEventJoinRequestCreated = onDocumentCreated(
+  "events/{eventId}/join_requests/{reqId}",
+  async (event) => {
+    const { eventId, reqId } = event.params as { eventId: string; reqId: string };
+    const req = event.data?.data() as { userId?: string; status?: string } | undefined;
+    if (!req?.userId) return;
+
+    // only pending requests
+    const status = (req.status || "pending").toString();
+    if (status !== "pending") return;
+
+    const evSnap = await db.collection("events").doc(eventId).get();
+    if (!evSnap.exists) return;
+
+    const ev = evSnap.data() as any;
+    const hostId = ev?.hostId as string | undefined;
+    if (!hostId) return;
+
+    // don't notify self
+    if (hostId === req.userId) return;
+
+    const eventTitle = (ev?.title as string) || "Tennis Event";
+    const requesterName = await getPlayerName(req.userId);
+
+    // ✅ stable notification id prevents duplicates on retries
+    const notifId = `eventJoinReq_${eventId}_${reqId}_${hostId}`;
+
+    await db.collection("notifications").doc(notifId).set(
+      {
+        recipientId: hostId,
+        type: "event_join_request",
+        eventId,
+        reqId,
+        fromUserId: req.userId,
+
+        title: "New join request",
+        body: `${requesterName} requested to join: ${eventTitle}`,
+        message: `${requesterName} requested to join: ${eventTitle}`,
+
+        route: `/events/${eventId}`,
+        url: `https://tennismate.vercel.app/events/${eventId}`,
+
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        read: false,
+
+        source: "cf:notifyHostOnEventJoinRequestCreated",
+      },
+      { merge: true }
+    );
+  }
+);
+
+// 2) Join request UPDATED -> if accepted -> notify requester (bell + push)
+export const notifyRequesterOnEventJoinRequestAccepted = onDocumentUpdated(
+  "events/{eventId}/join_requests/{reqId}",
+  async (event) => {
+    const { eventId, reqId } = event.params as { eventId: string; reqId: string };
+    const before = event.data?.before?.data() as { status?: string } | undefined;
+    const after = event.data?.after?.data() as { status?: string; userId?: string } | undefined;
+    if (!before || !after) return;
+
+    const prevStatus = (before.status || "pending").toString();
+    const nextStatus = (after.status || "pending").toString();
+
+    // Only when status transitions to accepted
+    if (prevStatus === "accepted" || nextStatus !== "accepted") return;
+
+    const requesterId = after.userId;
+    if (!requesterId) return;
+
+    const evSnap = await db.collection("events").doc(eventId).get();
+    const ev = evSnap.exists ? (evSnap.data() as any) : {};
+    const eventTitle = (ev?.title as string) || "Tennis Event";
+
+    const notifId = `eventJoinAccepted_${eventId}_${reqId}_${requesterId}`;
+
+    await db.collection("notifications").doc(notifId).set(
+      {
+        recipientId: requesterId,
+        type: "event_join_accepted",
+        eventId,
+        reqId,
+
+        title: "Request accepted ✅",
+        body: `You’ve been accepted into: ${eventTitle}`,
+        message: `You’ve been accepted into: ${eventTitle}`,
+
+        route: `/events/${eventId}`,
+        url: `https://tennismate.vercel.app/events/${eventId}`,
+
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        read: false,
+
+        source: "cf:notifyRequesterOnEventJoinRequestAccepted",
+      },
+      { merge: true }
+    );
+  }
+);
+
+// 3) Event UPDATED -> if cancelled -> notify participants + delete group chat
+export const notifyOnEventCancelledAndDeleteChat = onDocumentUpdated(
+  "events/{eventId}",
+  async (event) => {
+    const { eventId } = event.params as { eventId: string };
+    const before = event.data?.before?.data() as any;
+    const after = event.data?.after?.data() as any;
+    if (!before || !after) return;
+
+    const prevStatus = (before.status || "open").toString();
+    const nextStatus = (after.status || "open").toString();
+
+    // Only on transition to cancelled
+    if (prevStatus === "cancelled" || nextStatus !== "cancelled") return;
+
+    const eventTitle = (after.title as string) || "Tennis Event";
+    const hostId = (after.hostId as string) || null;
+    const participants: string[] = Array.isArray(after.participants)
+      ? after.participants.filter(Boolean)
+      : [];
+
+    const conversationId: string | undefined =
+      (after.conversationId as string | undefined) || undefined;
+
+    // Notify all participants (exclude host if you want)
+    const notifyUserIds = Array.from(
+  new Set([...(participants || []), ...(hostId ? [hostId] : [])])
+).filter(Boolean);
+
+    await Promise.all(
+      notifyUserIds.map(async (uid) => {
+        const notifId = `eventCancelled_${eventId}_${uid}`;
+
+        await db.collection("notifications").doc(notifId).set(
+          {
+            recipientId: uid,
+            type: "event_cancelled",
+            eventId,
+            fromUserId: hostId,
+
+            title: "Event cancelled",
+            body: `${eventTitle} has been cancelled.`,
+            message: `${eventTitle} has been cancelled.`,
+
+            route: `/events/${eventId}`,
+            url: `https://tennismate.vercel.app/events/${eventId}`,
+
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            read: false,
+
+            source: "cf:notifyOnEventCancelledAndDeleteChat",
+          },
+          { merge: true }
+        );
+      })
+    );
+
+    // ✅ delete group chat thread (conversation + messages)
+    if (conversationId) {
+      await deleteConversationDeep(conversationId);
+
+      // Optional cleanup: delete bell notifications for that conversation
+const notifSnap = await db
+  .collection("notifications")
+  .where("conversationId", "==", conversationId)
+  .get();
+
+if (!notifSnap.empty) {
+  const b = db.batch();
+  notifSnap.docs.forEach((d) => b.delete(d.ref));
+  await b.commit();
+}
+
+      // Optional but recommended: remove conversationId from event so UI doesn't link to a dead thread
+      await db.collection("events").doc(eventId).set(
+        {
+          conversationId: admin.firestore.FieldValue.delete(),
+        },
+        { merge: true }
+      );
+    }
+  }
+);
+
+
 
 // Auto-sync calendar for any participants newly added to the event
 export const syncCalendarWhenParticipantsChange = onDocumentUpdated("events/{eventId}", async (event) => {
   const before = event.data?.before?.data() as any;
   const after = event.data?.after?.data() as any;
   if (!before || !after) return;
+
+  // ✅ Only sync calendar when event is "open/active" and participants represent accepted users
+// If you have an explicit event status, enforce it here.
+if (after.status && (after.status === "cancelled" || after.status === "completed")) return;
 
   const eventId = event.params.eventId as string;
 
@@ -1390,25 +1656,109 @@ export const notifyOnNewMessage = onDocumentCreated(
       const senderId = message.senderId as string;
       const recipientId = message.recipientId as string | null;
       const text = (message.text as string) || "";
-      const read = message.read === true;
 
-      if (!recipientId) return;
-      if (recipientId === senderId) return;
-      if (!text || read) return;
+if (!text) return;
+if (recipientId === senderId) return;
 
-      // ✅ ALWAYS send push (even if user is in-app / in the conversation)
+      // ✅ Resolve sender name (used for DM + group)
       let senderName = "A player";
       try {
         const senderDoc = await db.collection("players").doc(senderId).get();
-        senderName = (senderDoc.exists ? (senderDoc.get("name") as string) : "") || "A player";
+        senderName =
+          (senderDoc.exists ? (senderDoc.get("name") as string) : "") || "A player";
       } catch (e) {
         console.log("[notifyOnNewMessage] sender name lookup failed", String(e));
       }
 
       const body = text.length > 60 ? text.slice(0, 60) + "…" : text;
 
-      // 1) Try native Android/iOS first
-      const nativeSent = await sendAndroidPushToUser(recipientId, {
+      // ============================================================
+      // ✅ GROUP / EVENT MESSAGE PATH (recipientId is null)
+      // ============================================================
+      if (!recipientId) {
+        // 1) Load conversation to get participants + context
+        const convoSnap = await db.collection("conversations").doc(conversationId).get();
+        const convo = convoSnap.exists ? (convoSnap.data() as any) : null;
+
+        const participants: string[] = Array.isArray(convo?.participants)
+          ? convo.participants.filter(Boolean)
+          : [];
+
+        const ctx = convo?.context || {};
+        const isEvent = ctx?.type === "event";
+        const title = (isEvent ? (ctx?.title || "Event Chat") : "Group Chat") as string;
+
+        // If we can't determine recipients, stop
+        if (!participants.length) return;
+
+        // 2) Notify everyone except sender
+        const recipients = participants.filter((uid) => uid !== senderId);
+
+        await Promise.all(
+          recipients.map(async (uid) => {
+            // PUSH
+            const nativeSent = await sendAndroidPushToUser(uid, {
+              title: `${title}: ${senderName}`,
+              body,
+              route: `/messages/${conversationId}`,
+              type: "group_message",
+            });
+
+            if (!nativeSent) {
+              await sendWebPushToUser(uid, {
+                title: `${title}: ${senderName}`,
+                body,
+                route: `/messages/${conversationId}`,
+                type: "group_message",
+              });
+            }
+
+            // IN-APP BELL DOC (optional, but recommended)
+            // pushDisabled:true prevents double push via notifications watcher
+            const notifId = `gmsg_${conversationId}_${messageId}_${uid}`;
+            await db.collection("notifications").doc(notifId).set(
+              {
+                recipientId: uid,
+                type: "group_message",
+                conversationId,
+                messageId,
+
+                title: "New group message",
+                body: text.length > 100 ? text.slice(0, 100) + "…" : text,
+                url: `https://tennismate.vercel.app/messages/${conversationId}`,
+
+                fromUserId: senderId,
+                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                read: false,
+
+                pushDisabled: true,
+                source: "cf:notifyOnNewMessage:group",
+              },
+              { merge: true }
+            );
+          })
+        );
+
+        console.log("[notifyOnNewMessage] group push attempted", {
+          conversationId,
+          messageId,
+          recipients: recipients.length,
+        });
+
+        return; // ✅ IMPORTANT: stop here; don’t run DM logic
+      }
+
+// ============================================================
+// ✅ DIRECT MESSAGE PATH (recipientId exists)
+// ============================================================
+if (recipientId === senderId) return;
+
+const read = message.read === true;
+if (read) return;
+
+// 1) Try native Android/iOS first
+const nativeSent = await sendAndroidPushToUser(recipientId, {
+
         title: `New message from ${senderName}`,
         body,
         route: `/messages/${conversationId}`,
@@ -1431,7 +1781,7 @@ export const notifyOnNewMessage = onDocumentCreated(
         messageId,
       });
 
-      // ✅ In-app bell doc (drives in-app list + email), but never triggers push watcher
+      // ✅ In-app bell doc for DM (drives list + email), never triggers push watcher
       const notifId = `msg_${conversationId}_${messageId}_${recipientId}`;
       await db.collection("notifications").doc(notifId).set(
         {
@@ -1448,7 +1798,6 @@ export const notifyOnNewMessage = onDocumentCreated(
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
           read: false,
 
-          // ✅ IMPORTANT: ensure no push is ever sent from notifications watcher for this doc
           pushDisabled: true,
           source: "cf:notifyOnNewMessage",
         },
@@ -1456,13 +1805,289 @@ export const notifyOnNewMessage = onDocumentCreated(
       );
 
       console.log(`[notifyOnNewMessage] bell notification created for ${recipientId}`);
+
     } catch (error) {
       console.error("[notifyOnNewMessage] ERROR:", error);
     }
   }
 );
 
+export const notifyOnMatchInviteCreated = onDocumentCreated(
+  "match_invites/{inviteId}",
+  async (event) => {
+    const runId = crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+    const inviteId = event.params.inviteId as string;
+    const data = event.data?.data() as any;
 
+    console.log(`[INVITE_PUSH][${runId}] trigger start`, { inviteId });
+
+    if (!data) return;
+
+    const toUserId = (data.toUserId as string) || null;
+    const fromUserId = (data.fromUserId as string) || null;
+    const conversationId = (data.conversationId as string) || null;
+
+    if (!toUserId || !fromUserId) {
+      console.log(`[INVITE_PUSH][${runId}] missing to/from`, { toUserId, fromUserId });
+      return;
+    }
+
+    // Avoid self-push edge case
+    if (toUserId === fromUserId) {
+      console.log(`[INVITE_PUSH][${runId}] self invite, skipping`, { toUserId });
+      return;
+    }
+
+    // Pull invite details
+    const inv = data.invite || {};
+    const courtName =
+      inv?.court?.name ||
+      inv?.location ||
+      data.courtName ||
+      "Court TBA";
+
+    const startISO = typeof inv?.startISO === "string" ? inv.startISO : null;
+    const when =
+      startISO && !isNaN(new Date(startISO).getTime())
+        ? new Date(startISO).toLocaleString("en-AU", {
+            timeZone: "Australia/Melbourne",
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "Time TBD";
+
+    // Sender name
+    const fromName = await getPlayerName(fromUserId);
+
+    const title = "🎾 New Match Invite";
+    const body = `${fromName} invited you • ${courtName} • ${when}`;
+
+    // Deep link destination (recommend invite details page)
+   const route = `/invites/${inviteId}`; // ✅ always invite details
+const url = `https://tennismate.vercel.app${route}`;
+
+    // 1) Send native push (android/ios via your helper)
+    const nativeSent = await sendAndroidPushToUser(toUserId, {
+      title,
+      body,
+      route,
+      type: "match_invite",
+    });
+
+    // 2) Web push fallback (if you wire it up later)
+    if (!nativeSent) {
+      await sendWebPushToUser(toUserId, {
+        title,
+        body,
+        route,
+        type: "match_invite",
+      });
+    }
+
+    console.log(`[INVITE_PUSH][${runId}] push attempted`, {
+      inviteId,
+      toUserId,
+      fromUserId,
+      nativeSent,
+      route,
+    });
+
+    // OPTIONAL (recommended): create an in-app bell notification doc
+    // pushDisabled:true ensures your sendPushNotification watcher won't double-send.
+    const notifId = `invite_${inviteId}_${toUserId}`;
+    await db.collection("notifications").doc(notifId).set(
+      {
+        recipientId: toUserId,
+        type: "match_invite",
+        inviteId,
+        conversationId: conversationId || "",
+        fromUserId,
+
+        title: "New match invite",
+        body,
+        message: body,
+        route,
+        url,
+
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        read: false,
+
+        pushDisabled: true,
+        source: "cf:notifyOnMatchInviteCreated",
+        runId,
+      },
+      { merge: true }
+    );
+
+    console.log(`[INVITE_PUSH][${runId}] bell notification written`, { notifId });
+  }
+);
+
+export const syncCalendarOnInviteAccepted = onDocumentUpdated(
+  "conversations/{conversationId}/messages/{messageId}",
+  async (event) => {
+    try {
+      console.log("🔥 [InviteCal] TRIGGERED", event.params);
+      const after = event.data?.after?.data() as any;
+
+      if (!after) {
+        console.log("❌ [InviteCal] Missing after snapshot");
+        return;
+      }
+
+      const { conversationId, messageId } = event.params as {
+        conversationId: string;
+        messageId: string;
+      };
+
+      // Only for invite messages
+      const isInvite = after.type === "invite" || typeof after.invite === "object";
+      if (!isInvite) {
+        console.log("❌ [InviteCal] Not an invite message");
+        return;
+      }
+
+      const status =
+        after.inviteStatus ||
+        after?.invite?.inviteStatus ||
+        "pending";
+
+      console.log("✅ [InviteCal] status:", status, "calendarSynced:", after.calendarSynced === true);
+
+      // Only act when accepted (NO transition requirement)
+      if (status !== "accepted") {
+        console.log("❌ [InviteCal] Status is not accepted; skipping");
+        return;
+      }
+
+      // participants: prefer message sender/recipient
+      const senderId = typeof after.senderId === "string" ? after.senderId : null;
+      const recipientId = typeof after.recipientId === "string" ? after.recipientId : null;
+
+      let participants: string[] = [];
+      if (senderId && recipientId) {
+        participants = [senderId, recipientId];
+      } else {
+        // fallback to conversation participants
+        const convoSnap = await db.collection("conversations").doc(conversationId).get();
+        const convo = convoSnap.exists ? (convoSnap.data() as any) : null;
+        participants = Array.isArray(convo?.participants)
+          ? convo.participants.filter(Boolean)
+          : [];
+      }
+
+      participants = Array.from(new Set(participants)).slice(0, 2);
+
+      if (participants.length < 2) {
+        console.log("❌ [InviteCal] Missing participants", { senderId, recipientId, participants });
+        return;
+      }
+
+      // Invite fields
+      const invite = pickInviteFields(after);
+      console.log("✅ [InviteCal] invite fields:", invite);
+
+      if (!invite.startISO) {
+        console.log("❌ [InviteCal] Missing startISO; skipping");
+        return;
+      }
+
+      const inviteId = messageId;                 // ✅ inviteId === messageId
+const inviteEventId = `invite_${inviteId}`; // ✅ calendar "eventId" label for invite type
+
+      // ---------------------------
+      // ✅ REPAIR MODE:
+      // If calendarSynced=true but calendar docs don't exist, we still create them.
+      // We'll check one expected doc (sender) existence.
+      // ---------------------------
+      const primaryUid = participants[0];
+      const primaryCalDocId = `${inviteId}_${primaryUid}`;
+      const primarySnap = await db.collection("calendar_events").doc(primaryCalDocId).get();
+
+      if (after.calendarSynced === true && primarySnap.exists) {
+        console.log("✅ [InviteCal] Already synced AND calendar doc exists; skipping", {
+          primaryCalDocId,
+        });
+        return;
+      }
+
+      console.log("🛠️ [InviteCal] Creating/repairing calendar docs", {
+        inviteEventId,
+        participants,
+        primaryCalDocId,
+        primaryExists: primarySnap.exists,
+      });
+
+      // courtName: prefer explicit field, else invite.court.name, else top-level courtName
+      const courtName =
+        invite.courtName ||
+        (typeof after?.invite?.court?.name === "string" ? after.invite.court.name : null) ||
+        (typeof after?.courtName === "string" ? after.courtName : null) ||
+        null;
+
+      // idempotent upsert
+      const batch = db.batch();
+
+for (const uid of participants) {
+  // ✅ predictable calendar doc id so we can delete later without storing calendarEventId
+  const calDocId = `${inviteId}_${uid}`;
+  const ref = db.collection("calendar_events").doc(calDocId);
+
+  console.log("🗓️ [InviteCal] Upserting calendar doc:", calDocId);
+
+  batch.set(
+    ref,
+    {
+      // ✅ keep "eventId" as a label (distinct from real events)
+      eventId: inviteEventId,
+
+      // ✅ NEW: store inviteId for debugging/optional queries later
+      inviteId,
+
+      ownerId: uid,
+      title: invite.title,
+      start: invite.startISO,
+      end: invite.endISO,
+      participants,
+      status: "accepted",
+      visibility: "private",
+      courtName,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      source: "cf:syncCalendarOnInviteAccepted",
+      conversationId,
+      messageId,
+    },
+    { merge: true }
+  );
+}
+
+      // mark message as synced (always)
+      batch.set(
+        db.collection("conversations").doc(conversationId).collection("messages").doc(messageId),
+        {
+          calendarSynced: true,
+          calendarSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          calendarSyncedVersion: 2, // helpful for future debugging
+        },
+        { merge: true }
+      );
+
+      await batch.commit();
+
+    console.log("✅ [InviteCal] Calendar sync COMPLETE", {
+  inviteId,
+  inviteEventId,
+  participants,
+});
+
+    } catch (err) {
+      console.error("❌ [InviteCal] ERROR:", err);
+    }
+  }
+);
 
 export const sendMatchRequestNotification = onDocumentCreated(
   "match_requests/{matchId}",
@@ -1562,7 +2187,8 @@ export const sendMatchRequestNotification = onDocumentCreated(
         title: "New match request",
         body: `${senderName} has challenged you to a match.`,
         message: `${senderName} has challenged you to a match.`,
-        url: "https://tennismate.vercel.app/matches",
+        route: "/matches", // ✅ ADD
+url: "https://tennismate.vercel.app/matches",
         source: "cf:sendMatchRequestNotification",
         runId, // 👈 for correlation
         timestamp: admin.firestore.FieldValue.serverTimestamp(),

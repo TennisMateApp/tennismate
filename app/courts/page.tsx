@@ -1,3 +1,8 @@
+// ✅ UPDATE YOUR EXISTING: app/courts/page.tsx (or wherever CourtsPage lives)
+// - Add the import
+// - Add desktop detection
+// - Render DesktopCourtsDirectory when desktop
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -19,8 +24,12 @@ import {
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged } from "firebase/auth";
 import withAuth from "@/components/withAuth";
+import { useRouter } from "next/navigation";
 import { GiTennisCourt } from "react-icons/gi";
-import { MapPin, Search, ExternalLink } from "lucide-react";
+import { MapPin, Search, SlidersHorizontal, X, ArrowLeft } from "lucide-react";
+
+// ✅ NEW
+import DesktopCourtsDirectory from "@/components/desktop_layout/DesktopCourtsDirectory";
 
 type LatLng = { lat: number; lng: number };
 
@@ -41,10 +50,7 @@ type Court = {
 };
 
 // 🔹 Track when a user clicks Map / Book for a court
-async function logCourtClick(
-  courtId: string,
-  type: "map" | "booking" = "map"
-) {
+async function logCourtClick(courtId: string, type: "map" | "booking" = "map") {
   const user = auth.currentUser;
   if (!user || !courtId) return;
 
@@ -161,8 +167,19 @@ const mapCourtDoc = (d: QueryDocumentSnapshot<DocumentData>): Court => {
 };
 
 function CourtsPage() {
+  const router = useRouter();
+
+  // ✅ Desktop detection
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const check = () => setIsDesktop(window.innerWidth >= 1024);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   const [courts, setCourts] = useState<Court[]>([]);
-  const [allCourts, setAllCourts] = useState<Court[] | null>(null); // full list
+  const [allCourts, setAllCourts] = useState<Court[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -177,15 +194,12 @@ function CourtsPage() {
     useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
 
-  // 0 = no distance filter (show any distance)
   const [maxDistanceKm, setMaxDistanceKm] = useState<number>(0);
-
-  // VIC/NSW state filter
   const [stateFilter, setStateFilter] = useState<"VIC" | "NSW">("VIC");
+  const [showFilters, setShowFilters] = useState(false);
 
   const qStr = searchTerm.trim().toLowerCase();
 
-  // 1️⃣ Load user postcode + coords and default stateFilter
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
@@ -207,13 +221,9 @@ function CourtsPage() {
         setUserPostcode(pcStr);
 
         const firstDigit = pcStr.charAt(0);
-        if (firstDigit === "2") {
-          setStateFilter("NSW");
-        } else if (firstDigit === "3") {
-          setStateFilter("VIC");
-        }
+        if (firstDigit === "2") setStateFilter("NSW");
+        else if (firstDigit === "3") setStateFilter("VIC");
 
-        // Lookup lat/lng from postcodes collection
         const pcRef = doc(db, "postcodes", String(pc));
         const pcSnap = await getDoc(pcRef);
         if (pcSnap.exists()) {
@@ -230,7 +240,6 @@ function CourtsPage() {
     return () => unsubscribe();
   }, []);
 
-  // 2️⃣ Initial page of courts (first 20)
   useEffect(() => {
     const loadFirstPage = async () => {
       try {
@@ -266,7 +275,6 @@ function CourtsPage() {
     loadFirstPage();
   }, []);
 
-  // 3️⃣ Load ALL courts once for global filtering (state + search)
   useEffect(() => {
     const loadAllCourts = async () => {
       if (allCourts !== null) return;
@@ -286,7 +294,6 @@ function CourtsPage() {
     loadAllCourts();
   }, [allCourts]);
 
-  // 4️⃣ Load more paginated courts (used mainly for initial experience, but filters use allCourts once loaded)
   const loadMore = async () => {
     if (!hasMore || !lastDoc || loadingMore) return;
 
@@ -316,11 +323,8 @@ function CourtsPage() {
     }
   };
 
-  // Helper: add distance
   const withDistances = (list: Court[], coords: LatLng | null): Court[] => {
-    if (!coords) {
-      return list.map((c) => ({ ...c, distanceKm: null }));
-    }
+    if (!coords) return list.map((c) => ({ ...c, distanceKm: null }));
 
     return list.map((c) => {
       if (
@@ -331,10 +335,9 @@ function CourtsPage() {
       ) {
         return { ...c, distanceKm: null };
       }
-
       return {
         ...c,
-        distanceKm: haversineKm(coords, { lat: c.lat, lng: c.lng }),
+        distanceKm: haversineKm(coords, { lat: c.lat!, lng: c.lng! }),
       };
     });
   };
@@ -349,31 +352,21 @@ function CourtsPage() {
     [allCourts, userCoords]
   );
 
-  // 5️⃣ Apply state filter + search + distance filter
   const filteredCourts = useMemo(() => {
-    // Once allCourts is loaded, always use it as the source; otherwise fall back to paged list
     const source = allWithDistance ?? pagedWithDistance;
 
-    // State filter (NSW: postcodes starting with 2, VIC: 3)
     let list = source.filter((c) => {
       const pc = (c.postcode || "").toString().trim();
-      if (!pc) return false; // no postcode → can't place state
+      if (!pc) return false;
       const first = pc.charAt(0);
       if (stateFilter === "NSW") return first === "2";
       if (stateFilter === "VIC") return first === "3";
       return true;
     });
 
-    // Text search
     if (qStr) {
       list = list.filter((c) => {
-        const haystack = [
-          c.name,
-          c.suburb,
-          c.postcode,
-          c.address,
-          c.surface,
-        ]
+        const haystack = [c.name, c.suburb, c.postcode, c.address, c.surface]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
@@ -381,7 +374,6 @@ function CourtsPage() {
       });
     }
 
-    // Distance filter (0 = any distance)
     if (userCoords && maxDistanceKm > 0) {
       list = list.filter(
         (c) => typeof c.distanceKm === "number" && c.distanceKm <= maxDistanceKm
@@ -391,74 +383,147 @@ function CourtsPage() {
     return list;
   }, [pagedWithDistance, allWithDistance, qStr, userCoords, maxDistanceKm, stateFilter]);
 
-  return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Heading */}
-        <div className="mb-3">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
-            <GiTennisCourt className="h-6 w-6 text-green-600" />
-            Courts
-          </h1>
-          <p className="text-sm text-gray-600">
-            All courts available in TennisMate
-            {userPostcode ? ` (from your postcode ${userPostcode})` : ""}.
-          </p>
-        </div>
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/");
+    }
+  };
 
-        {/* Search + State filter */}
-        <div className="mb-3 rounded-xl border bg-white px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-          <div className="relative flex-1">
-            <input
-              type="text"
-              placeholder="Search by name, suburb, postcode, or surface…"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-            />
-            <Search
-              className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400"
-              aria-hidden="true"
-            />
-          </div>
+  // ✅ DESKTOP RENDER
+  if (isDesktop) {
+    return (
+      <DesktopCourtsDirectory
+        userPostcode={userPostcode}
+        userCoords={userCoords}
+        searchTerm={searchTerm}
+        setSearchTerm={setSearchTerm}
+        showFilters={showFilters}
+        setShowFilters={setShowFilters}
+        stateFilter={stateFilter}
+        setStateFilter={setStateFilter}
+        maxDistanceKm={maxDistanceKm}
+        setMaxDistanceKm={setMaxDistanceKm}
+        filteredCourts={filteredCourts}
+        qStr={qStr}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
+        loadMore={loadMore}
+        onCourtClick={(id, type) => logCourtClick(id, type)}
+      />
+    );
+  }
 
-          {/* State filter */}
+// ✅ MOBILE
+return (
+  <div className="min-h-screen bg-[#F4F6F8] text-gray-900">
+    <div className="mx-auto w-full max-w-[520px] px-4 pb-10 pt-4">
+      {/* Top bar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="h-10 w-10 rounded-full bg-white ring-1 ring-gray-200 flex items-center justify-center hover:bg-gray-50"
+            aria-label="Back"
+            title="Back"
+          >
+            <ArrowLeft className="h-5 w-5 text-gray-700" />
+          </button>
+
           <div className="flex items-center gap-2">
-            <label
-              className="text-xs font-medium text-gray-700"
-              htmlFor="state-filter"
-            >
-              State
-            </label>
-            <select
-              id="state-filter"
-              value={stateFilter}
-              onChange={(e) =>
-                setStateFilter(e.target.value as "NSW" | "VIC")
-              }
-              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
-            >
-              <option value="VIC">VIC</option>
-              <option value="NSW">NSW</option>
-            </select>
+            <GiTennisCourt className="h-6 w-6 text-[#0B3D2E]" />
+            <h1 className="text-2xl font-extrabold tracking-tight">Courts</h1>
           </div>
-
-          <span className="hidden sm:inline text-xs text-gray-500 min-w-[80px] text-right">
-            {filteredCourts.length} court
-            {filteredCourts.length === 1 ? "" : "s"}
-          </span>
         </div>
 
-        {/* Distance slider */}
-        {userCoords && (
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-xs text-gray-600">
-              <span className="font-medium">Distance filter: </span>
-              {maxDistanceKm === 0
-                ? "Showing courts at any distance"
-                : `Showing courts within ${maxDistanceKm} km`}
+        <button
+          type="button"
+          onClick={() => setShowFilters((v) => !v)}
+          className="h-10 w-10 rounded-full bg-white ring-1 ring-gray-200 flex items-center justify-center hover:bg-gray-50"
+          aria-label="Filters"
+          title="Filters"
+        >
+          {showFilters ? (
+            <X className="h-5 w-5 text-gray-700" />
+          ) : (
+            <SlidersHorizontal className="h-5 w-5 text-gray-700" />
+          )}
+        </button>
+      </div>
+
+      {/* Centered subtitle */}
+      <div className="mt-2 text-center">
+        <p className="text-sm text-gray-600">
+          {userPostcode ? `Near ${userPostcode}` : "Find courts near you"}
+        </p>
+        <p className="text-xs text-gray-500 mt-0.5">
+          {filteredCourts.length} result{filteredCourts.length === 1 ? "" : "s"}
+        </p>
+      </div>
+
+      {/* Search */}
+      <div className="mt-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by name or suburb"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full rounded-2xl bg-white pl-9 pr-3 py-3 text-sm ring-1 ring-gray-200 focus:outline-none focus:ring-2 focus:ring-[#39FF14]"
+          />
+        </div>
+      </div>
+
+      {/* Filters panel (state + distance only) */}
+      {showFilters && (
+        <div className="mt-3 rounded-2xl bg-white ring-1 ring-gray-200 p-4">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold text-gray-900">Filters</div>
+            <button
+              type="button"
+              onClick={() => setShowFilters(false)}
+              className="text-xs font-semibold text-gray-600 hover:text-gray-900"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-gray-700">
+                State
+              </label>
+              <select
+                value={stateFilter}
+                onChange={(e) => setStateFilter(e.target.value as "NSW" | "VIC")}
+                className="mt-1 w-full rounded-xl bg-white px-3 py-2 text-sm ring-1 ring-gray-200 focus:outline-none focus:ring-2 focus:ring-[#39FF14]"
+              >
+                <option value="VIC">VIC</option>
+                <option value="NSW">NSW</option>
+              </select>
             </div>
-            <div className="flex items-center gap-3 w-full sm:w-auto">
+
+            <div>
+              <label className="text-xs font-semibold text-gray-700">
+                Distance
+              </label>
+              <div className="mt-1 rounded-xl bg-[#F4F6F8] px-3 py-2 text-sm ring-1 ring-gray-200">
+                {userCoords ? (
+                  <span className="font-semibold">
+                    {maxDistanceKm === 0 ? "Any" : `${maxDistanceKm} km`}
+                  </span>
+                ) : (
+                  <span className="text-gray-500">Set postcode</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {userCoords && (
+            <div className="mt-3">
               <input
                 type="range"
                 min={0}
@@ -466,162 +531,165 @@ function CourtsPage() {
                 step={5}
                 value={maxDistanceKm}
                 onChange={(e) => setMaxDistanceKm(Number(e.target.value))}
-                className="w-full sm:w-64"
+                className="w-full"
               />
-              <span className="text-xs text-gray-500 whitespace-nowrap">
-                {maxDistanceKm === 0 ? "Any" : `${maxDistanceKm} km`}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {searchLoading && !allCourts && (
-          <p className="mb-2 text-xs text-gray-500">
-            Loading courts…
-          </p>
-        )}
-
-        {loading ? (
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
-              >
-                <div className="h-4 w-1/2 bg-gray-200 rounded animate-pulse mb-2" />
-                <div className="h-3 w-2/3 bg-gray-200 rounded animate-pulse mb-1" />
-                <div className="h-3 w-1/3 bg-gray-200 rounded animate-pulse mb-4" />
-                <div className="h-7 w-20 bg-gray-200 rounded animate-pulse" />
+              <div className="mt-1 text-[11px] text-gray-500">
+                0 = any distance • 50 = within 50 km
               </div>
-            ))}
-          </div>
-        ) : error ? (
-          <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {error}
-          </div>
-        ) : filteredCourts.length === 0 ? (
-          <div className="mt-8 rounded-xl border border-dashed border-gray-300 bg-white p-10 text-center">
-            <p className="text-gray-800 font-medium">No courts found</p>
-            <p className="text-gray-600 text-sm mt-1">
-              Try a different search, or add more courts to the{" "}
-              <code>courts</code> collection.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Courts grid */}
-            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredCourts.map((court) => {
-                const distanceKm =
-                  typeof court.distanceKm === "number"
-                    ? court.distanceKm
-                    : null;
+            </div>
+          )}
+        </div>
+      )}
 
-                const locationLabel =
-                  court.suburb && court.postcode
-                    ? `${court.suburb} ${court.postcode}`
-                    : court.suburb || court.postcode || "Location unknown";
+      {searchLoading && !allCourts && (
+        <p className="mt-3 text-xs text-gray-500">Loading courts…</p>
+      )}
 
-                return (
-                  <article key={court.id} className="w-full">
-                    {/* mini-header */}
-                    <div className="flex items-center justify_between text-[11px] font-semibold tracking-wide text-green-800/80 uppercase px-1">
-                      <div className="flex items-center gap-1.5 min-w-0">
+      {/* ✅ LIST / STATES */}
+      {loading ? (
+        <div className="mt-5 space-y-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div
+              key={i}
+              className="rounded-3xl bg-white ring-1 ring-gray-200 p-4"
+            >
+              <div className="h-4 w-2/3 bg-gray-200 rounded animate-pulse mb-2" />
+              <div className="h-3 w-1/2 bg-gray-200 rounded animate-pulse mb-4" />
+              <div className="flex gap-2">
+                <div className="h-10 w-28 bg-gray-200 rounded-xl animate-pulse" />
+                <div className="h-10 w-28 bg-gray-200 rounded-xl animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : error ? (
+        <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      ) : filteredCourts.length === 0 ? (
+        <div className="mt-6 rounded-3xl bg-white ring-1 ring-gray-200 p-8 text-center">
+          <p className="text-gray-900 font-semibold">No courts found</p>
+          <p className="text-gray-600 text-sm mt-1">Try a different search.</p>
+        </div>
+      ) : (
+        <>
+          {/* Court tiles */}
+          <div className="mt-5 space-y-4">
+            {filteredCourts.map((court) => {
+              const distanceKm =
+                typeof court.distanceKm === "number" ? court.distanceKm : null;
+
+              const locationLabel =
+                court.suburb && court.postcode
+                  ? `${court.suburb}, ${court.postcode}`
+                  : court.suburb || court.postcode || "Location unknown";
+
+              return (
+                <article
+                  key={court.id}
+                  className="rounded-3xl bg-white ring-1 ring-gray-200 p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-base font-extrabold text-gray-900 truncate">
+                        {court.name}
+                      </div>
+
+                      <div className="mt-1 flex items-center gap-1 text-xs text-gray-600">
                         <MapPin className="h-3.5 w-3.5" />
                         <span className="truncate">{locationLabel}</span>
                       </div>
-                      {distanceKm != null && (
-                        <span className="ml-2 whitespace-nowrap">
-                          ~{distanceKm.toFixed(1)} km
-                        </span>
+
+                      {court.address && (
+                        <div className="mt-1 text-xs text-gray-500 line-clamp-2">
+                          {court.address}
+                        </div>
                       )}
                     </div>
 
-                    {/* card */}
-                    <div className="mt-1 rounded-xl bg-green-50 ring-1 ring-green-200/80 shadow-sm px-3 py-2.5">
-                      <div className="flex items-start gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="font-semibold text-green-900 truncate">
-                            {court.name}
-                          </div>
-
-                          {court.address && (
-                            <div className="text-xs text-green-900/80 line-clamp-2">
-                              {court.address}
-                            </div>
-                          )}
-
-                          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-green-900/90">
-                            {court.surface && (
-                              <span className="rounded-full bg-white/70 px-2 py-0.5">
-                                Surface: {court.surface}
-                              </span>
-                            )}
-                            {typeof court.lights === "boolean" && (
-                              <span className="rounded-full bg-white/70 px-2 py-0.5">
-                                {court.lights ? "Lights available" : "No lights"}
-                              </span>
-                            )}
-                            {typeof court.indoor === "boolean" && (
-                              <span className="rounded-full bg_white/70 px-2 py-0.5">
-                                {court.indoor ? "Indoor" : "Outdoor"}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-row items-center gap-1.5">
-                          {court.mapsUrl && (
-                            <a
-                              href={court.mapsUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={() => logCourtClick(court.id, "map")}
-                              className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-green-800 ring-1 ring-green-200 hover:bg-green-100"
-                              title="Open in Google Maps"
-                            >
-                              Map
-                            </a>
-                          )}
-
-                          {court.bookingUrl && (
-                            <a
-                              href={court.bookingUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={() => logCourtClick(court.id, "booking")}
-                              className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
-                              title="Open booking page"
-                            >
-                              Book <ExternalLink className="h-3.5 w-3.5" />
-                            </a>
-                          )}
-                        </div>
+                    {distanceKm != null && (
+                      <div className="shrink-0 rounded-full bg-[#39FF14] px-3 py-1 text-[11px] font-extrabold text-[#0B3D2E]">
+                        {distanceKm.toFixed(1)} KM
                       </div>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+                    )}
+                  </div>
 
-            {/* Load more (still useful if you want paging for initial render, but not needed for filters once allCourts is loaded) */}
-            {!qStr && hasMore && (
-              <div className="mt-6 flex justify-center">
-                <button
-                  type="button"
-                  onClick={loadMore}
-                  disabled={loadingMore}
-                  className="inline-flex items-center rounded-lg bg-white px-4 py-2 text-sm font-medium text-gray-800 ring-1 ring-gray-200 hover:bg-gray-50 disabled:opacity-60"
-                >
-                  {loadingMore ? "Loading…" : "Load more courts"}
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+                  <div className="mt-4 flex gap-2">
+                    <a
+                      href={court.bookingUrl || court.mapsUrl || "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() =>
+                        court.bookingUrl
+                          ? logCourtClick(court.id, "booking")
+                          : logCourtClick(court.id, "map")
+                      }
+                      className={[
+                        "flex-1 rounded-xl px-4 py-3 text-sm font-extrabold text-center",
+                        "bg-[#39FF14] text-[#0B3D2E] hover:brightness-95",
+                        !(court.bookingUrl || court.mapsUrl)
+                          ? "pointer-events-none opacity-60"
+                          : "",
+                      ].join(" ")}
+                    >
+                      Book Now
+                    </a>
+
+                    {court.mapsUrl && (
+                      <a
+                        href={court.mapsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => logCourtClick(court.id, "map")}
+                        className="flex-1 rounded-xl px-4 py-3 text-sm font-extrabold text-center bg-gray-100 text-gray-800 hover:bg-gray-200"
+                        title="Open in Google Maps"
+                      >
+                        View on Map
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                    {court.surface && (
+                      <span className="rounded-full bg-gray-100 px-2 py-1 font-semibold text-gray-700">
+                        {court.surface}
+                      </span>
+                    )}
+                    {typeof court.indoor === "boolean" && (
+                      <span className="rounded-full bg-gray-100 px-2 py-1 font-semibold text-gray-700">
+                        {court.indoor ? "Indoor" : "Outdoor"}
+                      </span>
+                    )}
+                    {typeof court.lights === "boolean" && (
+                      <span className="rounded-full bg-gray-100 px-2 py-1 font-semibold text-gray-700">
+                        {court.lights ? "Lights" : "No lights"}
+                      </span>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          {/* Load more (only when not searching) */}
+          {!qStr && hasMore && (
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-gray-900 ring-1 ring-gray-200 hover:bg-gray-50 disabled:opacity-60"
+              >
+                {loadingMore ? "Loading…" : "Load more courts"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
-  );
+  </div>
+);
+
 }
 
 export default withAuth(CourtsPage);

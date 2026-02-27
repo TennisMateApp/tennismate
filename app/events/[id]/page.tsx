@@ -34,6 +34,9 @@ import {
 } from "lucide-react";
 import { ensureEventConversation } from "@/lib/conversations";
 
+import DesktopEventDetailsPage from "@/components/events/DesktopEventDetailsPage";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import PlayerProfileView from "@/components/players/PlayerProfileView";
 
 
 /* ----------------------------- Types / helpers ---------------------------- */
@@ -45,14 +48,45 @@ type EventDoc = {
   start?: string; // ISO
   end?: string;   // ISO
   durationMins?: number;
+
+// ✅ Skill range (matches create page + Firestore)
+minSkillLabel?: string | null; // FROM
+maxSkillLabel?: string | null; // TO
+
+  // ✅ legacy (keep so old events don't break)
   minSkill?: number | null;
+  minSkillLabel?: string | null;
+
   spotsTotal?: number;
   spotsFilled?: number;
   status?: "open" | "full" | "cancelled" | "completed";
   hostId?: string;
   participants?: string[];
   description?: string | null;
+
+    // ✅ court object (so desktop details can render map + booking button)
+  court?: {
+    id?: string | null;
+    name?: string | null;
+    nameLower?: string | null;
+    address?: string | null;
+    suburb?: string | null;
+    state?: string | null;
+    postcode?: string | null;
+    bookingUrl?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+  } | null;
+
+  // ✅ booking confirmation (host marks court booked)
+  bookingConfirmed?: boolean;
+  bookingConfirmedAt?: any;     // Firestore Timestamp
+  bookingConfirmedBy?: string;  // uid
+  
 };
+
+
+
 
 type UserProfile = {
   name?: string;
@@ -81,6 +115,39 @@ function getSkill(profile?: Partial<UserProfile> | null): number | null {
     null
   );
 }
+
+function toTitleCase(input: string) {
+  return input
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : ""))
+    .join(" ");
+}
+
+function formatSkillRange(event: EventDoc): string {
+  const fromRaw = (event.minSkillLabel ?? "").toString().trim();
+  const toRaw = (event.maxSkillLabel ?? "").toString().trim();
+
+  const from = fromRaw ? toTitleCase(fromRaw) : "";
+  const to = toRaw ? toTitleCase(toRaw) : "";
+
+  // If either label exists, show range
+  if (from || to) {
+    if (from && to) {
+      return from.toLowerCase() === to.toLowerCase() ? from : `${from} to ${to}`;
+    }
+    return from ? `${from}+` : `Up to ${to}`;
+  }
+
+  // Legacy fallback (numeric)
+  if (typeof event.minSkill === "number") return `Minimum: ${event.minSkill}`;
+
+  return "All levels welcome";
+}
+
+
+
 
 /** Upserts a personal calendar entry for current user; best-effort for others */
 async function upsertCalendarEntriesForEvent(updated: EventDoc, eventId: string) {
@@ -173,8 +240,10 @@ useEffect(() => {
   const [requestsOpen, setRequestsOpen] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const [leaving, setLeaving] = useState(false); 
+  const [confirmingBooking, setConfirmingBooking] = useState(false);
   const [activeTab, setActiveTab] = useState<"about" | "players">("about");
-
+const isDesktop = useIsDesktop();
+const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
 
   /* ----------------------------- Subscriptions ---------------------------- */
 
@@ -182,10 +251,18 @@ useEffect(() => {
   useEffect(() => {
     if (!id) return;
     const unsub = onSnapshot(doc(db, "events", id), (snap) => {
-      if (snap.exists()) setEvent(snap.data() as EventDoc);
-      else setEvent(null);
-      setLoading(false);
+  if (snap.exists()) {
+    const data = snap.data() as EventDoc;
+
+    setEvent({
+      bookingConfirmed: false, // ✅ default if missing in Firestore
+      ...data,
     });
+  } else {
+    setEvent(null);
+  }
+  setLoading(false);
+});
     return () => unsub();
   }, [id]);
 
@@ -364,6 +441,31 @@ useEffect(() => {
   })();
 }, [id, uid, event?.status]);
 
+// Close profile modal on Escape
+useEffect(() => {
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") setProfileOpenId(null);
+  };
+  document.addEventListener("keydown", onKey);
+  return () => document.removeEventListener("keydown", onKey);
+}, []);
+
+// Lock scroll when modal open
+useEffect(() => {
+  if (!profileOpenId) return;
+
+  const prevOverflow = document.body.style.overflow;
+  const prevTouch = document.body.style.touchAction;
+
+  document.body.style.overflow = "hidden";
+  document.body.style.touchAction = "none";
+
+  return () => {
+    document.body.style.overflow = prevOverflow;
+    document.body.style.touchAction = prevTouch;
+  };
+}, [profileOpenId]);
+
 
   /* ------------------------------- Actions -------------------------------- */
 
@@ -475,6 +577,35 @@ tx.update(eventRef, {
     console.error("Failed to accept request:", err);
   } finally {
     setAcceptingId(null);
+  }
+}
+
+async function handleDecline(request: JoinRequest) {
+  if (!event || !id) return;
+  const u = auth.currentUser;
+  if (!u || uid !== event.hostId) return; // host only
+  if (request.status !== "pending") return;
+
+  try {
+    const requestRef = doc(db, "events", id, "join_requests", request.id);
+
+    await updateDoc(requestRef, {
+      status: "declined",
+      updatedAt: serverTimestamp(),
+    });
+
+    // notify requester
+    await addDoc(collection(db, "notifications"), {
+      recipientId: request.userId,
+      type: "event_join_declined",
+      eventId: id,
+      fromUserId: event.hostId,
+      message: "Your request to join an event was declined.",
+      read: false,
+      createdAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("Failed to decline request:", err);
   }
 }
 
@@ -622,6 +753,32 @@ async function handleCancelEvent() {
   }
 }
 
+async function handleConfirmBooking() {
+  if (!id || !event || !uid) return;
+  if (uid !== event.hostId) return; // host only
+  if (event.status === "cancelled" || event.status === "completed") return;
+  if (event.bookingConfirmed) return;
+
+  const ok = confirm("Mark this event as Booking Confirmed for all players?");
+  if (!ok) return;
+
+  try {
+    setConfirmingBooking(true);
+
+    await updateDoc(doc(db, "events", id), {
+      bookingConfirmed: true,
+      bookingConfirmedAt: serverTimestamp(),
+      bookingConfirmedBy: uid,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.error("Failed to confirm booking:", e);
+    alert("Could not confirm booking. Check console for details.");
+  } finally {
+    setConfirmingBooking(false);
+  }
+}
+
 /* ------------------------------ Derivatives ------------------------------ */
 
 
@@ -669,6 +826,41 @@ const canRequest =
   (r) => !(r.status === "accepted" && !(event.participants ?? []).includes(r.userId))
 );
 
+  // ✅ Desktop UI (render the desktop component instead of the mobile layout)
+if (isDesktop) {
+  return (
+    <DesktopEventDetailsPage
+      eventId={id}
+      event={event}
+      uid={uid}
+      hostProfile={hostProfile}
+      participantProfiles={participantProfiles}
+      conversationId={conversationId}
+      onCancelEvent={handleCancelEvent}
+      cancelling={cancelling}
+      isHost={isHost}
+      status={status}
+      onConfirmBooking={handleConfirmBooking}
+      confirmingBooking={confirmingBooking}
+
+      // ✅ JOIN CTA (NEW)
+      canRequest={canRequest}
+      hasPendingRequest={hasPendingRequest}
+      sendingJoin={sendingJoin}
+      onJoinRequest={handleJoinRequest}
+      isParticipant={isParticipant}
+      isFull={isFull}
+      authLoading={authLoading}
+
+       requests={visibleRequests}
+      acceptingId={acceptingId}
+      onAcceptRequest={handleAccept}
+      onDeclineRequest={handleDecline}
+    />
+  );
+}
+
+
 
   function StatusPill({ status }: { status?: EventDoc["status"] }) {
     const base = "rounded-full px-2 py-0.5 text-xs font-medium";
@@ -688,410 +880,513 @@ const canRequest =
 
   /* --------------------------------- UI ----------------------------------- */
 
-  return (
-    <>
-      <main className="mx-auto max-w-3xl px-4 py-6 space-y-6">
-        {/* Back + Status */}
-<div className="flex items-center justify-between">
-  <Link
-    href="/events"
-    className="
-      inline-flex items-center gap-2
-      rounded-full border border-primary/20
-      bg-white text-primary
-      px-3 py-1.5 text-sm font-medium
-      shadow-sm
-      hover:bg-primary/10
-      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30
-      transition
-    "
-  >
-    <ArrowLeft className="h-4 w-4" aria-hidden />
-    <span>Back to Events</span>
-  </Link>
+ return (
+  <main className="mx-auto max-w-3xl px-4 py-4 pb-10">
+    {/* Top bar (back + actions) */}
+    <div className="mb-3 flex items-center justify-between">
+      <Link
+        href="/events"
+        className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900"
+      >
+        <ArrowLeft className="h-5 w-5" />
+        <span>Event Details</span>
+      </Link>
 
-  <StatusPill status={event.status} />
-</div>
-
-
-{/* HERO HEADER (with background image) */}
-<section className="relative overflow-hidden rounded-2xl border p-5 shadow-sm">
-  {/* background image layer */}
-  <div className="absolute inset-0 z-0">
-    <img
-      src="/images/eventspagetile.jpg"
-      alt=""
-      className="h-full w-full object-cover"
-      loading="lazy"
-      fetchPriority="low"
-    />
-    <div className="absolute inset-0 bg-black/30" />
-    <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/35 to-transparent" />
-  </div>
-
-  {/* content layer */}
-  <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]">
-    <div>
-      <h1 className="text-2xl font-bold leading-tight">
-        {event.title || "Tennis Event"}
-      </h1>
-      <p className="mt-1 text-sm capitalize opacity-95">
-        {event.type || "Event"}
-      </p>
+      {/* Keep status pill if you want (subtle, top-right) */}
+      <StatusPill status={event.status} />
     </div>
 
-    {typeof event.spotsTotal === "number" && (
-      <div className="min-w-[160px]">
-        <div className="flex items-center justify-between text-xs opacity-95">
-          <span>Spots</span>
-          <span className="font-medium">
-            {(event.spotsFilled ?? 0)}/{event.spotsTotal}
+    {/* HERO */}
+    <section className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+      <div className="relative h-44 w-full">
+        <img
+          src="/images/eventspagetile.jpg"
+          alt=""
+          className="h-full w-full object-cover"
+          loading="lazy"
+        />
+        <div className="absolute inset-0 bg-black/25" />
+        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent" />
+
+        <div className="absolute left-4 top-4">
+          <span className="inline-flex items-center rounded-full bg-lime-300 px-3 py-1 text-[11px] font-extrabold tracking-wide text-green-950">
+            TRENDING EVENT
           </span>
         </div>
-        <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-white/30">
-          <div
-            className="h-2 bg-emerald-400 transition-[width] duration-300"
-            style={{
-              width: `${
-                event.spotsTotal && event.spotsTotal > 0
-                  ? Math.min(
-                      100,
-                      Math.max(
-                        0,
-                        Math.round(((event.spotsFilled ?? 0) / event.spotsTotal) * 100)
-                      )
-                    )
-                  : 0
-              }%`,
-            }}
-          />
+
+        <div className="absolute bottom-4 left-4 right-4">
+          <h1 className="text-xl font-extrabold leading-tight text-white drop-shadow">
+            {event.title || "Tennis Event"}
+          </h1>
         </div>
       </div>
-    )}
-  </div>
 
-  {/* meta chips */}
-  <div className="relative z-10 mt-4 flex flex-wrap items-center gap-2 text-sm">
-    {event.location && (
-      <span className="inline-flex items-center gap-1 rounded-full border border-white/30 bg-white/15 px-2 py-1 text-white backdrop-blur-sm">
-        <MapPin className="h-4 w-4" aria-hidden />
-        {event.location}
-      </span>
-    )}
-    {start && (
-      <span className="inline-flex items-center gap-1 rounded-full border border-white/30 bg-white/15 px-2 py-1 text-white backdrop-blur-sm">
-        <CalendarDays className="h-4 w-4" aria-hidden />
-        {start.toLocaleString()} {end ? `– ${end.toLocaleTimeString()}` : ""}
-      </span>
-    )}
-    {typeof event.durationMins === "number" && (
-      <span className="inline-flex items-center gap-1 rounded-full border border-white/30 bg-white/15 px-2 py-1 text-white backdrop-blur-sm">
-        <Clock className="h-4 w-4" aria-hidden />
-        {event.durationMins} mins
-      </span>
-    )}
-    {typeof event.minSkill === "number" && (
-      <span className="inline-flex items-center gap-1 rounded-full border border-white/30 bg-white/15 px-2 py-1 text-white backdrop-blur-sm">
-        <ShieldCheck className="h-4 w-4" aria-hidden />
-        Min Skill {event.minSkill}
-      </span>
-    )}
-    {typeof event.spotsTotal === "number" && (
-      <span className="inline-flex items-center gap-1 rounded-full border border-white/30 bg-white/15 px-2 py-1 text-white backdrop-blur-sm">
-        <UsersIcon className="h-4 w-4" aria-hidden />
-        {(event.spotsFilled ?? 0)}/{event.spotsTotal}
-      </span>
-    )}
-  </div>
-</section>
+      {/* Primary CTA */}
+      <div className="px-4 pt-4">
+        {/* Join/request state (main CTA) */}
+        {hasPendingRequest ? (
+          <button
+            disabled
+            className="w-full rounded-xl bg-gray-200 px-4 py-3 text-sm font-bold text-gray-700"
+            title="Your join request is awaiting approval"
+          >
+            Request Pending
+          </button>
+        ) : canRequest ? (
+          <button
+            onClick={handleJoinRequest}
+            disabled={sendingJoin}
+            className="w-full rounded-xl bg-lime-400 px-4 py-3 text-sm font-extrabold text-green-950 shadow-sm hover:bg-lime-300 active:scale-[0.99] transition disabled:opacity-70"
+          >
+            {sendingJoin ? "Sending…" : "Request to Join"}
+          </button>
+        ) : (
+          <button
+            disabled
+            className="w-full rounded-xl bg-gray-200 px-4 py-3 text-sm font-bold text-gray-700"
+            title={
+              isHost
+                ? "You are the host"
+                : isParticipant
+                ? "You’ve already joined"
+                : isFull
+                ? "Event is full"
+                : status === "cancelled"
+                ? "Event was cancelled"
+                : status === "completed"
+                ? "Event has finished"
+                : "Join unavailable"
+            }
+          >
+            {isHost
+              ? "You’re the Host"
+              : isParticipant
+              ? "You’ve Joined"
+              : isFull
+              ? "Full"
+              : status === "cancelled"
+              ? "Cancelled"
+              : status === "completed"
+              ? "Completed"
+              : "Unavailable"}
+          </button>
+        )}
 
-{/* 🔹 Tab Switcher */}
-<div className="mt-4 flex gap-2 border-b">
-  {[
-    { key: "about", label: "About" },
-    { key: "players", label: "Players" },
-  ].map((t) => (
-    <button
-      key={t.key}
-      onClick={() => setActiveTab(t.key as any)}
-      className={`px-3 py-2 text-sm -mb-px border-b-2 transition ${
-        activeTab === t.key
-          ? "border-emerald-600 text-emerald-700 font-medium"
-          : "border-transparent text-gray-600 hover:text-gray-900"
-      }`}
+        {/* Host line */}
+        <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-600">
+          <span className="font-semibold">
+            Host:{" "}
+            <span className="text-green-700">
+              {hostProfile?.name || "Unknown"}
+            </span>
+          </span>
+          <span>•</span>
+          <span>
+            {spotsTotalNum !== null ? (
+              <>
+                <span className="font-semibold text-gray-900">
+                  {Math.max(0, spotsTotalNum - filled)}
+                </span>{" "}
+                slots remaining
+              </>
+            ) : (
+              "Open spots"
+            )}
+          </span>
+        </div>
+
+        {/* Secondary actions (chat / leave / cancel host) */}
+        <div className="mt-4 flex flex-col gap-2">
+          {/* Event chat shortcut */}
+          {conversationId && (isHost || isParticipant) && status !== "cancelled" && (
+            <Link
+              href={`/messages/${conversationId}`}
+              className="w-full rounded-xl border border-emerald-200 bg-white px-4 py-3 text-center text-sm font-bold text-emerald-700 hover:bg-emerald-50"
+            >
+              Open Event Chat
+            </Link>
+          )}
+
+          {/* Leave (participant) */}
+          {isParticipant && !isHost && status !== "cancelled" && status !== "completed" && (
+            <button
+              onClick={handleLeaveEvent}
+              disabled={leaving}
+              className="w-full rounded-xl border border-red-200 bg-white px-4 py-3 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-70"
+            >
+              {leaving ? "Leaving…" : "Leave Event"}
+            </button>
+          )}
+
+   {/* Host actions */}
+{/* Host actions */}
+{isHost && status !== "cancelled" && status !== "completed" && (
+  <>
+    {/* Confirm Booking (host only, if not already confirmed) */}
+    {!event.bookingConfirmed ? (
+      <button
+        onClick={handleConfirmBooking}
+        disabled={confirmingBooking}
+        className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white hover:bg-emerald-700 disabled:opacity-70"
+      >
+        {confirmingBooking ? "Confirming…" : "Booking Confirmed"}
+      </button>
+    ) : (
+      <div className="w-full rounded-xl bg-emerald-100 px-4 py-3 text-center text-sm font-extrabold text-emerald-800">
+        ✓ Court Booking Confirmed
+      </div>
+    )}
+
+    <Link
+      href={`/events/new?edit=${id}`}
+      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-center text-sm font-extrabold text-gray-800 hover:bg-gray-50"
     >
-      {t.label}
-    </button>
-  ))}
-</div>
+      Edit Event
+    </Link>
 
-
-
-
-{/* 🔹 ABOUT TAB */}
-{activeTab === "about" && (
-  <section className="rounded-2xl border bg-white p-5 shadow-sm">
-    {/* header row with CTA on the right */}
-    <div className="mb-2 flex items-center justify-between gap-3">
-      <h2 className="text-base font-semibold">About this event</h2>
-
-      <div className="flex items-center gap-2">
-  {/* Join/request state */}
-  {hasPendingRequest ? (
-    <button
-      disabled
-      className="rounded-lg bg-gray-300 px-3 py-2 text-sm font-medium text-gray-700"
-      title="Your join request is awaiting approval"
-    >
-      Request Pending
-    </button>
-    
-  ) : canRequest ? (
-    <button
-      onClick={handleJoinRequest}
-      disabled={sendingJoin}
-      className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 active:scale-[0.98] transition disabled:opacity-70"
-    >
-      {sendingJoin ? "Sending…" : "Request to Join"}
-    </button>
-  ) : (
-    <button
-      disabled
-      className="rounded-lg bg-gray-300 px-3 py-2 text-sm font-medium text-gray-700"
-      title={
-        isHost
-          ? "You are the host"
-          : isParticipant
-          ? "You’ve already joined"
-          : isFull
-          ? "Event is full"
-          : status === "cancelled"
-          ? "Event was cancelled"
-          : status === "completed"
-          ? "Event has finished"
-          : "Join unavailable"
-      }
-    >
-      {isHost
-        ? "You’re the Host"
-        : isParticipant
-        ? "You’ve Joined"
-        : isFull
-        ? "Full"
-        : status === "cancelled"
-        ? "Cancelled"
-        : status === "completed"
-        ? "Completed"
-        : "Unavailable"}
-    </button>
-  )}
-  {isParticipant && !isHost && status !== "cancelled" && status !== "completed" && (
-  <button
-    onClick={handleLeaveEvent}
-    disabled={leaving}
-    className="rounded-lg border border-red-300 text-red-700 px-3 py-2 text-sm font-medium hover:bg-red-50 active:scale-[0.98] transition disabled:opacity-70"
-    title="Leave this event"
-  >
-    {leaving ? "Leaving…" : "Leave Event"}
-  </button>
-)}
-
-
-  {/* 🔹 Host-only Cancel (duplicate of sticky bar, but visible here too) */}
-  {isHost && status !== "cancelled" && status !== "completed" && (
     <button
       onClick={handleCancelEvent}
       disabled={cancelling}
-      className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 active:scale-[0.98] transition disabled:opacity-70"
-      title="Cancel this event"
+      className="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-70"
     >
       {cancelling ? "Cancelling…" : "Cancel Event"}
     </button>
-  )}
-
-  {/* Event chat shortcut */}
-  {conversationId && (isHost || isParticipant) && status !== "cancelled" && (
-    <Link
-      href={`/messages/${conversationId}`}
-      className="rounded-lg border border-emerald-300 text-emerald-700 px-3 py-2 text-sm font-medium hover:bg-emerald-50"
-      title="Open event conversation"
-    >
-      Event Chat
-    </Link>
-  )}
-</div>
-</div>
-
-    {/* description */}
-    {event.description ? (
-      <p className="whitespace-pre-wrap text-sm leading-6 text-gray-700">{event.description}</p>
-    ) : (
-      <p className="text-sm text-muted-foreground italic">No description provided.</p>
-    )}
-  </section>
+  </>
 )}
 
-{/* 🔹 PLAYERS TAB */}
-{activeTab === "players" && (
-  <>
-    <section className="rounded-2xl border bg-white p-5 shadow-sm">
-      <h2 className="mb-3 text-base font-semibold">Players</h2>
+        </div>
+      </div>
 
-      {/* Host */}
-      {event.hostId && hostProfile && (
-        <Link
-          href={`/players/${event.hostId}`}
-          className="flex items-center gap-3 rounded-xl border p-3 hover:bg-gray-50 transition"
-        >
-          <img
-            src={hostProfile.photoURL || "/default-avatar.png"}
-            alt={hostProfile.name || "Host"}
-            className="h-12 w-12 rounded-full object-cover"
-          />
-          <div>
-            <p className="font-medium">Host · {hostProfile.name || "Unknown Player"}</p>
-            {getSkill(hostProfile) !== null && (
-              <p className="text-sm text-muted-foreground">
-                Skill Level: {getSkill(hostProfile)}
+      <div className="h-4" />
+    </section>
+
+    {/* EVENT INFO */}
+    <section className="mt-5">
+      <h2 className="mb-3 text-sm font-extrabold text-gray-900">Event Info</h2>
+
+      <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="space-y-4">
+          {/* When */}
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-100 text-green-900">
+              <CalendarDays className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-gray-900">When</p>
+              <p className="text-sm text-gray-600">
+                {start
+                  ? `${start.toLocaleString([], {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                    })} • ${start.toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}${end ? ` – ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`
+                  : "TBA"}
               </p>
-            )}
+            </div>
           </div>
-        </Link>
-      )}
 
-      {/* Participants */}
-      {(event.participants?.length ?? 0) > 0 && (
-        <div className="mt-4">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">
-            Accepted Participants
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            {Array.from(new Set(event.participants ?? []))
-              .filter((uid) => uid !== event.hostId)
-              .map((uid) => {
-                const p = participantProfiles[uid];
-                return (
-                  <Link
-                    key={uid}
-                    href={`/players/${uid}`}
-                    className="group relative inline-flex items-center"
-                    title={p?.name || uid}
-                  >
-                    <img
-                      src={p?.photoURL || "/default-avatar.png"}
-                      className="h-9 w-9 rounded-full ring-2 ring-white object-cover transition-transform group-hover:scale-105"
-                      alt={p?.name || "Player"}
-                    />
-                  </Link>
-                );
-              })}
+          {/* Location (NO MAP) */}
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-100 text-green-900">
+              <MapPin className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+<p className="text-sm font-bold text-gray-900">Location</p>
+
+<p className="text-sm text-gray-600">
+  {event.location || "TBA"}
+</p>
+
+{event.location && (
+  <div className="mt-3 w-full overflow-hidden rounded-xl border">
+    <iframe
+      src={`https://www.google.com/maps?q=${encodeURIComponent(
+        event.court?.address || event.location
+      )}&output=embed`}
+      width="100%"
+      height="220"
+      style={{ border: 0 }}
+      loading="lazy"
+      allowFullScreen
+      referrerPolicy="no-referrer-when-downgrade"
+    />
+  </div>
+)}
+            </div>
           </div>
+
+         {/* Skill Level */}
+<div className="flex items-start gap-3">
+  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-100 text-green-900">
+    <ShieldCheck className="h-5 w-5" />
+  </div>
+  <div className="min-w-0">
+    <p className="text-sm font-bold text-gray-900">Skill Level</p>
+    <p className="text-sm text-gray-600">{formatSkillRange(event)}</p>
+  </div>
+</div>
+
+        </div>
+      </div>
+    </section>
+
+    {/* PLAYERS (compact row like screenshot) */}
+    <section className="mt-6">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-extrabold text-gray-900">
+          Players{" "}
+          <span className="font-semibold text-gray-500">
+            ({filled}
+            {spotsTotalNum !== null ? `/${spotsTotalNum}` : ""})
+          </span>
+        </h2>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("players")}
+          className="text-sm font-extrabold text-green-700 hover:underline"
+        >
+          See All
+        </button>
+      </div>
+
+      <div className="flex items-center gap-3 overflow-x-auto pb-1">
+        {/* Host first */}
+        {event.hostId && (
+        <button
+  type="button"
+  onClick={() => setProfileOpenId(event.hostId!)}
+  className="shrink-0 text-center"
+  title={hostProfile?.name || "Host"}
+>
+  <img
+    src={hostProfile?.photoURL || "/default-avatar.png"}
+    className="h-14 w-14 rounded-full object-cover ring-2 ring-white"
+    alt={hostProfile?.name || "Host"}
+  />
+  <p className="mt-1 text-[11px] font-bold text-gray-800 truncate max-w-[72px]">
+    {hostProfile?.name || "Host"}
+  </p>
+  <p className="text-[10px] font-semibold text-gray-500">(Host)</p>
+</button>
+        )}
+
+        {/* Participants */}
+        {Array.from(new Set(event.participants ?? []))
+          .filter((pid) => pid && pid !== event.hostId)
+          .slice(0, 10)
+          .map((pid) => {
+            const p = participantProfiles[pid];
+            return (
+            <button
+  key={pid}
+  type="button"
+  onClick={() => setProfileOpenId(pid)}
+  className="shrink-0 text-center"
+  title={p?.name || "Player"}
+>
+  <img
+    src={p?.photoURL || "/default-avatar.png"}
+    className="h-14 w-14 rounded-full object-cover ring-2 ring-white"
+    alt={p?.name || "Player"}
+  />
+  <p className="mt-1 text-[11px] font-bold text-gray-800 truncate max-w-[72px]">
+    {p?.name || "Player"}
+  </p>
+</button>
+            );
+          })}
+      </div>
+
+      {/* If they tap "See All", show your existing Players tab content below */}
+      {activeTab === "players" && (
+        <div className="mt-4">
+          {/* Keep your existing players tab block (host, accepted, join requests) */}
+          {/* --- BEGIN existing PLAYERS TAB content --- */}
+          <section className="rounded-2xl border bg-white p-5 shadow-sm">
+            <h2 className="mb-3 text-base font-semibold">Players</h2>
+
+            {event.hostId && hostProfile && (
+             <button
+  type="button"
+  onClick={() => setProfileOpenId(event.hostId!)}
+  className="flex items-center gap-3 rounded-xl border p-3 hover:bg-gray-50 transition text-left w-full"
+>
+  <img
+    src={hostProfile.photoURL || "/default-avatar.png"}
+    alt={hostProfile.name || "Host"}
+    className="h-12 w-12 rounded-full object-cover"
+  />
+  <div>
+    <p className="font-medium">
+      Host · {hostProfile.name || "Unknown Player"}
+    </p>
+    {getSkill(hostProfile) !== null && (
+      <p className="text-sm text-muted-foreground">
+        Skill Level: {getSkill(hostProfile)}
+      </p>
+    )}
+  </div>
+</button>
+            )}
+
+            {(event.participants?.length ?? 0) > 0 && (
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">
+                  Accepted Participants
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {Array.from(new Set(event.participants ?? []))
+                    .filter((pid) => pid !== event.hostId)
+                    .map((pid) => {
+                      const p = participantProfiles[pid];
+                      return (
+                       <button
+  key={pid}
+  type="button"
+  onClick={() => setProfileOpenId(pid)}
+  className="group relative inline-flex items-center"
+  title={p?.name || pid}
+>
+  <img
+    src={p?.photoURL || "/default-avatar.png"}
+    className="h-9 w-9 rounded-full ring-2 ring-white object-cover transition-transform group-hover:scale-105"
+    alt={p?.name || "Player"}
+  />
+</button>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {isHost && visibleRequests.length > 0 && (
+            <section className="mt-4 rounded-2xl border bg-white p-5 shadow-sm">
+              <button
+                onClick={() => setRequestsOpen((v) => !v)}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left"
+              >
+                <h2 className="text-base font-semibold">
+                  Join Requests{" "}
+                  <span className="text-muted-foreground">
+                    ({visibleRequests.length})
+                  </span>
+                </h2>
+                <ChevronDown
+                  className={`h-5 w-5 transition-transform ${
+                    requestsOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+
+              {requestsOpen && (
+                <div className="mt-3 space-y-3">
+                  {visibleRequests.map((req) => {
+                    const skill = getSkill(req.profile || null);
+                    const canAccept = req.status === "pending" && !isFull;
+
+                    return (
+                      <div
+                        key={req.id}
+                        className="flex items-center justify-between gap-3 rounded-xl border p-3"
+                      >
+                        <button
+  type="button"
+  onClick={() => setProfileOpenId(req.userId)}
+  className="flex items-center gap-3 hover:opacity-90 text-left"
+>
+  <img
+    src={req.profile?.photoURL || "/default-avatar.png"}
+    alt={req.profile?.name || "Player"}
+    className="h-10 w-10 rounded-full object-cover"
+  />
+  <div>
+    <p className="font-medium">
+      {req.profile?.name || "Unknown Player"}
+    </p>
+    {getSkill(req.profile || null) !== null && (
+      <p className="text-sm text-muted-foreground">
+        Skill Level: {getSkill(req.profile || null)}
+      </p>
+    )}
+    <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-gray-600">
+      {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+    </p>
+  </div>
+</button>
+
+                        <button
+                          onClick={() => handleAccept(req)}
+                          disabled={!canAccept || acceptingId === req.id}
+                          className={`rounded-lg px-3 py-2 text-sm font-medium text-white ${
+                            canAccept
+                              ? "bg-emerald-600 hover:bg-emerald-700"
+                              : "bg-gray-300"
+                          }`}
+                        >
+                          {acceptingId === req.id ? "Accepting…" : "Accept"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+          {/* --- END existing PLAYERS TAB content --- */}
         </div>
       )}
     </section>
 
-
-    {/* Join Requests only visible to host */}
-    {isHost && visibleRequests.length > 0 && (
-      <section className="rounded-2xl border bg-white p-5 shadow-sm">
-        <button
-          onClick={() => setRequestsOpen((v) => !v)}
-          className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left"
-        >
-          <h2 className="text-base font-semibold">
-            Join Requests{" "}
-            <span className="text-muted-foreground">({visibleRequests.length})</span>
-          </h2>
-          <ChevronDown
-            className={`h-5 w-5 transition-transform ${
-              requestsOpen ? "rotate-180" : ""
-            }`}
-          />
-        </button>
-
-        {requestsOpen && (
-          <div className="mt-3 space-y-3">
-            {visibleRequests.map((req) => {
-
-              const skill = getSkill(req.profile || null);
-              const canAccept = req.status === "pending" && !isFull;
-
-              return (
-                <div
-                  key={req.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border p-3"
-                >
-                  <Link
-                    href={`/players/${req.userId}`}
-                    className="flex items-center gap-3 hover:opacity-90"
-                  >
-                    <img
-                      src={req.profile?.photoURL || "/default-avatar.png"}
-                      alt={req.profile?.name || "Player"}
-                      className="h-10 w-10 rounded-full object-cover"
-                    />
-                    <div>
-                      <p className="font-medium">
-                        {req.profile?.name || "Unknown Player"}
-                      </p>
-                      {skill !== null && (
-                        <p className="text-sm text-muted-foreground">
-                          Skill Level: {skill}
-                        </p>
-                      )}
-                      <p
-                        className={`mt-0.5 inline-flex items-center gap-1 text-xs ${
-  req.status === "pending"
-    ? "text-amber-700"
-    : req.status === "accepted"
-    ? "text-emerald-700"
-    : req.status === "left"
-    ? "text-gray-700"
-    : "text-gray-600"
-}`}
-
-                      >
-                        {req.status === "pending" && (
-                          <Clock className="h-3.5 w-3.5" />
-                        )}
-                        {req.status === "accepted" && (
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                        )}
-                        {req.status === "declined" && (
-                          <XCircle className="h-3.5 w-3.5" />
-                        )}{req.status === "left" && <XCircle className="h-3.5 w-3.5" />}
-
-                        {req.status.charAt(0).toUpperCase() +
-                          req.status.slice(1)}
-                      </p>
-                    </div>
-                  </Link>
-
-                  <button
-                    onClick={() => handleAccept(req)}
-                    disabled={!canAccept || acceptingId === req.id}
-                    className={`rounded-lg px-3 py-2 text-sm font-medium text-white ${
-                      canAccept
-                        ? "bg-emerald-600 hover:bg-emerald-700"
-                        : "bg-gray-300"
-                    }`}
-                  >
-                    {acceptingId === req.id ? "Accepting…" : "Accept"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+    {/* ABOUT */}
+    <section className="mt-6">
+      <h2 className="mb-2 text-sm font-extrabold text-gray-900">About the Match</h2>
+      <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        {event.description ? (
+          <p className="whitespace-pre-wrap text-sm leading-6 text-gray-700">
+            {event.description}
+          </p>
+        ) : (
+          <p className="text-sm text-gray-500 italic">No description provided.</p>
         )}
-      </section>
-    )}
-  </>
+      </div>
+    </section>
+    {/* Profile overlay modal */}
+{profileOpenId && (
+  <div className="fixed inset-0 z-[9999]">
+    {/* Backdrop */}
+    <div
+      className="absolute inset-0 bg-black/60"
+      onMouseDown={() => setProfileOpenId(null)}
+    />
+
+    {/* Panel */}
+    <div className="absolute inset-0 flex items-start justify-center px-3 pt-3 pb-4 sm:items-center sm:p-6">
+      <div
+        className="w-full max-w-[560px] rounded-2xl shadow-2xl overflow-hidden"
+        style={{ background: "#071B15" }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            height: "min(88dvh, 820px)",
+            maxHeight: "min(88dvh, 820px)",
+          }}
+        >
+          <PlayerProfileView
+            playerId={profileOpenId}
+            onClose={() => setProfileOpenId(null)}
+          />
+        </div>
+      </div>
+    </div>
+  </div>
 )}
+  </main>
+);
 
- 
-      </main>
-
-       
-    </>
-  );
 }

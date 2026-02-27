@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useRef, useLayoutEffect } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   User,
@@ -30,15 +30,12 @@ import {
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import dynamic from "next/dynamic";
-const OnboardingTour = dynamic(
-  () => import("@/components/OnboardingTour").then((m) => m.default),
-  { ssr: false }
-);
+
 const PushClientOnly = dynamic(
   () => import("@/components/PushClientOnly").then(m => m.default),
   { ssr: false }
 );
-import { ONBOARDING_VERSION } from "@/app/constants/onboarding";
+
 import NotificationBell from "@/components/notifications/NotificationBell";
 import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 import { Capacitor } from '@capacitor/core';
@@ -51,7 +48,22 @@ import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { track, trackSetUserId } from "@/lib/track";
 import AgeGateModal from "@/components/AgeGateModal";
 import Image from "next/image";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import { cn } from "@/lib/utils";
 
+
+
+const TM = {
+  forest: "#0B3D2E",
+  neon: "#39FF14",
+  bg: "#F5F5F0",
+};
+
+const FOOTER = {
+  bg: TM.forest,
+  inactive: "rgba(255,255,255,0.55)",
+  active: TM.neon,
+};
 
 function useAppBootLoader() {
   const [bootDone, setBootDone] = useState(false);
@@ -114,6 +126,7 @@ function shouldPingLastActive(uid: string) {
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   useSystemTheme(); // <-- Call the hook at the top of your component
 
+
   // 🔔 Kick off native push once on app boot (Android + iOS native only)
   useEffect(() => {
     console.log("[LayoutWrapper] calling initNativePush()");
@@ -172,17 +185,16 @@ const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
   const [showVerify, setShowVerify] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const profileTrackedRef = useRef(false);
-  const [userOnboardingSeen, setUserOnboardingSeen] = useState<number | null>(null);
-const [showTour, setShowTour] = useState(false);
 
-
-// NEW:
-const [needsTour, setNeedsTour] = useState<boolean | null>(null);
-const tourShownThisSession = useRef(false);
 
 
 const router = useRouter();
 const pathname = usePathname() || "";
+
+const isDesktop = useIsDesktop(1024);
+const isApp = Capacitor.isNativePlatform();
+const isDesktopWeb = isDesktop && !isApp;
+
 
 useEffect(() => {
   if (!pathname) return;
@@ -197,9 +209,10 @@ useEffect(() => {
 
 
 
-// 👇 routes that should be full-bleed (no grey background, no boxed layout)
-const fullBleedRoutes = ["/login", "/signup"];
+// 👇 routes that should be full-bleed (no boxed max-width)
+const fullBleedRoutes = ["/login", "/signup", "/home", "/match", "/matches"];
 const isFullBleed = fullBleedRoutes.some((r) => pathname.startsWith(r));
+
 
 const isActive = (href: string) =>
   pathname === href || pathname.startsWith(href + "/");  
@@ -285,7 +298,7 @@ void trackSetUserId(u.uid);
    void track("login", { method: "firebase" });
     sessionStorage.setItem(loginKey, "1");
   }
-  tourShownThisSession.current = false; // ✅ reset for this user session
+ 
   await u.reload();
   setUser(auth.currentUser);
 
@@ -296,10 +309,6 @@ void trackSetUserId(u.uid);
       const requireVerification =
         userDocSnap.exists() && userDocSnap.data()?.requireVerification === true;
       setShowVerify(requireVerification && !u.emailVerified);
-
-      const seen = userDocSnap.exists() ? userDocSnap.data()?.onboardingVersionSeen ?? 0 : 0;
-      setUserOnboardingSeen(seen);
-      setNeedsTour((seen ?? 0) < ONBOARDING_VERSION);
 
 const playerRef = doc(db, "players", u.uid);
 
@@ -398,20 +407,16 @@ if (hasNewer && inbound) {
           setUnreadMessages(unreadList);
         }
       );
-    } else {
-      profileTrackedRef.current = false;
-      void trackSetUserId(null);
-void track("logout");
+} else {
+  profileTrackedRef.current = false;
+  void trackSetUserId(null);
+  void track("logout");
 
-
-  tourShownThisSession.current = false; // ✅ reset on logout
-  
-setUser(null);
-setPhotoURL(null);
-setPhotoThumbURL(null);
-setShowTour(false);
-setProfileComplete(null);
-    }
+  setUser(null);
+  setPhotoURL(null);
+  setPhotoThumbURL(null);
+  setProfileComplete(null);
+}
   });
 
   // ✅ proper cleanup
@@ -434,27 +439,6 @@ useEffect(() => {
   user_id: user.uid,
 });
 }, [user, profileComplete]);
-
-
-
-useEffect(() => {
-  if (!user) return;
-  if (PUBLIC_ROUTES.has(pathname || "")) return;
-  if (needsTour !== true) return;          // ✅ only when known + needed
-  if (tourShownThisSession.current) return;
-  if (hideAllNav) return;
-  if (showAgeGate) return; // ✅ don't show tour while age gate is open
-
-  const t = setTimeout(() => {
-    tourShownThisSession.current = true;
-    setShowSettings(false);
-    setShowTour(true);
-  }, 300);
-
-  return () => clearTimeout(t);
-}, [user, pathname, needsTour, hideAllNav, showAgeGate]);
-
-
 
 
 // ✅ Redirect watcher on navigation (does NOT touch gateReady)
@@ -538,51 +522,6 @@ useEffect(() => {
 
 const totalMessages = unreadMessages.length; // ✅ separate count for messages
 
-function dismissOnboardingTour() {
-  setShowTour(false);
-}
-
-useEffect(() => {
-  if (!user) {
-    setShowAgeGate(false);
-    return;
-  }
-
-  // Never show age gate on public routes (login/signup/verify-email)
-  if (PUBLIC_ROUTES.has(pathname || "")) {
-    setShowAgeGate(false);
-    return;
-  }
-
-  // Don't fight the email verification gate
-  if (showVerify) {
-    setShowAgeGate(false);
-    return;
-  }
-}, [user, pathname, showVerify]);
-
-
-
-async function completeOnboardingTour() {
-  // ✅ close immediately so UI never gets stuck
-  setShowTour(false);
-  setNeedsTour(false);
-  setUserOnboardingSeen(ONBOARDING_VERSION);
-
-  try {
-    const u = auth.currentUser;
-    if (!u) return;
-
-    await updateDoc(doc(db, "users", u.uid), {
-      onboardingVersionSeen: ONBOARDING_VERSION,
-      onboardingCompletedAt: serverTimestamp(),
-    });
-  } catch (e) {
-    console.error("[Onboarding] failed to update onboardingVersionSeen:", e);
-  }
-}
-
-
     // Floating feedback button component
   function FloatingFeedbackButton() {
     const router = useRouter();
@@ -625,12 +564,13 @@ if (shouldGateToVerify) {
   );
 }
 
-  return (
-    <div
-      className={`min-h-screen text-gray-900 ${
-        hideAllNav || isFullBleed ? "" : "bg-gray-100"
-      }`}
-    >
+return (
+  <div
+    className="min-h-screen w-full overflow-x-hidden text-gray-900"
+    style={{ background: TM.bg }} // or your cream if you want global cream
+  >
+
+
       <BackButtonHandler />
 
     <PushClientOnly />
@@ -659,139 +599,23 @@ if (shouldGateToVerify) {
 />
 
 
-{!hideAllNav && (
-  <>
-<header
-  className="sticky top-0 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b"
-  style={{
-    // pad the header itself under the iOS status bar / Dynamic Island
-    paddingTop: 'env(safe-area-inset-top)',
-  }}
->
-  <div className="max-w-6xl mx-auto flex items-center justify-between py-3 px-4">
-
-
-
-
-            <Link href="/" className="flex items-center">
-              <img src="/logo.png" alt="TennisMate" className="w-[40px] h-[40px] rounded-full object-cover" />
-            </Link>
-
-                    <nav className="flex items-center space-x-6 text-sm">
-              {user ? (
-                <>
-                <Link href="/profile" title="Profile" data-tour="profile">
-  {photoThumbURL || photoURL ? (
-    <div className="relative w-8 h-8 rounded-full overflow-hidden border border-green-600 bg-white">
-      {/* instant placeholder so it never feels “blank” */}
-      <div className="absolute inset-0 animate-pulse bg-gray-200" />
-      <Image
-        src={(photoThumbURL || photoURL) as string}
-        alt="Profile"
-        fill
-        sizes="32px"
-        className="object-cover"
-      />
-    </div>
-  ) : (
-    <User className="w-6 h-6 text-blue-600 hover:text-blue-800" />
-  )}
-</Link>
-
-
-                  {/* Directory */}
-                  <Link href="/directory" title="Directory" data-tour="directory">
-                    <Search className="w-6 h-6 text-green-600 hover:text-blue-800" />
-                  </Link>
-
-
-                  {/* Messages */}
-                  <Link href="/messages" title="Messages" className="relative">
-                    <MessageCircle className="w-6 h-6 text-green-600 hover:text-blue-800" />
-                    {totalMessages > 0 && (
-                      <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full animate-pulse">
-                        {totalMessages > 9 ? "9+" : totalMessages}
-                      </span>
-                    )}
-                  </Link>
-
-                  {/* Notifications */}
-                  <div className="relative flex items-center justify-center top-[2px]" data-tour="notifications">
-                    <NotificationBell />
-                  </div>
-
-                  {/* Settings dropdown */}
-                  <div className="relative" ref={settingsRef}>
-                    <button
-                      onClick={() => setShowSettings(!showSettings)}
-                      title="Menu"
-                      className="flex items-center justify-center mt-[1px]"
-                    >
-                      <MoreVertical className="w-7 h-7 text-green-600 hover:text-green-800" />
-                    </button>
-                    {showSettings && (
-                      <div className="absolute right-0 mt-2 w-48 bg-white border rounded shadow z-50">
-                        <Link
-  href="/profile"
-  className="block px-4 py-2 text-sm hover:bg-gray-100"
-  onClick={() => setShowSettings(false)}
->
-  Profile
-</Link>
-                        <Link
-  href="/calendar"
-  className="block px-4 py-2 text-sm hover:bg-gray-100"
-  onClick={() => setShowSettings(false)}
->
-  Calendar
-</Link>
-
-                        <Link
-                          href="/support"
-                          className="block px-4 py-2 text-sm hover:bg-gray-100"
-                          onClick={() => setShowSettings(false)}
-                        >
-                          Support
-                        </Link>
-                        <button
-                          onClick={() => {
-                            setShowSettings(false);
-                            setShowTour(true); // 👈 Reopen onboarding tour
-                          }}
-                          className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                        >
-                          Tutorial
-                        </button>
-                        <button
-                          onClick={handleLogout}
-                          className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
-                        >
-                          Logout
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <Link href="/login" className="text-blue-600 hover:underline">
-                  Login / Sign Up
-                </Link>
-              )}
-            </nav>
-
-          </div>
-        </header>
-        </>
-      )}
-
 <main
-  className={`${
-    isFullBleed ? "w-full" : "max-w-5xl mx-auto px-4"
-  } ${hideAllNav ? "pb-0" : ""}`}
+    className={cn(
+    isFullBleed
+      ? "w-full px-0"
+      : isDesktopWeb
+      ? "w-full"
+      : "max-w-5xl mx-auto px-4",
+    hideAllNav ? "pb-0" : ""
+  )}
   style={
     hideAllNav
       ? undefined
-      : { paddingBottom: "calc(5rem + env(safe-area-inset-bottom, 0px))" }
+      : {
+          paddingBottom: isDesktopWeb
+            ? undefined
+            : "calc(5rem + env(safe-area-inset-bottom, 0px))",
+        }
   }
 >
   {children}
@@ -799,109 +623,86 @@ if (shouldGateToVerify) {
 
 
 
-
-{user && !hideAllNav && (
-  <footer className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-md z-50">
-    <div
-      className="max-w-5xl mx-auto flex justify-around text-sm px-4"
-      style={{ paddingTop: 8 }}
-    >
-
-
-
-      {/* 🏠 Home */}
-      {footerTabs.includes("home") && (
-      <Link href="/home" aria-label="Home" data-tour="home"
-          className={`flex flex-col items-center ${
-            isActive("/home") ? "text-blue-700" : "text-green-600 hover:text-green-800"
-          }`}
-        >
-          <Home className="w-6 h-6 mb-1" />
-          <span>Home</span>
-        </Link>
-      )}
-
-      {/* 🎯 Match Me */}
-{footerTabs.includes("match") && (
-<Link href="/match" aria-label="Match Me" data-tour="match-me"
-
-    className={`flex flex-col items-center ${
-      isActive("/match") ? "text-blue-700" : "text-green-600 hover:text-green-800"
-    }`}
+{user && !hideAllNav && !isDesktopWeb && (
+  <footer
+    className="fixed bottom-0 left-0 right-0 z-50"
+    style={{ background: FOOTER.bg }}
   >
-    <GiTennisRacket className="w-6 h-6 mb-1" />
-    <span>Match Me</span>
-  </Link>
-)}
-
-
-      {/* 👥 Events (shown when NOT in match flow) */}
-      {footerTabs.includes("events") && (
+    <div className="w-full px-4 safe-x">
+      <div className="flex items-center justify-around py-3 text-sm">
+        {/* 🏠 HOME */}
         <Link
-          href="/events"
-          aria-label="Events"
-          className={`flex flex-col items-center ${
-            isActive("/events") ? "text-blue-700" : "text-green-600 hover:text-green-800"
-          }`}
+          href="/home"
+          aria-label="Home"
+          data-tour="home"
+          className="flex flex-col items-center gap-1"
+          style={{ color: isActive("/home") ? FOOTER.active : FOOTER.inactive }}
         >
-          <UsersRound className="w-6 h-6 mb-1" />
-          <span>Events</span>
+          <Home className="h-6 w-6" />
+          <span className="text-[10px] font-semibold tracking-widest">HOME</span>
         </Link>
-      )}
 
-      {/* 🎾 Matches (shown IN match flow) */}
-      {footerTabs.includes("matches") && (
-        <Link href="/matches" aria-label="Matches" data-tour="matches"
-
-          className={`relative flex flex-col items-center ${
-            isActive("/matches") ? "text-blue-700" : "text-green-600 hover:text-green-800"
-          }`}
+        {/* 💬 CHAT */}
+        <Link
+          href="/messages"
+          aria-label="Chat"
+          className="relative flex flex-col items-center gap-1"
+          style={{
+            color: isActive("/messages") ? FOOTER.active : FOOTER.inactive,
+          }}
         >
-          <GiTennisBall className="w-6 h-6 mb-1" />
-          <span>Matches</span>
-          {unreadMatchRequests.length > 0 && (
-            <span className="absolute top-0 right-1 -mt-1 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">
-              {unreadMatchRequests.length > 9 ? "9+" : unreadMatchRequests.length}
+          <MessageCircle className="h-6 w-6" />
+          <span className="text-[10px] font-semibold tracking-widest">CHAT</span>
+
+          {totalMessages > 0 && (
+            <span className="absolute -top-1 right-1 min-w-[18px] rounded-full bg-red-600 px-1 text-center text-[10px] font-bold leading-[18px] text-white">
+              {totalMessages > 9 ? "9+" : totalMessages}
             </span>
           )}
         </Link>
-      )}
-      {/* 📅 Calendar (shown in Events flow) */}
-{footerTabs.includes("calendar") && (
-  <Link
-    href="/calendar"
-    aria-label="Calendar"
-    className={`flex flex-col items-center ${
-      isActive("/calendar") ? "text-blue-700" : "text-green-600 hover:text-green-800"
-    }`}
-  >
-    <CalendarDays className="w-6 h-6 mb-1" />
-    <span>Calendar</span>
-  </Link>
-)}
 
+        {/* 🔍 SEARCH */}
+        <Link
+          href="/directory"
+          aria-label="Search"
+          data-tour="directory"
+          className="flex flex-col items-center gap-1"
+          style={{
+            color: isActive("/directory") ? FOOTER.active : FOOTER.inactive,
+          }}
+        >
+          <Search className="h-6 w-6" />
+          <span className="text-[10px] font-semibold tracking-widest">DIRECTORY</span>
+        </Link>
 
+        {/* 👤 PROFILE */}
+        <Link
+          href="/profile"
+          aria-label="Profile"
+          data-tour="profile"
+          className="flex flex-col items-center gap-1"
+          style={{
+            color: isActive("/profile") ? FOOTER.active : FOOTER.inactive,
+          }}
+        >
+          <User className="h-6 w-6" />
+          <span className="text-[10px] font-semibold tracking-widest">PROFILE</span>
+        </Link>
+      </div>
     </div>
+
     <SafeAreaBottom extra={8} />
   </footer>
 )}
 
 
 
-     {user && !hideAllNav && !hideFeedback && <FloatingFeedbackButton />}
+
+     {user && !hideAllNav && !hideFeedback && !isDesktopWeb && <FloatingFeedbackButton />}
+
 
      {/* 🔔 Suggest native app for mobile web users after 20s of being logged in */}
      {user && !hideAllNav && <GetTheAppPrompt />}
-
-   {showTour && (
-  <OnboardingTour
-    open={!!user && !PUBLIC_ROUTES.has(pathname || "") && !hideAllNav}
-    onClose={dismissOnboardingTour}       // ✅ close = dismiss
-    onComplete={completeOnboardingTour}   // ✅ finish = complete
-  />
-)}
-
-
 
 
 

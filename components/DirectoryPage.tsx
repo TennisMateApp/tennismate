@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, SlidersHorizontal, ChevronDown } from "lucide-react";
 import {
   collection,
   getDocs,
@@ -13,14 +13,18 @@ import {
   endAt,
   QueryDocumentSnapshot,
   DocumentData,
+  getCountFromServer,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseConfig";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { GiTennisBall } from "react-icons/gi";
-import { skillFromUTR, SKILL_OPTIONS } from "@/lib/skills";
 import Image from "next/image";
- // assumes this returns a label like "Upper Beginner"
+import { skillFromUTR, SKILL_OPTIONS } from "@/lib/skills";
+import PlayerProfileView from "@/components/players/PlayerProfileView";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
+import DesktopDirectoryPage from "@/components/directory/DesktopDirectoryPage";
+
 
 interface Player {
   id: string;
@@ -32,35 +36,37 @@ interface Player {
   photoURL?: string;
   photoThumbURL?: string;
   timestamp?: any;
-  joinedAt?: any;  
+  joinedAt?: any;
   createdAt?: any;
   nameLower?: string;
 }
 
-const PAGE_SIZE = 20;
+// ✅ show first 10 like the mock (and load 10 at a time)
+const PAGE_SIZE = 10;
 
-const DIR_CACHE_KEY = "tm_directory_page1_v1";
+const DIR_CACHE_KEY = "tm_directory_page1_v2";
 const DIR_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-const SEARCH_CACHE_PREFIX = "tm_dir_search_v1:";
+const SEARCH_CACHE_PREFIX = "tm_dir_search_v2:";
 const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
+const TM = {
+  forest: "#0B3D2E",
+  neon: "#39FF14",
+  bg: "#F7FAF8",
+  ink: "#0F172A",
+};
 
 function getSkillLabel(v: DocumentData): string {
-  // 1) New schema: explicit human-readable label from signup
   if (typeof v.skillBandLabel === "string" && v.skillBandLabel.trim()) {
     return v.skillBandLabel;
   }
 
-  // 2) Canonical band value (snake_case) → try SKILL_OPTIONS, then Title Case
   if (typeof v.skillBand === "string" && v.skillBand.trim()) {
     const val = v.skillBand.trim();
-
-    // Prefer official label from SKILL_OPTIONS
     const fromOptions = SKILL_OPTIONS.find((s) => s.value === val)?.label;
     if (fromOptions) return fromOptions;
 
-    // Fallback: lower_beginner → Lower Beginner
     if (val.includes("_")) {
       return val
         .split("_")
@@ -71,7 +77,6 @@ function getSkillLabel(v: DocumentData): string {
     return val;
   }
 
-  // 3) Older fields that may already be human-readable
   const direct =
     (typeof v.skillLevel === "string" && v.skillLevel) ||
     (typeof v.skill === "string" && v.skill) ||
@@ -80,13 +85,12 @@ function getSkillLabel(v: DocumentData): string {
 
   if (direct) return direct as string;
 
-  // 4) Derive from numeric rating if present
   const utr = typeof v.utr === "number" ? v.utr : undefined;
   const tmr = typeof v.tmr === "number" ? v.tmr : undefined;
   const rating = utr ?? tmr;
   if (typeof rating === "number") {
     try {
-      const bandValue = skillFromUTR(rating); // likely returns something like "lower_beginner"
+      const bandValue = skillFromUTR(rating);
       if (bandValue) {
         const fromOptions = SKILL_OPTIONS.find((s) => s.value === bandValue)?.label;
         return fromOptions ?? bandValue;
@@ -96,17 +100,17 @@ function getSkillLabel(v: DocumentData): string {
     }
   }
 
-  return ""; // show "—" in UI when blank
+  return "";
 }
 
-
 export default function DirectoryPage() {
-  // ----- browse mode state (no search) -----
+  // ----- browse mode state -----
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
+  const [totalPlayers, setTotalPlayers] = useState<number | null>(null);
 
   // ----- search state -----
   const [searchTerm, setSearchTerm] = useState("");
@@ -118,45 +122,76 @@ export default function DirectoryPage() {
   const inSearch = searchTerm.trim().length >= 2;
   const qStr = searchTerm.trim().toLowerCase();
 
-  const onImgError = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    (e.currentTarget as HTMLImageElement).src = "/images/avatar-fallback.svg";
-  };
+  const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
 
-  // ----- initial browse load (latest players by timestamp) -----
+  const isDesktop = useIsDesktop();
+
+// Close profile modal on Escape
+useEffect(() => {
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && profileOpenId) setProfileOpenId(null);
+  };
+  document.addEventListener("keydown", onKey);
+  return () => document.removeEventListener("keydown", onKey);
+}, [profileOpenId]);
+
+// Lock page scroll while profile modal is open
+useEffect(() => {
+  if (!profileOpenId) return;
+
+  const prevOverflow = document.body.style.overflow;
+  const prevTouch = document.body.style.touchAction;
+
+  document.body.style.overflow = "hidden";
+  document.body.style.touchAction = "none";
+
+  return () => {
+    document.body.style.overflow = prevOverflow;
+    document.body.style.touchAction = prevTouch;
+  };
+}, [profileOpenId]);
+
+
+  // ----- fetch total count (for “Showing X of Y”) -----
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const agg = await getCountFromServer(collection(db, "players"));
+        if (!cancelled) setTotalPlayers(agg.data().count ?? null);
+      } catch {
+        if (!cancelled) setTotalPlayers(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ----- initial browse load -----
   useEffect(() => {
     const loadFirstPage = async () => {
-
-            // ✅ Session cache for first directory page (saves reads on revisit)
       const cachedRaw = sessionStorage.getItem(DIR_CACHE_KEY);
       if (cachedRaw) {
         try {
           const cached = JSON.parse(cachedRaw);
           const isFresh = Date.now() - cached.ts < DIR_CACHE_TTL_MS;
-
           if (isFresh && Array.isArray(cached.players)) {
             setPlayers(cached.players);
             setHasMore(!!cached.hasMore);
-            setCursor(null); // cursor rebuilt only if user taps Load more
+            setCursor(null);
             setLoading(false);
             return;
           }
         } catch {
-          // ignore cache errors
+          // ignore
         }
       }
 
-
       try {
         setLoading(true);
-
-        const qy = query(
-          collection(db, "players"),
-          orderBy("nameLower"),
-          limit(PAGE_SIZE)
-        );
-
+        const qy = query(collection(db, "players"), orderBy("nameLower"), limit(PAGE_SIZE));
         const snap = await getDocs(qy);
-
 
         const page = snap.docs.map((d) => {
           const v = d.data() as DocumentData;
@@ -164,13 +199,14 @@ export default function DirectoryPage() {
             id: d.id,
             name: v.name ?? "",
             postcode: v.postcode ?? "",
-            skillLevel: getSkillLabel(v),  
+            skillLevel: getSkillLabel(v),
             photoURL: v.photoURL ?? undefined,
             photoThumbURL: v.photoThumbURL ?? undefined,
             timestamp: v.timestamp ?? undefined,
-            joinedAt: v.joinedAt ?? undefined, 
-            createdAt: v.createdAt ?? undefined, 
+            joinedAt: v.joinedAt ?? undefined,
+            createdAt: v.createdAt ?? undefined,
             nameLower: v.nameLower ?? undefined,
+            bio: v.bio ?? undefined,
           } as Player;
         });
 
@@ -178,7 +214,6 @@ export default function DirectoryPage() {
         setCursor(snap.docs[snap.docs.length - 1] ?? null);
         setHasMore(snap.size === PAGE_SIZE);
 
-                // ✅ Save first page to session cache
         sessionStorage.setItem(
           DIR_CACHE_KEY,
           JSON.stringify({
@@ -187,35 +222,30 @@ export default function DirectoryPage() {
             hasMore: snap.size === PAGE_SIZE,
           })
         );
-
-
       } catch (err) {
         console.error("Error fetching first page:", err);
       } finally {
         setLoading(false);
       }
     };
+
     loadFirstPage();
   }, []);
 
-  // ----- load more in browse mode -----
+  // ----- load more (browse mode) -----
   const loadMore = async () => {
     if (!hasMore || loadingMore) return;
 
     try {
       setLoadingMore(true);
 
-      // ✅ Rebuild cursor if first page came from session cache
       let effectiveCursor = cursor;
 
       if (!effectiveCursor) {
         const bootstrapSnap = await getDocs(
           query(collection(db, "players"), orderBy("nameLower"), limit(PAGE_SIZE))
         );
-
-        effectiveCursor =
-          bootstrapSnap.docs[bootstrapSnap.docs.length - 1] ?? null;
-
+        effectiveCursor = bootstrapSnap.docs[bootstrapSnap.docs.length - 1] ?? null;
         setCursor(effectiveCursor);
         if (!effectiveCursor) return;
       }
@@ -242,6 +272,7 @@ export default function DirectoryPage() {
           joinedAt: v.joinedAt ?? undefined,
           createdAt: v.createdAt ?? undefined,
           nameLower: v.nameLower ?? undefined,
+          bio: v.bio ?? undefined,
         } as Player;
       });
 
@@ -255,11 +286,10 @@ export default function DirectoryPage() {
     }
   };
 
-
   // ----- search (prefix on nameLower) -----
   useEffect(() => {
     let cancelled = false;
-    // clear search state when < 2 chars
+
     if (!inSearch) {
       setSearching(false);
       setSearchResults([]);
@@ -269,7 +299,7 @@ export default function DirectoryPage() {
     }
 
     setSearching(true);
-        // ✅ Session cache for searches (cuts reads while typing/backspacing)
+
     const cacheKey = SEARCH_CACHE_PREFIX + qStr;
     const cachedRaw = sessionStorage.getItem(cacheKey);
     if (cachedRaw) {
@@ -279,13 +309,13 @@ export default function DirectoryPage() {
 
         if (isFresh && Array.isArray(cached.players)) {
           setSearchResults(cached.players);
-          setSearchCursor(null); // rebuilt only if user taps Load more
+          setSearchCursor(null);
           setHasMoreSearch(!!cached.hasMore);
           setSearching(false);
           return;
         }
       } catch {
-        // ignore cache errors
+        // ignore
       }
     }
 
@@ -298,6 +328,7 @@ export default function DirectoryPage() {
           endAt(qStr + "\uf8ff"),
           limit(PAGE_SIZE)
         );
+
         const snap = await getDocs(qy);
         if (cancelled) return;
 
@@ -307,20 +338,21 @@ export default function DirectoryPage() {
             id: d.id,
             name: v.name ?? "",
             postcode: v.postcode ?? "",
-            skillLevel: getSkillLabel(v),  
+            skillLevel: getSkillLabel(v),
             photoURL: v.photoURL ?? undefined,
             photoThumbURL: v.photoThumbURL ?? undefined,
             timestamp: v.timestamp ?? undefined,
-            joinedAt: v.joinedAt ?? undefined, 
-            createdAt: v.createdAt ?? undefined, 
+            joinedAt: v.joinedAt ?? undefined,
+            createdAt: v.createdAt ?? undefined,
             nameLower: v.nameLower ?? undefined,
+            bio: v.bio ?? undefined,
           } as Player;
         });
 
         setSearchResults(page);
         setSearchCursor(snap.docs[snap.docs.length - 1] ?? null);
         setHasMoreSearch(snap.size === PAGE_SIZE);
-                // ✅ Save search results to session cache
+
         sessionStorage.setItem(
           cacheKey,
           JSON.stringify({
@@ -329,13 +361,12 @@ export default function DirectoryPage() {
             hasMore: snap.size === PAGE_SIZE,
           })
         );
-
       } catch (err) {
         console.error("Error searching players:", err);
       } finally {
         if (!cancelled) setSearching(false);
       }
-    }, 300); // debounce
+    }, 300);
 
     return () => {
       cancelled = true;
@@ -343,14 +374,13 @@ export default function DirectoryPage() {
     };
   }, [qStr, inSearch]);
 
-  // ----- load more in search mode -----
+  // ----- load more (search mode) -----
   const loadMoreSearch = async () => {
     if (!inSearch || !hasMoreSearch || loadingMore) return;
 
     try {
       setLoadingMore(true);
 
-      // ✅ Rebuild searchCursor if search results came from cache
       let effectiveCursor = searchCursor;
 
       if (!effectiveCursor) {
@@ -363,10 +393,7 @@ export default function DirectoryPage() {
             limit(PAGE_SIZE)
           )
         );
-
-        effectiveCursor =
-          bootstrapSnap.docs[bootstrapSnap.docs.length - 1] ?? null;
-
+        effectiveCursor = bootstrapSnap.docs[bootstrapSnap.docs.length - 1] ?? null;
         setSearchCursor(effectiveCursor);
         if (!effectiveCursor) return;
       }
@@ -394,6 +421,7 @@ export default function DirectoryPage() {
           joinedAt: v.joinedAt ?? undefined,
           createdAt: v.createdAt ?? undefined,
           nameLower: v.nameLower ?? undefined,
+          bio: v.bio ?? undefined,
         } as Player;
       });
 
@@ -407,179 +435,298 @@ export default function DirectoryPage() {
     }
   };
 
-
-  // ----- choose which list to show -----
-  const visiblePlayers = useMemo(
-    () => (inSearch ? searchResults : players),
-    [inSearch, searchResults, players]
-  );
+  const visiblePlayers = useMemo(() => (inSearch ? searchResults : players), [inSearch, searchResults, players]);
   const canLoadMore = inSearch ? hasMoreSearch : hasMore;
   const onLoadMore = inSearch ? loadMoreSearch : loadMore;
 
-  return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Heading */}
-        <div className="mb-3">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
-            <GiTennisBall className="h-6 w-6 text-green-600" />
-            TennisMates
-          </h1>
-          <p className="text-sm text-gray-600">
-            Find partners by name, skill & postcode.
-          </p>
-        </div>
+    // ✅ Desktop layout (sidebar left + results centered)
+  if (isDesktop) {
+    return (
+      <div className="min-h-screen" style={{ background: "#f6f7f8" }}>
+        <div className="w-full px-4 lg:px-8 2xl:px-12 py-6">
+          <div className="flex items-start gap-6">
+            {/* Left sidebar */}
+            <TMDesktopSidebar active="Search" player={null} />
 
-        {/* Sticky search / controls bar */}
-        <div className="sticky top-[56px] z-30 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border rounded-xl">
-          <div className="flex items-center gap-3 px-3 py-2.5">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                placeholder="Search TennisMates by name…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                aria-label="Search TennisMates by name"
+            {/* Main content */}
+            <div className="flex-1 min-w-0">
+              <DesktopDirectoryPage
+                loading={loading || searching}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                players={visiblePlayers}
+                totalPlayers={!inSearch ? totalPlayers : null}
+                canLoadMore={canLoadMore}
+                loadingMore={loadingMore}
+                onLoadMore={onLoadMore}
+                onViewProfile={(id) => setProfileOpenId(id)}
               />
-              <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" aria-hidden="true" />
-            </div>
-            <div className="hidden sm:flex text-sm text-gray-600 min-w-[160px] justify-end">
-              {searching ? "Searching…" : `${visiblePlayers.length} result${visiblePlayers.length === 1 ? "" : "s"}`}
             </div>
           </div>
+        </div>
 
-          {/* Optional helper: hint for min chars */}
+        {/* ✅ Profile overlay modal (shared) */}
+        {profileOpenId && (
+          <div className="fixed inset-0 z-[9999]">
+            <div
+              className="absolute inset-0 bg-black/60"
+              onMouseDown={() => setProfileOpenId(null)}
+            />
+            <div className="absolute inset-0 flex items-start justify-center px-3 pt-3 pb-4 sm:items-center sm:p-6">
+              <div
+                className="w-full max-w-[560px] rounded-2xl shadow-2xl overflow-hidden"
+                style={{ background: "#071B15" }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div
+                  style={{
+                    height: "min(88dvh, 820px)",
+                    maxHeight: "min(88dvh, 820px)",
+                  }}
+                >
+                  <PlayerProfileView
+                    playerId={profileOpenId}
+                    onClose={() => setProfileOpenId(null)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+
+  return (
+    <div className="min-h-screen" style={{ background: TM.bg, color: TM.ink }}>
+      <div className="mx-auto w-full max-w-md px-4 py-6">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-[22px] font-extrabold tracking-tight" style={{ color: TM.forest }}>
+            Players
+          </h1>
+
+          <button
+            type="button"
+            className="rounded-xl p-2 border"
+            style={{
+              borderColor: "rgba(11,61,46,0.12)",
+              background: "rgba(255,255,255,0.8)",
+            }}
+            aria-label="Filters"
+          >
+            <SlidersHorizontal className="h-5 w-5" style={{ color: TM.forest }} />
+          </button>
+        </div>
+
+        {/* Search */}
+        <div
+          className="rounded-2xl border p-3 shadow-sm mb-4"
+          style={{
+            background: "#fff",
+            borderColor: "rgba(11,61,46,0.10)",
+          }}
+        >
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5" style={{ color: "rgba(11,61,46,0.45)" }} />
+            <input
+              type="text"
+              placeholder="Search players by name or postcode"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full rounded-xl border pl-10 pr-3 py-2.5 text-sm outline-none"
+              style={{
+                borderColor: "rgba(11,61,46,0.12)",
+                background: "rgba(247,250,248,0.65)",
+              }}
+              aria-label="Search players"
+            />
+          </div>
+
           {searchTerm && !inSearch && (
-            <div className="px-3 pb-2 text-xs text-gray-500">Type at least 2 characters to search the whole directory.</div>
+            <div className="pt-2 text-xs" style={{ color: "rgba(11,61,46,0.60)" }}>
+              Type at least 2 characters to search.
+            </div>
           )}
         </div>
 
+        {/* Loading */}
         {loading ? (
-          // Skeleton grid
-          <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="space-y-3">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                <div className="flex gap-4">
-                  <div className="w-14 h-14 rounded-full bg-gray-200 animate-pulse" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 w-1/2 bg-gray-200 rounded animate-pulse" />
-                    <div className="h-3 w-2/3 bg-gray-200 rounded animate-pulse" />
-                    <div className="h-8 w-32 bg-gray-200 rounded animate-pulse mt-3" />
+              <div
+                key={i}
+                className="rounded-2xl border bg-white p-4 shadow-sm"
+                style={{ borderColor: "rgba(11,61,46,0.10)" }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-full bg-gray-200 animate-pulse" />
+                  <div className="flex-1">
+                    <div className="h-4 w-40 bg-gray-200 rounded animate-pulse" />
+                    <div className="mt-2 h-3 w-28 bg-gray-200 rounded animate-pulse" />
                   </div>
+                  <div className="h-9 w-24 bg-gray-200 rounded-xl animate-pulse" />
                 </div>
               </div>
             ))}
           </div>
         ) : visiblePlayers.length === 0 ? (
-          // Empty state
-          <div className="mt-8 rounded-xl border border-dashed border-gray-300 bg-white p-10 text-center">
-            <p className="text-gray-800 font-medium">No players found</p>
-            <p className="text-gray-600 text-sm mt-1">Try another name.</p>
+          <div className="rounded-2xl border bg-white p-8 text-center" style={{ borderColor: "rgba(11,61,46,0.12)" }}>
+            <p className="font-semibold" style={{ color: TM.forest }}>
+              No players found
+            </p>
+            <p className="text-sm mt-1" style={{ color: "rgba(11,61,46,0.65)" }}>
+              Try another name or postcode.
+            </p>
           </div>
         ) : (
           <>
-            {/* Cards grid */}
-            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {/* List */}
+            <div className="space-y-3">
               {visiblePlayers.map((player, index) => {
-const createdMs =
-  typeof player.createdAt?.toDate === "function"
-    ? player.createdAt.toDate().getTime()
-    : typeof player.createdAt === "number"
-    ? player.createdAt
-    : player.createdAt
-    ? new Date(player.createdAt).getTime()
-    : 0;
-
-
-const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
-const ageMs = Date.now() - createdMs;
-
-// guard against invalid / future dates
-const isNew = createdMs > 0 && ageMs >= 0 && ageMs < ONE_WEEK;
-
+                const avatarSrc = player.photoThumbURL || player.photoURL || "/images/avatar-fallback.svg";
 
                 return (
                   <motion.article
                     key={player.id}
-                    initial={{ opacity: 0, y: 16 }}
+                    initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.35, delay: index * 0.03 }}
-                    className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:shadow-md transition"
+                    transition={{ duration: 0.25, delay: Math.min(index * 0.02, 0.18) }}
+                    className="rounded-2xl border bg-white p-4 shadow-sm"
+                    style={{ borderColor: "rgba(11,61,46,0.10)" }}
                     aria-labelledby={`player-${player.id}-name`}
                   >
-                    <div className="flex gap-4">
-                      <div className="relative w-14 h-14 rounded-full overflow-hidden bg-gray-100 shrink-0">
-  {/* ✅ instant placeholder (so it doesn't feel "last") */}
-  <div className="absolute inset-0 animate-pulse bg-gray-200" />
-
-  <Image
-    src={player.photoThumbURL || player.photoURL || "/images/avatar-fallback.svg"}
-    alt=""
-    fill
-    sizes="56px"
-    className="object-cover"
-  />
+                    <div className="flex items-center gap-3">
+                 {/* Avatar */}
+<div className="relative h-12 w-12 shrink-0">
+  <div className="absolute inset-0 rounded-full bg-gray-200 animate-pulse" />
+  <div className="relative h-12 w-12 overflow-hidden rounded-full">
+    <Image
+      src={avatarSrc}
+      alt=""
+      fill
+      sizes="48px"
+      className="object-cover"
+    />
+  </div>
 </div>
 
+
+                      {/* Name + meta */}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 id={`player-${player.id}-name`} className="font-semibold truncate">
-                            {player.name}
-                          </h3>
-                          {isNew && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">
-                              New
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="mt-1 flex flex-wrap gap-2 text-xs">
-                          <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                            Postcode {player.postcode || "—"}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                            Skill {player.skillLevel || "—"}
-                          </span>
-                        </div>
-
-                        {player.bio && (
-                          <p className="mt-2 text-sm text-gray-600 line-clamp-2">{player.bio}</p>
-                        )}
-
-                        <div className="mt-3">
-                          <Link
-                            href={`/players/${player.id}`}
-                            className="inline-flex items-center justify-center rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
-                            aria-label={`View ${player.name?.split(" ")[0] || "player"}’s profile`}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <h3
+                            id={`player-${player.id}-name`}
+                            className="font-extrabold truncate"
+                            style={{ color: TM.forest }}
                           >
-                            View Profile
-                          </Link>
+                            {player.name || "Player"}
+                          </h3>
+                        </div>
+
+                        <div className="mt-1 flex items-center gap-2 text-xs">
+                          <span
+                            className="rounded-full px-2 py-0.5"
+                            style={{
+                              background: "rgba(11,61,46,0.08)",
+                              color: "rgba(11,61,46,0.85)",
+                            }}
+                          >
+                            {player.skillLevel ? player.skillLevel : "Skill —"}
+                          </span>
+
+                          <span style={{ color: "rgba(11,61,46,0.55)" }}>
+                            {player.postcode ? player.postcode : "—"}
+                          </span>
                         </div>
                       </div>
+
+                      {/* View Profile */}
+                   <button
+  type="button"
+  onClick={() => setProfileOpenId(player.id)}
+  className="shrink-0 rounded-full px-3 py-2 text-sm font-semibold"
+  style={{
+    border: `1px solid rgba(11,61,46,0.22)`,
+    color: TM.forest,
+    background: "#fff",
+  }}
+  aria-label={`View ${player.name?.split(" ")[0] || "player"} profile`}
+>
+  View Profile
+</button>
+
                     </div>
                   </motion.article>
                 );
               })}
             </div>
 
-            {/* Load more */}
-            <div className="flex justify-center">
+            {/* Footer count + Load more */}
+            <div className="pt-5 text-center">
+              <div className="text-xs mb-2" style={{ color: "rgba(11,61,46,0.55)" }}>
+                Showing {visiblePlayers.length}
+                {totalPlayers != null && !inSearch ? ` of ${totalPlayers}` : ""} players
+              </div>
+
               {canLoadMore ? (
                 <button
                   onClick={onLoadMore}
                   disabled={loadingMore}
-                  className="mt-6 px-4 py-2.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-1 rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                  style={{
+                    color: TM.forest,
+                    background: "transparent",
+                  }}
                 >
-                  {loadingMore ? "Loading…" : "Load more"}
+                  {loadingMore ? "Loading…" : "Load More"}
+                  <ChevronDown className="h-4 w-4" />
                 </button>
               ) : (
-                <div className="mt-6 text-xs text-gray-500">No more players</div>
+                <div className="text-xs" style={{ color: "rgba(11,61,46,0.45)" }}>
+                  No more players
+                </div>
               )}
+
+              
             </div>
           </>
         )}
       </div>
+
+           {/* 👇 Profile overlay modal — MUST live here */}
+      {profileOpenId && (
+        <div className="fixed inset-0 z-[9999]">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60"
+            onMouseDown={() => setProfileOpenId(null)}
+          />
+
+          {/* Panel */}
+          <div className="absolute inset-0 flex items-start justify-center px-3 pt-3 pb-4 sm:items-center sm:p-6">
+            <div
+              className="w-full max-w-[560px] rounded-2xl shadow-2xl overflow-hidden"
+              style={{ background: "#071B15" }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  height: "min(88dvh, 820px)",
+                  maxHeight: "min(88dvh, 820px)",
+                }}
+              >
+                <PlayerProfileView
+                  playerId={profileOpenId}
+                  onClose={() => setProfileOpenId(null)}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
