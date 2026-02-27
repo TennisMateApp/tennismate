@@ -764,8 +764,8 @@ heartbeatTimer = setInterval(async () => {
       // Only auto-create 1:1 conversations (IDs that look like "<uid>_<uid>")
       const parts = String(conversationID || "").split("_");
       const looksLikeOneToOne = parts.length === 2 && parts.every(Boolean);
-      const otherUserId = looksLikeOneToOne ? parts.find((id) => id !== u.uid) : null;
-      setOtherUserId(otherUserId);
+      const otherUserId = looksLikeOneToOne ? (parts.find((id) => id !== u.uid) ?? null) : null;
+setOtherUserId(otherUserId);
 
       if (!convoSnap.exists() && looksLikeOneToOne && otherUserId) {
         await setDoc(convoRef, {
