@@ -901,7 +901,7 @@ const filteredMatches = useMemo(() => {
     if (genderFilter !== "" && m.gender !== genderFilter) return false;
 
     // Age filter
-    if (ageBand !== "" && (m.age === undefined || !inAgeBand(m.age, ageBand))) return false;
+    if (ageBand !== "" && (m.age == null || !inAgeBand(m.age, ageBand))) return false;
 
     return true;
   });
