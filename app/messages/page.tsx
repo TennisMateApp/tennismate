@@ -385,7 +385,7 @@ return (
       <div className="grid gap-8 2xl:gap-10 xl:grid-cols-[300px_1fr]">
         {/* Sidebar (same as Home) */}
         <TMDesktopSidebar
-          active="Messages"
+          active="Chat"
           player={{
             name: user?.displayName || "Me",
             skillLevel: "",
