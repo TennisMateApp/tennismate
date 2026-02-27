@@ -373,8 +373,10 @@ const mapsEmbedUrl = court
 
 function SystemInviteCancelled({
   msg,
+  router,
 }: {
   msg: any;
+  router: ReturnType<typeof useRouter>;
 }) {
   // 1) figure out which invite doc to fetch
   const inviteId =
@@ -1555,7 +1557,7 @@ style={{
     router={router}
   />
 ) : msg.type === "system" && msg.systemType === "invite_cancelled" ? (
-  <SystemInviteCancelled msg={msg} router={router} />
+  <SystemInviteCancelled msg={msg} />
 ) : (
   msg.text
 )}
