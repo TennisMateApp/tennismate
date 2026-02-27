@@ -1557,7 +1557,7 @@ style={{
     router={router}
   />
 ) : msg.type === "system" && msg.systemType === "invite_cancelled" ? (
-  <SystemInviteCancelled msg={msg} />
+  <SystemInviteCancelled msg={msg} router={router} />
 ) : (
   msg.text
 )}
