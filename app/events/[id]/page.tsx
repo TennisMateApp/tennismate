@@ -745,7 +745,13 @@ async function handleConfirmBooking() {
 const start = event.start ? new Date(event.start) : null;
 const end = event.end ? new Date(event.end) : null;
 
-const status = event.status ?? "open";
+const status: "open" | "full" | "cancelled" | "completed" =
+  event.status === "open" ||
+  event.status === "full" ||
+  event.status === "cancelled" ||
+  event.status === "completed"
+    ? event.status
+    : "open";
 const spotsTotalNum =
   typeof event.spotsTotal === "number" && event.spotsTotal > 0 ? event.spotsTotal : null;
 const filled =
