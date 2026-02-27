@@ -306,8 +306,6 @@ if (isDesktop) {
 if (!e?.eventId) return;
 router.push(`/events/${e.eventId}`);
 }}
-            // ✅ remove this prop once we remove it from DesktopCalendarView
-            onAddEvent={() => router.push("/events")}
           />
         </div>
       </div>
