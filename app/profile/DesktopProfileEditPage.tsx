@@ -13,7 +13,7 @@ import {
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { auth, db, storage } from "@/lib/firebaseConfig";
 
-import DesktopSideBar from "@/components/desktop_layout/TMDesktopSideBar";
+import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import type { SkillBand } from "@/lib/skills";
 import { SKILL_OPTIONS, skillFromUTR, clampUTR } from "@/lib/skills";
 
@@ -397,7 +397,7 @@ export default function DesktopProfileEditPage() {
         <div className="grid grid-cols-[280px_minmax(0,1fr)_360px] gap-6 items-start">
          {/* LEFT */}
 <aside className="sticky top-6 self-start">
-  <DesktopSideBar />
+  <TMDesktopSidebar ... />
 
   {/* Danger Zone (Delete Account) */}
   <div className="mt-4 rounded-2xl border p-4"
