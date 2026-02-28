@@ -312,9 +312,6 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
   );
   if (!ok1) return;
 
-  const typed = window.prompt('Type DELETE to confirm account deletion.');
-  if (typed !== "DELETE") return;
-
   const uid = auth.currentUser?.uid;
   if (!uid) {
     setDeleteError("You must be signed in to delete your account.");

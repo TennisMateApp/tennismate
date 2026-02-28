@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import debounce from "lodash.debounce";
 import { ArrowLeft, CalendarPlus, Info, Send } from "lucide-react";
 import { suggestCourt } from "@/lib/suggestCourt";
+import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 
 import { db, auth } from "@/lib/firebaseConfig";
 import {
@@ -125,7 +126,7 @@ function InviteCard({
   onConfirmBooked,
   currentUid,
   nameByUid,
-  router, // ✅ ADD THIS
+  onOpenInvite,
 }: {
   msg: any;
   isOther: boolean;
@@ -134,8 +135,9 @@ function InviteCard({
   onConfirmBooked: () => void;
   currentUid: string | null;
   nameByUid: Record<string, string>;
-  router: any; // ✅ ADD THIS
+  onOpenInvite: (inviteId: string) => void;
 }) {
+
   const inv = msg?.invite || {};
   const when = inv?.startISO ? formatInviteWhen(inv.startISO) : "";
   const duration = inv?.durationMins ? `${inv.durationMins} min` : "";
@@ -307,9 +309,10 @@ const mapsEmbedUrl = court
       </div>
 
       {/* ✅ View Details Button */}
-{msg?.inviteId && (
+{(msg?.inviteId || msg?.id) && (
   <button
-    onClick={() => router.push(`/invites/${msg.inviteId}`)}
+    type="button"
+    onClick={() => onOpenInvite(String(msg?.inviteId || msg?.id))}
     className="mt-3 w-full rounded-xl py-2 text-[12px] font-extrabold"
     style={{
       background: TM.neon,
@@ -479,6 +482,19 @@ function ChatPage() {
 
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
 const [isOtherOnline, setIsOtherOnline] = useState(false);
+
+const [inviteOverlayId, setInviteOverlayId] = useState<string | null>(null);
+
+useEffect(() => {
+  if (!inviteOverlayId) return;
+
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") setInviteOverlayId(null);
+  };
+
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+}, [inviteOverlayId]);
 
   // ===== INVITE MODAL STATE =====
   const [showInvite, setShowInvite] = useState(false);
@@ -982,8 +998,6 @@ const unsub = onSnapshot(q, async (snap) => {
 
 return () => unsub();
 
-
-    return () => unsub();
   }, [conversationID, user, isEventChat]);
 
   // ===== SEND =====
@@ -1546,16 +1560,16 @@ style={{
 
               >
 {msg.type === "invite" ? (
-  <InviteCard
-    msg={msg}
-    isOther={isOther}
-    isMe={msg.senderId === user?.uid}
-    onRespond={(status) => respondToInvite(msg.id, status)}
-    onConfirmBooked={() => confirmInviteBooking(msg.id)}
-    currentUid={user?.uid || null}
-    nameByUid={nameByUid}
-    router={router}
-  />
+ <InviteCard
+  msg={msg}
+  isOther={isOther}
+  isMe={msg.senderId === user?.uid}
+  onRespond={(status) => respondToInvite(msg.id, status)}
+  onConfirmBooked={() => confirmInviteBooking(msg.id)}
+  currentUid={user?.uid || null}
+  nameByUid={nameByUid}
+  onOpenInvite={(id) => setInviteOverlayId(id)}
+/>
 ) : msg.type === "system" && msg.systemType === "invite_cancelled" ? (
   <SystemInviteCancelled msg={msg} router={router} />
 ) : (
@@ -1677,6 +1691,8 @@ style={{
     maxHeight: "calc(100svh - 120px)",
   }}
 >
+  
+ 
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b">
         <button
@@ -1968,6 +1984,36 @@ style={{
     </div>
   </div>
 )}
+
+  {inviteOverlayId && (
+      <div className="fixed inset-0 z-[999]">
+        <div
+          className="absolute inset-0 bg-black/40"
+          onMouseDown={() => setInviteOverlayId(null)}
+        />
+
+        <div className="absolute inset-0 flex items-center justify-center p-4">
+          <div
+            className="w-[900px] max-w-[95vw] h-[85vh] rounded-2xl overflow-hidden shadow-2xl bg-white border border-slate-200"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+              <div className="text-sm font-bold text-slate-900">Match Invite</div>
+
+              <button
+                type="button"
+                onClick={() => setInviteOverlayId(null)}
+                className="rounded-lg px-3 py-1.5 text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+
+            <InviteOverlayCard inviteId={inviteOverlayId} />
+          </div>
+        </div>
+      </div>
+    )}
 
     </div>
 

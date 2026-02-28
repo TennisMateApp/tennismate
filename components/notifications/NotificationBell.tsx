@@ -223,6 +223,32 @@ export default function NotificationBell() {
   const unreadCount = items.length;
 
   function resolveNotificationRoute(n: Notification): string {
+  const t = (n.type || "").toLowerCase();
+  const title = (n.title || "").toLowerCase();
+  const body = (n.body || n.message || "").toLowerCase();
+
+  // ✅ HARD OVERRIDE (ALWAYS first):
+  // Any match invite should go to /messages no matter what route/url says.
+  const looksLikeInvite =
+    t === "match_invite" ||
+    (typeof n.inviteId === "string" && n.inviteId.length > 0) ||
+    title.includes("match invite") ||
+    body.includes("invited you");
+
+    if (looksLikeInvite) {
+  console.log("[Bell] resolve → /messages (invite override)", {
+    t,
+    inviteId: n.inviteId,
+    title: n.title,
+    body: n.body,
+    route: n.route,
+    url: n.url,
+  });
+  return "/messages";
+}
+
+  if (looksLikeInvite) return "/messages";
+
   // ✅ 1) Prefer explicit route if present
   if (typeof n.route === "string" && n.route.startsWith("/")) return n.route;
 
@@ -235,36 +261,32 @@ export default function NotificationBell() {
     }
   }
 
-  // ✅ 3) Type-based rules (your desired behaviour)
-  const t = (n.type || "").toLowerCase();
-
-  // Match invite → invite details page
-  if (t === "match_invite") {
-    if (n.inviteId) return `/invites/${n.inviteId}`;
-    // If your invite notifications are keyed like invite_<inviteId>_uid, this at least avoids /matches
-    return "/invites";
-  }
-
-  // Match request received → matches page
+  // ✅ 3) Type-based rules
   if (t === "match_request") return "/matches";
 
-  // Match request accepted → matches accepted section
-  if (t === "match_accepted") return "/matches?tab=accepted";
+  const looksAccepted =
+    t === "match_accepted" ||
+    title.includes("accepted") ||
+    body.includes("accepted");
 
-  // Event notifications → events (or specific event)
+  if (looksAccepted) {
+    const mid = typeof n.matchId === "string" && n.matchId ? n.matchId : null;
+    return mid
+      ? `/matches?matchId=${encodeURIComponent(mid)}&tab=accepted`
+      : "/matches?tab=accepted";
+  }
+
   if (t.includes("event")) {
-    if (n.eventId) return `/events/${n.eventId}`;
+    if (n.eventId) return `/events/${encodeURIComponent(n.eventId)}`;
     return "/events";
   }
 
-  // Messages (you said these are fine, but we’ll keep it correct)
-  if (t === "message" && n.conversationId) return `/messages/${n.conversationId}`;
+  if (t === "message" && n.conversationId) {
+    return `/messages/${encodeURIComponent(n.conversationId)}`;
+  }
 
-  // ✅ 4) Old fallback behaviour
-  // If matchId exists but type isn't invite, keep your old deep link
-  if (n.matchId) return `/matches?matchId=${n.matchId}`;
+  if (n.matchId) return `/matches?matchId=${encodeURIComponent(n.matchId)}`;
 
-  // Final fallback
   return "/matches";
 }
 
@@ -277,7 +299,38 @@ const handleItemClick = async (n: Notification) => {
     console.warn("Failed to mark read:", e);
   }
 
+  
+
   const target = resolveNotificationRoute(n);
+
+    // 3) DEBUG: prove what we are doing
+  console.log("[Bell] navigate", {
+    id: n.id,
+    type: n.type,
+    inviteId: n.inviteId,
+    conversationId: n.conversationId,
+    route: n.route,
+    url: n.url,
+    target,
+  });
+
+    // 4) Navigate
+  // If it's an invite, do replace to reduce “bounce back” behaviour
+  const t = (n.type || "").toLowerCase();
+  const title = (n.title || "").toLowerCase();
+  const body = (n.body || n.message || "").toLowerCase();
+
+  const looksLikeInvite =
+    t === "match_invite" ||
+    (typeof n.inviteId === "string" && n.inviteId.length > 0) ||
+    title.includes("match invite") ||
+    body.includes("invited you");
+
+  if (looksLikeInvite) {
+    router.replace("/messages");
+    return;
+  }
+  
   return router.push(target);
 };
 

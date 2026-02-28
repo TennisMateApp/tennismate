@@ -81,33 +81,6 @@ export default function DesktopMatchPage(props: {
     setProfileOpenId,
   } = props;
 
-  // ---------------- DEBUG STATE ----------------
-  const [debugClicks, setDebugClicks] = useState(0);
-  const [lastInviteMeta, setLastInviteMeta] = useState<any>(null);
-  const mountedAtRef = useRef<string>(new Date().toISOString());
-
-  // Render/mount proof
-  useEffect(() => {
-    console.log("[DESKTOP] DesktopMatchPage mounted", {
-      mountedAt: mountedAtRef.current,
-      loading,
-      myProfileHidden,
-      visibleMatches: visibleMatches?.length,
-      sortedMatches: sortedMatches?.length,
-    });
-  }, []); // mount only
-
-  // Prop change proof
-  useEffect(() => {
-    console.log("[DESKTOP] props changed", {
-      loading,
-      myProfileHidden,
-      visibleCount,
-      sortedLen: sortedMatches?.length,
-      visibleLen: visibleMatches?.length,
-      sampleIds: (visibleMatches || []).slice(0, 2).map((p) => p?.id),
-    });
-  }, [loading, myProfileHidden, visibleCount, sortedMatches?.length, visibleMatches?.length]);
 
 // ✅ Small helper: derive Auth UID (preferred) with safe fallbacks
 const deriveRecipientId = (p: any): string | null => {
@@ -121,68 +94,17 @@ const deriveRecipientId = (p: any): string | null => {
   const recipient =
     typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
 
-  // Optional: warn if both exist but differ
-  const idGuess = typeof p?.id === "string" ? p.id : null;
-  const uidGuess = typeof p?.uid === "string" ? p.uid : null;
-  if (recipient && idGuess && uidGuess && idGuess !== uidGuess) {
-    console.warn("[DESKTOP] player id != uid", {
-      name: p?.name,
-      id: idGuess,
-      uid: uidGuess,
-      using: recipient,
-    });
-  }
-
   return recipient;
 };
 
-  // Debug invite wrapper (PROVES click + PROVES what we pass to parent)
-  const debugInvite = useCallback(
-    (p: any) => {
-      // 1) Impossible-to-miss confirmation
-      alert("DESKTOP Invite clicked");
-
-      setDebugClicks((c) => c + 1);
-
-      try {
-        const recipient = deriveRecipientId(p);
-        console.log("[DESKTOP invite] FINAL toUid (what parent will use):", recipient);
-
-        console.log("[DESKTOP invite] clicked @", new Date().toISOString());
-        console.log("[DESKTOP invite] raw player object:", p);
-        console.log("[DESKTOP invite] candidate ids:", {
-          p_id: p?.id,
-          p_uid: p?.uid,
-          p_userId: p?.userId,
-          p_playerId: p?.playerId,
-          p_docId: p?.docId,
-          p_email: p?.email,
-          p_name: p?.name,
-        });
-        console.log("[DESKTOP invite] derived recipient:", recipient);
-
-        setLastInviteMeta({
-          at: new Date().toLocaleTimeString(),
-          name: p?.name ?? "",
-          derivedRecipient: recipient,
-          rawId: p?.id ?? null,
-        });
-
-        if (!recipient) {
-          console.error("[DESKTOP invite] NO recipient id found on player object", p);
-          alert("Could not send invite (missing recipient id). Please refresh.");
-          return;
-        }
-
-        // 2) Force parent handler to always receive match.id as the true recipient uid/docId
-        onInvite(recipient);
-      } catch (e) {
-        console.error("[DESKTOP invite] logger failed:", e);
-        alert("Desktop invite debug failed. Check console.");
-      }
-    },
-    [onInvite]
-  );
+const handleInvite = useCallback(
+  (p: any) => {
+    const recipient = deriveRecipientId(p);
+    if (!recipient) return; // optionally show a user-friendly toast later
+    onInvite(recipient);
+  },
+  [onInvite]
+);
 
   // ---------------- Existing display helpers ----------------
   const formatDistance = (p: any) => {
@@ -256,43 +178,10 @@ const deriveRecipientId = (p: any): string | null => {
     );
   }
 
-  const debugSummary = useMemo(() => {
-    return {
-      mountedAt: mountedAtRef.current,
-      debugClicks,
-      visibleLen: visibleMatches?.length ?? 0,
-      sortedLen: sortedMatches?.length ?? 0,
-      firstVisibleIds: (visibleMatches || []).slice(0, 3).map((p) => p?.id),
-    };
-  }, [debugClicks, visibleMatches, sortedMatches]);
-
   return (
     <div className="min-h-screen bg-[#f6f7f8]">
       <div className="w-full max-w-[1800px] mx-auto px-6 2xl:px-10 py-6">
-        {/* 🔥 DEBUG BADGE (cannot miss) */}
-        <div
-          className="mb-4 rounded-xl px-4 py-3 text-xs font-semibold"
-          style={{
-            background: "rgba(255, 255, 0, 0.20)",
-            border: "1px solid rgba(0,0,0,0.15)",
-          }}
-        >
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>✅ DesktopMatchPage loaded</span>
-            <span>mounted: {debugSummary.mountedAt}</span>
-            <span>clicks: {debugSummary.debugClicks}</span>
-            <span>visible: {debugSummary.visibleLen}</span>
-            <span>sorted: {debugSummary.sortedLen}</span>
-          </div>
-          <div className="mt-1 text-[11px] opacity-80">
-            first visible ids: {debugSummary.firstVisibleIds.join(", ") || "(none)"}
-          </div>
-          {lastInviteMeta && (
-            <div className="mt-2 text-[11px] opacity-90">
-              last invite: {lastInviteMeta.at} · {lastInviteMeta.name} · recipient={String(lastInviteMeta.derivedRecipient)}
-            </div>
-          )}
-        </div>
+
 
         {/* TWO-COLUMN LAYOUT */}
         <div className="grid grid-cols-[minmax(0,1fr)_340px] gap-8 items-start">
@@ -426,7 +315,7 @@ const deriveRecipientId = (p: any): string | null => {
                         <div className="mt-3 flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => debugInvite(p)}
+                            onClick={() => handleInvite(p)}
                             className="flex-1 rounded-xl py-2 text-sm font-extrabold"
                             style={{
                               background: TM.neon,
@@ -450,10 +339,6 @@ const deriveRecipientId = (p: any): string | null => {
                           </button>
                         </div>
 
-                        {/* small debug text per-card (optional but useful) */}
-                        <div className="mt-2 text-[10px] text-gray-400 break-all">
-  debug: id={String(p?.id ?? "")} · uid={String(p?.uid ?? "")} · userId={String(p?.userId ?? "")}
-</div>
                       </div>
                     ))}
                   </div>
@@ -537,19 +422,6 @@ const deriveRecipientId = (p: any): string | null => {
                 Hide contacted
               </label>
 
-              {/* Optional: a button to prove right sidebar interacts */}
-              <button
-                type="button"
-                onClick={() => {
-                  console.log("[DESKTOP] setFiltersOpen(true) test");
-                  setFiltersOpen(true);
-                  alert("DESKTOP filtersOpen test fired");
-                }}
-                className="w-full rounded-xl px-3 py-2 text-xs font-bold"
-                style={{ background: "rgba(11,61,46,0.08)", color: TM.forest }}
-              >
-                DEBUG: test click (sidebar)
-              </button>
             </div>
           </aside>
         </div>

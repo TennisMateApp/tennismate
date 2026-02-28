@@ -44,6 +44,11 @@ type DesktopNotification = {
   matchId?: string | null;
   conversationId?: string | null;
   eventId?: string | null;
+
+    inviteId?: string | null;
+  route?: string | null;
+  url?: string | null;
+
   read?: boolean;
   timestamp?: any; // Firestore Timestamp
 };
@@ -192,6 +197,11 @@ const unsub = onSnapshot(
         matchId: (data.matchId ?? null) as any,
         conversationId: (data.conversationId ?? null) as any,
         eventId: (data.eventId ?? null) as any,
+
+        inviteId: (data.inviteId ?? null) as any,
+  route: (data.route ?? null) as any,
+  url: (data.url ?? null) as any,
+        
         read: !!data.read,
         timestamp: data.timestamp ?? null,
       };
@@ -308,7 +318,8 @@ const handleLogout = async () => {
   }
 };
 
-const activeLabel = derivedActive ?? active;
+const isMatchesRoute = pathname.startsWith("/matches") || pathname.startsWith("/match");
+const activeLabel = derivedActive ?? (isMatchesRoute ? undefined : active);
   return (
     <aside className="w-[300px] shrink-0">
       <div className="sticky top-6 rounded-3xl border border-black/10 bg-white p-4 flex flex-col h-[calc(100vh-48px)]">
@@ -374,16 +385,64 @@ const activeLabel = derivedActive ?? active;
                       <button
                         key={n.id}
                         type="button"
-                        onClick={async () => {
-                          await markNotifRead(n.id);
-                          setNotifOpen(false);
+                       onClick={async () => {
+  await markNotifRead(n.id);
+  setNotifOpen(false);
 
-                          if (n.matchId) return window.location.href = `/matches?matchId=${n.matchId}`;
-if (n.type === "message" && n.conversationId) return window.location.href = `/messages/${n.conversationId}`;
-if (n.eventId) return window.location.href = `/events/${n.eventId}`;
-if (n.link) return window.location.href = n.link;
-window.location.href = "/matches";
-                        }}
+  const t = (n.type || "").toLowerCase();
+  const title = (n.title || "").toLowerCase();
+  const body = ((n.body || n.message || "") as string).toLowerCase();
+
+  // ✅ 1) MATCH INVITE: always go to Messages home
+  const looksLikeInvite =
+    t === "match_invite" ||
+    !!n.inviteId ||
+    title.includes("match invite") ||
+    body.includes("invited you");
+
+  if (looksLikeInvite) {
+    router.push("/messages");
+    return;
+  }
+
+  // ✅ 2) Direct message thread
+  if (t === "message" && n.conversationId) {
+    window.location.href = `/messages/${n.conversationId}`;
+    return;
+  }
+
+  // ✅ 3) Events
+  if (n.eventId) {
+    window.location.href = `/events/${n.eventId}`;
+    return;
+  }
+
+  // ✅ 4) Explicit route/url (if present)
+  if (n.route && n.route.startsWith("/")) {
+    window.location.href = n.route;
+    return;
+  }
+  if (n.url) {
+    try {
+      window.location.href = new URL(n.url).pathname || "/messages";
+      return;
+    } catch {}
+  }
+
+  // ✅ 5) Match fallback (only AFTER invite handling)
+  if (n.matchId) {
+    window.location.href = `/matches?matchId=${n.matchId}`;
+    return;
+  }
+
+  // ✅ Final fallback
+  if (n.link) {
+    window.location.href = n.link;
+    return;
+  }
+
+  window.location.href = "/matches";
+}}
                         className={[
                           "w-full text-left px-3 py-3 border-b border-black/5 hover:bg-black/[0.03]",
                           n.read ? "opacity-80" : "opacity-100",

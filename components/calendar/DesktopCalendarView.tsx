@@ -1,8 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
+import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 
 type MiniProfile = { name?: string; photoURL?: string };
 
@@ -45,6 +46,19 @@ export default function DesktopCalendarView(props: {
     onSelectISO,
     onOpenEvent,
   } = props;
+
+  const [inviteOverlayId, setInviteOverlayId] = useState<string | null>(null);
+
+useEffect(() => {
+  if (!inviteOverlayId) return;
+
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") setInviteOverlayId(null);
+  };
+
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+}, [inviteOverlayId]);
 
   return (
     <div className="w-full">
@@ -193,13 +207,40 @@ export default function DesktopCalendarView(props: {
 
                 const avatarIds: string[] = (e.participants ?? []).filter(Boolean).slice(0, 2);
 
+const inviteId = e?.inviteId || e?.matchInviteId || null;
+
+const isMatchInvite =
+  (String(e?.type || "").toLowerCase().includes("invite")) ||
+  (String(e?.source || "").toLowerCase().includes("invite")) ||
+  (String(e?.title || "").toLowerCase().includes("invite")) ||
+  (String(e?.title || "").toLowerCase().includes("match invite")) ||
+  !!e?.inviteId ||
+  !!e?.matchInviteId;
+
+
+// ✅ Build a Google Maps embed query from location text
+const locText = String(e?.courtName || e?.location || "").trim();
+const mapsQ = encodeURIComponent(locText);
+const mapsEmbedSrc = locText
+  ? `https://www.google.com/maps?q=${mapsQ}&output=embed`
+  : "";
+
                 return (
-                  <button
-                    key={e.id}
-                    type="button"
-                    onClick={() => onOpenEvent(e?.eventId)}
-                    className="w-full text-left rounded-2xl border border-slate-200 bg-white p-4 hover:bg-slate-50 transition"
-                  >
+   <button
+  key={e.id}
+  type="button"
+  onClick={() => {
+    // ✅ If this is a match invite: open overlay instead of navigating
+    if (isMatchInvite && inviteId) {
+      setInviteOverlayId(inviteId);
+      return;
+    }
+
+    // ✅ Otherwise open normal event
+    onOpenEvent(e?.eventId);
+  }}
+  className="w-full text-left rounded-2xl border border-slate-200 bg-white p-4 hover:bg-slate-50 transition"
+>
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-lg font-bold text-slate-900 leading-none">
@@ -242,6 +283,20 @@ export default function DesktopCalendarView(props: {
                         {e.courtName || e.location || "Court TBA"}
                       </span>
                     </div>
+                    {/* ✅ Match invite: show embedded map preview */}
+{isMatchInvite && mapsEmbedSrc && (
+  <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+    <div className="relative w-full h-[160px]">
+      <iframe
+        title="Map preview"
+        src={mapsEmbedSrc}
+        className="absolute inset-0 w-full h-full"
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+      />
+    </div>
+  </div>
+)}
                   </button>
                 );
               })}
@@ -249,6 +304,38 @@ export default function DesktopCalendarView(props: {
           )}
         </div>
       </div>
+      {/* ✅ Invite overlay */}
+{inviteOverlayId && (
+  <div className="fixed inset-0 z-[9999]">
+    {/* Backdrop */}
+    <div
+      className="absolute inset-0 bg-black/40"
+      onMouseDown={() => setInviteOverlayId(null)}
+    />
+
+    {/* Modal */}
+    <div className="absolute inset-0 flex items-center justify-center p-4">
+      <div
+        className="w-[900px] max-w-[95vw] h-[85vh] rounded-2xl overflow-hidden shadow-2xl bg-white border border-slate-200"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+ <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+  <div className="text-sm font-bold text-slate-900">Match Invite</div>
+
+  <button
+    type="button"
+    onClick={() => setInviteOverlayId(null)}
+    className="rounded-lg px-3 py-1.5 text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-100"
+  >
+    Close
+  </button>
+</div>
+
+   <InviteOverlayCard inviteId={inviteOverlayId} />
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }

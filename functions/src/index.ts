@@ -1594,7 +1594,7 @@ if (!emailAllowed) {
       const html = `
         <p>${fromName} sent you a message:</p>
         <blockquote>${snippet}</blockquote>
-        <p><a href="https://tennismate.vercel.app/messages/${conversationId}">Open your conversation</a></p>
+        <p><a href="https://tennismate.vercel.app/messages">Open your conversation</a></p>
         <p style="font-size:12px;color:#777">This is an automated TennisMate message alert.</p>
       `;
 
@@ -1725,7 +1725,7 @@ if (recipientId === senderId) return;
 
                 title: "New group message",
                 body: text.length > 100 ? text.slice(0, 100) + "…" : text,
-                url: `https://tennismate.vercel.app/messages/${conversationId}`,
+                url: `https://tennismate.vercel.app/messages`,
 
                 fromUserId: senderId,
                 timestamp: admin.firestore.FieldValue.serverTimestamp(),
@@ -1792,7 +1792,7 @@ const nativeSent = await sendAndroidPushToUser(recipientId, {
 
           title: "New message",
           body: text.length > 100 ? text.slice(0, 100) + "…" : text,
-          url: `https://tennismate.vercel.app/messages/${conversationId}`,
+          url: `https://tennismate.vercel.app/messages`,
 
           fromUserId: senderId,
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
@@ -1865,9 +1865,9 @@ export const notifyOnMatchInviteCreated = onDocumentCreated(
     const title = "🎾 New Match Invite";
     const body = `${fromName} invited you • ${courtName} • ${when}`;
 
-    // Deep link destination (recommend invite details page)
-   const route = `/invites/${inviteId}`; // ✅ always invite details
-const url = `https://tennismate.vercel.app${route}`;
+// ✅ Destination: always go to Messages home
+const route = "/messages";
+const url = "https://tennismate.vercel.app/messages";
 
     // 1) Send native push (android/ios via your helper)
     const nativeSent = await sendAndroidPushToUser(toUserId, {
@@ -1903,7 +1903,7 @@ const url = `https://tennismate.vercel.app${route}`;
         recipientId: toUserId,
         type: "match_invite",
         inviteId,
-        conversationId: conversationId || "",
+        ...(conversationId ? { conversationId } : {}),
         fromUserId,
 
         title: "New match invite",

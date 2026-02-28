@@ -257,46 +257,41 @@ export default function DesktopProfileEditPage() {
     return { lat: data.lat, lng: data.lng };
   };
 
-    const handleDeleteAccount = async () => {
-    setDeleteError(null);
+   const handleDeleteAccount = async () => {
+  setDeleteError(null);
 
-    const ok = window.confirm(
-      "Are you sure you want to permanently delete your TennisMate account? This cannot be undone."
-    );
-    if (!ok) return;
+  const ok = window.confirm(
+    "Are you sure you want to permanently delete your TennisMate account? This cannot be undone."
+  );
+  if (!ok) return;
 
-    const typed = window.prompt('Type DELETE to confirm account deletion.');
-    if (typed !== "DELETE") return;
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    setDeleteError("You must be signed in to delete your account.");
+    return;
+  }
 
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
-      setDeleteError("You must be signed in to delete your account.");
-      return;
-    }
+  try {
+    setDeletingAccount(true);
 
-    try {
-      setDeletingAccount(true);
+    // Best-effort storage cleanup (same pattern as ProfileContent)
+    await deleteObject(ref(storage, `profile_pictures/${uid}/profile.jpg`)).catch(() => {});
 
-      // Best-effort storage cleanup (same pattern as ProfileContent)
-      await deleteObject(ref(storage, `profile_pictures/${uid}/profile.jpg`)).catch(() => {});
+    // ✅ Use existing callable
+    const fn = httpsCallable(getFunctionsClient(), "deleteMyAccount");
+    await fn();
 
-      // ✅ Use existing callable
-      const fn = httpsCallable(getFunctionsClient(), "deleteMyAccount");
-      await fn();
+    await auth.signOut();
+    router.replace("/");
+  } catch (err: any) {
+    console.error("[DesktopProfileEditPage] delete FAILED", err);
 
-      await auth.signOut();
-      router.replace("/");
-    } catch (err: any) {
-      console.error("[DesktopProfileEditPage] delete FAILED", err);
-
-      const details = err?.details;
-      setDeleteError(
-        `❌ Delete failed${details?.runId ? ` (ref ${details.runId})` : ""}`
-      );
-    } finally {
-      setDeletingAccount(false);
-    }
-  };
+    const details = err?.details;
+    setDeleteError(`❌ Delete failed${details?.runId ? ` (ref ${details.runId})` : ""}`);
+  } finally {
+    setDeletingAccount(false);
+  }
+};
 
 
   const saveProfile = async () => {
