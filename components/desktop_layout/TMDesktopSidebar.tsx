@@ -62,6 +62,94 @@ const TM = {
   ink: "#0F172A",
 };
 
+function resolveNotifHref(n: DesktopNotification): string {
+  const t = (n.type || "").toLowerCase();
+  const title = (n.title || "").toLowerCase();
+  const body = ((n.body || n.message || "") as string).toLowerCase();
+
+  // ✅ broaden invite detection (so it works even if type/title differs)
+  const looksLikeInvite =
+    t.includes("invite") ||
+    !!n.inviteId ||
+    title.includes("invite") ||
+    title.includes("match invite") ||
+    body.includes("invite") ||
+    body.includes("invited you");
+
+  if (looksLikeInvite) {
+    // Keep your current behavior: go to Messages home
+    // (Later you can deep-link to an invite screen if you add one)
+    return "/messages";
+  }
+
+  // ✅ Direct message thread
+  if (t === "message" && n.conversationId) return `/messages/${n.conversationId}`;
+
+  // ✅ Events
+  if (n.eventId) return `/events/${n.eventId}`;
+
+  // ✅ Explicit route
+  if (n.route && n.route.startsWith("/")) return n.route;
+
+  // ✅ URL field
+  if (n.url) {
+    try {
+      const u = new URL(n.url);
+      return u.pathname || "/home";
+    } catch {
+      if (n.url.startsWith("/")) return n.url;
+    }
+  }
+
+  // ✅ link field
+  if (n.link) {
+    if (n.link.startsWith("/")) return n.link;
+    try {
+      const u = new URL(n.link);
+      return u.pathname || "/home";
+    } catch {}
+  }
+
+  // ✅ Match
+  if (n.matchId) return `/matches?matchId=${n.matchId}`;
+
+  // ✅ safer final fallback than /matches
+  return "/home";
+}
+
+function formatNotifTime(ts: any): string {
+  if (!ts?.toDate) return "";
+
+  const d = ts.toDate();
+  const now = new Date();
+
+  const isToday =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
+
+  const isYesterday =
+    d.getDate() === yesterday.getDate() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getFullYear() === yesterday.getFullYear();
+
+  const time = d.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  if (isToday) return `Today · ${time}`;
+  if (isYesterday) return `Yesterday · ${time}`;
+
+  return d.toLocaleDateString([], {
+    day: "numeric",
+    month: "short",
+  }) + ` · ${time}`;
+}
+
 export default function TMDesktopSidebar({
   active,
   player,
@@ -81,7 +169,14 @@ export default function TMDesktopSidebar({
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
   const notifWrapRef = useRef<HTMLDivElement | null>(null);
 
-  const unreadCount = notifs.length;
+  const bellBtnRef = useRef<HTMLButtonElement | null>(null);
+const [notifPos, setNotifPos] = useState<{ top: number; right: number; width: number }>({
+  top: 0,
+  right: 0,
+  width: 360,
+});
+
+  const unreadCount = notifs.filter((n) => !n.read).length;
 
   const markNotifRead = async (id: string) => {
     try {
@@ -175,12 +270,11 @@ useEffect(() => {
   return;
 }
   const qy = query(
-    collection(db, "notifications"),
-    where("recipientId", "==", uid),       // ✅ matches mobile
-    where("read", "==", false),            // ✅ unread only (mobile)
-    orderBy("timestamp", "desc"),          // ✅ matches mobile
-    limit(50)
-  );
+  collection(db, "notifications"),
+  where("recipientId", "==", uid),
+  orderBy("timestamp", "desc"),
+  limit(50)
+);
 
 const unsub = onSnapshot(
   qy,
@@ -208,11 +302,13 @@ const unsub = onSnapshot(
     });
 
     // ✅ Count unread message notifications (for Chat pill)
-    const unreadMessages = rows.filter((n) => n.type === "message").length;
-    setUnreadMsgCount(unreadMessages);
+   const unreadMessages = rows.filter(
+  (n) => (n.type || "").toLowerCase() === "message" && !n.read
+).length;
+setUnreadMsgCount(unreadMessages);
 
     // ✅ Remove message notifications from bell dropdown
-    const filtered = rows.filter((n) => n.type !== "message");
+    const filtered = rows.filter((n) => (n.type || "").toLowerCase() !== "message");
 
     filtered.sort(
       (a, b) =>
@@ -320,11 +416,53 @@ const handleLogout = async () => {
 
 const isMatchesRoute = pathname.startsWith("/matches") || pathname.startsWith("/match");
 const activeLabel = derivedActive ?? (isMatchesRoute ? undefined : active);
+
+function computeNotifPos() {
+  const btn = bellBtnRef.current;
+  if (!btn) return;
+
+  const r = btn.getBoundingClientRect();
+
+  const desired = 360;
+  const vw = window.innerWidth;
+
+  // Width never exceeds viewport minus padding
+  const width = Math.min(desired, vw - 24);
+
+  // Ideal: align dropdown right edge with the bell button right edge
+  let right = vw - r.right;
+
+  // Clamp right so dropdown stays inside viewport
+  // right must be between 12 and (vw - width - 12)
+  right = Math.min(Math.max(right, 12), vw - width - 12);
+
+  const top = r.bottom + 8;
+
+  setNotifPos({ top, right, width });
+}
+
+useEffect(() => {
+  if (!notifOpen) return;
+
+  computeNotifPos();
+
+  const onResize = () => computeNotifPos();
+  const onScroll = () => computeNotifPos();
+
+  window.addEventListener("resize", onResize);
+  window.addEventListener("scroll", onScroll, true);
+
+  return () => {
+    window.removeEventListener("resize", onResize);
+    window.removeEventListener("scroll", onScroll, true);
+  };
+}, [notifOpen]);
+
   return (
     <aside className="w-[300px] shrink-0">
       <div className="sticky top-6 rounded-3xl border border-black/10 bg-white p-4 flex flex-col h-[calc(100vh-48px)]">
          {/* Header / logo + notifications */}
-        <div className="flex items-center justify-between gap-3" ref={notifWrapRef}>
+        <div className="flex items-center justify-between gap-3">
           {/* Left: Logo + title */}
           <div className="flex items-center gap-3">
             <div
@@ -341,13 +479,21 @@ const activeLabel = derivedActive ?? (isMatchesRoute ? undefined : active);
           </div>
 
           {/* Right: Bell */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setNotifOpen((v) => !v)}
-              className="relative inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-black/10 bg-white hover:bg-black/[0.03]"
-              aria-label="Notifications"
-            >
+          <div className="relative" ref={notifWrapRef}>
+           <button
+  ref={bellBtnRef}
+  type="button"
+  onClick={() => {
+    setNotifOpen((v) => {
+      const next = !v;
+      // compute position right as we open
+      if (next) setTimeout(() => computeNotifPos(), 0);
+      return next;
+    });
+  }}
+  className="relative inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-black/10 bg-white hover:bg-black/[0.03]"
+  aria-label="Notifications"
+>
               <Bell size={18} className="text-black/70" />
 
               {unreadCount > 0 && (
@@ -362,7 +508,16 @@ const activeLabel = derivedActive ?? (isMatchesRoute ? undefined : active);
 
             {/* Dropdown */}
             {notifOpen && (
-              <div className="absolute right-0 mt-2 w-[320px] rounded-2xl border border-black/10 bg-white shadow-lg overflow-hidden z-50">
+  <div
+    className="fixed rounded-2xl border border-black/10 bg-white shadow-lg overflow-hidden z-[9999]"
+    style={{
+  top: notifPos.top,
+  right: notifPos.right,
+  width: notifPos.width,
+  maxWidth: "calc(100vw - 24px)",
+  maxHeight: "calc(100vh - 24px)",
+}}
+  >
                 <div className="flex items-center justify-between px-3 py-2 border-b border-black/10">
                   <div className="text-sm font-extrabold text-black/80">Notifications</div>
 
@@ -380,97 +535,56 @@ const activeLabel = derivedActive ?? (isMatchesRoute ? undefined : active);
                     No notifications yet.
                   </div>
                 ) : (
-                  <div className="max-h-[340px] overflow-auto">
-                    {notifs.map((n) => (
-                      <button
-                        key={n.id}
-                        type="button"
-                       onClick={async () => {
-  await markNotifRead(n.id);
-  setNotifOpen(false);
+                <div className="max-h-[420px] overflow-auto p-2 space-y-2">
+  {notifs.map((n) => (
+    <button
+      key={n.id}
+      type="button"
+      onClick={async () => {
+        await markNotifRead(n.id);
+        setNotifOpen(false);
+        router.push(resolveNotifHref(n));
+      }}
+      className={[
+        "w-full text-left rounded-2xl border border-black/10 bg-white px-3 py-3",
+        "hover:bg-black/[0.02] hover:shadow-sm transition",
+        "focus:outline-none focus:ring-2 focus:ring-[#39FF14]/40",
+        !n.read ? "shadow-[0_0_0_2px_rgba(57,255,20,0.10)]" : "opacity-90",
+      ].join(" ")}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-extrabold text-black/85 truncate">
+                {n.title || "Notification"}
+              </div>
 
-  const t = (n.type || "").toLowerCase();
-  const title = (n.title || "").toLowerCase();
-  const body = ((n.body || n.message || "") as string).toLowerCase();
+              {(n.body || n.message) && (
+                <div className="mt-1 text-xs text-black/60 leading-relaxed line-clamp-2">
+                  {n.body || n.message}
+                </div>
+              )}
+            </div>
 
-  // ✅ 1) MATCH INVITE: always go to Messages home
-  const looksLikeInvite =
-    t === "match_invite" ||
-    !!n.inviteId ||
-    title.includes("match invite") ||
-    body.includes("invited you");
+            {n.timestamp && (
+              <div className="text-[11px] font-semibold text-black/40 whitespace-nowrap pt-[2px]">
+                {formatNotifTime(n.timestamp)}
+              </div>
+            )}
+          </div>
+        </div>
 
-  if (looksLikeInvite) {
-    router.push("/messages");
-    return;
-  }
-
-  // ✅ 2) Direct message thread
-  if (t === "message" && n.conversationId) {
-    window.location.href = `/messages/${n.conversationId}`;
-    return;
-  }
-
-  // ✅ 3) Events
-  if (n.eventId) {
-    window.location.href = `/events/${n.eventId}`;
-    return;
-  }
-
-  // ✅ 4) Explicit route/url (if present)
-  if (n.route && n.route.startsWith("/")) {
-    window.location.href = n.route;
-    return;
-  }
-  if (n.url) {
-    try {
-      window.location.href = new URL(n.url).pathname || "/messages";
-      return;
-    } catch {}
-  }
-
-  // ✅ 5) Match fallback (only AFTER invite handling)
-  if (n.matchId) {
-    window.location.href = `/matches?matchId=${n.matchId}`;
-    return;
-  }
-
-  // ✅ Final fallback
-  if (n.link) {
-    window.location.href = n.link;
-    return;
-  }
-
-  window.location.href = "/matches";
-}}
-                        className={[
-                          "w-full text-left px-3 py-3 border-b border-black/5 hover:bg-black/[0.03]",
-                          n.read ? "opacity-80" : "opacity-100",
-                        ].join(" ")}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="text-sm font-extrabold text-black/85 truncate">
-                              {n.title || "Notification"}
-                            </div>
-                            {(n.body || n.message) && (
-  <div className="mt-0.5 text-xs text-black/60 line-clamp-2">
-    {n.body || n.message}
-  </div>
-)}
-
-                          </div>
-
-                          {!n.read && (
-                            <span
-                              className="mt-1 h-2.5 w-2.5 rounded-full shrink-0"
-                              style={{ background: TM.neon }}
-                            />
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+        {!n.read && (
+          <span
+            className="mt-1.5 h-2.5 w-2.5 rounded-full shrink-0"
+            style={{ background: TM.neon }}
+          />
+        )}
+      </div>
+    </button>
+  ))}
+</div>
                 )}
               </div>
             )}

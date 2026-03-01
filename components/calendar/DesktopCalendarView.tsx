@@ -60,6 +60,15 @@ useEffect(() => {
   return () => window.removeEventListener("keydown", onKey);
 }, [inviteOverlayId]);
 
+function dayToneClasses(opts: { isSelected: boolean; hasEvents: boolean }) {
+  const { isSelected, hasEvents } = opts;
+
+  if (isSelected) return "border-transparent bg-[#39FF14]/30";
+  if (hasEvents)
+    return "border-[#39FF14]/40 bg-[#39FF14]/10 hover:bg-[#39FF14]/15";
+  return "border-slate-200 hover:bg-slate-50";
+}
+
   return (
     <div className="w-full">
       {/* Header */}
@@ -131,39 +140,55 @@ useEffect(() => {
                   type="button"
                   disabled={!c.day || !c.iso}
                   onClick={() => c.iso && onSelectISO(c.iso)}
-                  className={`h-16 rounded-xl border text-left px-3 py-2 transition ${
-                    !c.day
-                      ? "border-transparent bg-transparent cursor-default"
-                      : isSelected
-                      ? "border-transparent bg-[#39FF14]/30"
-                      : "border-slate-200 hover:bg-slate-50"
-                  }`}
+                  className={`relative h-16 rounded-xl border text-left px-3 py-2 transition
+  ${!c.day ? "border-transparent bg-transparent cursor-default" : dayToneClasses({ isSelected, hasEvents })}
+`}
                 >
-                  {c.day ? (
-                    <div className="flex items-start justify-between">
-                      <div className="flex flex-col">
-                        <div
-                          className={`text-sm font-bold ${
-                            isSelected ? "text-slate-900" : "text-slate-900"
-                          }`}
-                        >
-                          {c.day}
-                        </div>
+                 {c.day ? (
+  <div className="flex items-start justify-between">
+    <div className="flex flex-col">
+      <div
+        className={`text-sm font-bold ${
+          isSelected ? "text-slate-900" : "text-slate-900"
+        }`}
+      >
+        {c.day}
+      </div>
 
-                        {/* dot */}
-                        {hasEvents && (
-                          <div className="mt-2 h-1.5 w-1.5 rounded-full bg-[#39FF14]" />
-                        )}
-                      </div>
+      {/* Events badge (much more obvious than a dot) */}
+      {hasEvents && (
+        <div className="mt-2">
+          <span
+            className="
+              inline-flex items-center gap-1 rounded-full
+              px-2 py-0.5 text-[10px] font-extrabold
+              bg-[#0B3D2E] text-[#39FF14]
+              ring-2 ring-[#39FF14]/40
+              shadow-[0_0_0_3px_rgba(57,255,20,0.10)]
+            "
+          >
+            ● EVENT
+          </span>
+        </div>
+      )}
+    </div>
 
-                      {/* Today marker ring (optional) */}
-                      {isToday && !isSelected && (
-                        <div className="h-7 w-7 rounded-full border-2 border-[#0B3D2E]/20" />
-                      )}
-                    </div>
-                  ) : (
-                    <div />
-                  )}
+    {/* Today marker ring (optional) */}
+    {isToday && !isSelected && (
+      <div className="h-7 w-7 rounded-full border-2 border-[#0B3D2E]/20" />
+    )}
+
+    {/* ⭐ Top-right ping indicator (makes event days impossible to miss) */}
+    {hasEvents && !isSelected && (
+      <span className="absolute top-2 right-2 flex h-3 w-3">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#39FF14]/60" />
+        <span className="relative inline-flex h-3 w-3 rounded-full bg-[#39FF14]" />
+      </span>
+    )}
+  </div>
+) : (
+  <div />
+)}
                 </button>
               );
             })}

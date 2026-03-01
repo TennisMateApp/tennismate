@@ -66,37 +66,88 @@ export default function InviteOverlayCard({
 
 
   useEffect(() => {
-    if (!inviteId) return;
+  if (!inviteId) return;
 
-    const ref = doc(db, "match_invites", String(inviteId));
-    const unsub = onSnapshot(
-      ref,
-      async (snap) => {
-        setLoading(false);
+  setLoading(true);
+  setError(null);
+
+  const ref = doc(db, "match_invites", String(inviteId));
+
+  const unsub = onSnapshot(
+    ref,
+    async (snap) => {
+      try {
         if (!snap.exists()) {
           setInviteDoc(null);
+          setFromProfile(null);
+          setToProfile(null);
+          setLoading(false);
           return;
         }
 
         const data = snap.data();
         setInviteDoc({ id: snap.id, ...data });
 
-        const [fromSnap, toSnap] = await Promise.all([
-          getDoc(doc(db, "players", data.fromUserId)),
-          getDoc(doc(db, "players", data.toUserId)),
+        // Guard against missing ids (prevents doc(db,'players',undefined) crashing)
+        const fromId = data?.fromUserId ? String(data.fromUserId) : null;
+        const toId = data?.toUserId ? String(data.toUserId) : null;
+
+        if (!fromId || !toId) {
+          setFromProfile(null);
+          setToProfile(null);
+          setError("Invite is missing fromUserId/toUserId.");
+          setLoading(false);
+          return;
+        }
+
+        // These can fail due to rules; catch and continue so overlay still renders
+        const [fromSnap, toSnap] = await Promise.allSettled([
+          getDoc(doc(db, "players", fromId)),
+          getDoc(doc(db, "players", toId)),
         ]);
 
-        setFromProfile(fromSnap.exists() ? fromSnap.data() : null);
-        setToProfile(toSnap.exists() ? toSnap.data() : null);
-      },
-      () => {
-        setLoading(false);
-        setInviteDoc(null);
-      }
-    );
+        setFromProfile(
+          fromSnap.status === "fulfilled" && fromSnap.value.exists()
+            ? fromSnap.value.data()
+            : null
+        );
+        setToProfile(
+          toSnap.status === "fulfilled" && toSnap.value.exists()
+            ? toSnap.value.data()
+            : null
+        );
 
-    return () => unsub();
-  }, [inviteId]);
+        // If players reads failed, surface it (this is a key diagnostic for your Germany test)
+        if (fromSnap.status === "rejected" || toSnap.status === "rejected") {
+          console.error("InviteOverlayCard: player profile read failed", {
+            fromErr: fromSnap.status === "rejected" ? fromSnap.reason : null,
+            toErr: toSnap.status === "rejected" ? toSnap.reason : null,
+          });
+          setError("Loaded invite, but player profiles could not be read (likely permissions).");
+        }
+
+        setLoading(false);
+      } catch (err: any) {
+        console.error("InviteOverlayCard snapshot handler error:", err);
+        setError(err?.message || String(err));
+        setInviteDoc(null);
+        setFromProfile(null);
+        setToProfile(null);
+        setLoading(false);
+      }
+    },
+    (err) => {
+      console.error("InviteOverlayCard onSnapshot error:", err);
+      setError(err?.message || String(err));
+      setInviteDoc(null);
+      setFromProfile(null);
+      setToProfile(null);
+      setLoading(false);
+    }
+  );
+
+  return () => unsub();
+}, [inviteId]);
 
   const inv = inviteDoc?.invite || {};
   const court = inv?.court || null;
@@ -119,6 +170,8 @@ export default function InviteOverlayCard({
 
   const canConfirmBooking =
     status === "accepted" && bookingStatus !== "confirmed" && (isSender || isRecipient);
+
+    const [error, setError] = useState<string | null>(null);
 
   // ✅ Keep invite doc + message doc in sync (same as InviteDetailsPage)
   async function updateInviteEverywhere(patch: Record<string, any>) {
@@ -244,6 +297,23 @@ const mapsEmbedSrc = mapQuery
   if (loading) {
     return <div className="p-4 text-sm text-slate-600">Loading invite…</div>;
   }
+
+  if (error) {
+  return (
+    <div className="p-4">
+      <div className="text-sm font-extrabold text-slate-900">Couldn’t load invite</div>
+      <div className="mt-2 text-xs font-semibold text-red-600 break-words">{error}</div>
+      <button
+        type="button"
+        onClick={() => onClose?.()}
+        className="mt-3 w-full rounded-xl py-2 text-xs font-extrabold"
+        style={{ background: TM.neon, color: TM.ink }}
+      >
+        Close
+      </button>
+    </div>
+  );
+}
 
   if (!inviteDoc) {
     return (
