@@ -124,47 +124,34 @@ export default function TMDesktopCoachProfile(props: {
             </div>
           </div>
 
-          {/* actions (NO book lesson, NO availability, NO responds-in-time) */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              disabled={!hasPhone}
-              onClick={() => {
-                if (!hasPhone) return;
-                onCall();
-                // keep actual navigation outside if you do it in onCall; otherwise uncomment:
-                // window.location.href = `tel:${phoneForLink}`;
-              }}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-extrabold disabled:opacity-60"
-              style={{
-                background: hasPhone ? TM.neon : "rgba(0,0,0,0.06)",
-                color: TM.forest,
-                border: "1px solid rgba(11,61,46,0.12)",
-              }}
-            >
-              <Phone size={16} />
-              Contact
-            </button>
-
-            <button
-              type="button"
-              disabled={!hasPhone}
-              onClick={() => {
-                if (!hasPhone) return;
-                onText();
-                // window.location.href = `sms:${phoneForLink}`;
-              }}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-extrabold disabled:opacity-60"
-              style={{
-                background: "rgba(11,61,46,0.06)",
-                color: TM.forest,
-                border: "1px solid rgba(11,61,46,0.12)",
-              }}
-            >
-              <MessageSquare size={16} />
-              Text
-            </button>
-          </div>
+          {/* contact number (replaces Contact/Text buttons) */}
+<div className="shrink-0">
+  {hasPhone ? (
+    <div
+      className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-extrabold"
+      style={{
+        background: "rgba(11,61,46,0.06)",
+        color: TM.forest,
+        border: "1px solid rgba(11,61,46,0.12)",
+      }}
+    >
+      <Phone size={16} />
+      <span className="tracking-wide">{coach.mobile}</span>
+    </div>
+  ) : (
+    <div
+      className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-extrabold"
+      style={{
+        background: "rgba(0,0,0,0.06)",
+        color: "rgba(0,0,0,0.45)",
+        border: "1px solid rgba(0,0,0,0.08)",
+      }}
+    >
+      <Phone size={16} />
+      <span>No number</span>
+    </div>
+  )}
+</div>
         </div>
       </div>
 
