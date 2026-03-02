@@ -987,7 +987,7 @@ if (showDesktopWeb) {
 {/* Next Match (single card like reference) */}
 <div className="mt-6">
   <div className="mb-2 flex items-center justify-between">
-    <div className="text-sm font-extrabold text-black/85">Next Match</div>
+    <div className="text-sm font-extrabold text-black/85">Next Game</div>
 
     <button
       onClick={() => router.push("/calendar")}
@@ -1101,7 +1101,7 @@ if (showDesktopWeb) {
 {/* My Matches (horizontal scroll) */}
 <div className="mt-6">
   <div className="mb-2 flex items-center justify-between">
-    <div className="text-sm font-extrabold text-black/85">My Matches</div>
+    <div className="text-sm font-extrabold text-black/85">My TennisMates</div>
 
     <button
       onClick={() => router.push("/matches")}
