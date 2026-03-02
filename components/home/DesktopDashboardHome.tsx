@@ -338,7 +338,7 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
                 {/* ✅ Next Match (desktop, like mobile) */}
                 <div className="mt-6 rounded-3xl border border-black/10 bg-white p-5 2xl:p-6">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-extrabold text-black/85">Next Match</div>
+                    <div className="text-sm font-extrabold text-black/85">Next Game</div>
                     <button
                       onClick={() => router.push("/calendar")}
                       className="text-xs font-extrabold tracking-wide"
@@ -518,7 +518,7 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
               >
                 <div className="rounded-3xl border border-black/10 bg-white p-7 2xl:p-8">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-extrabold text-black/85">My Matches</div>
+                    <div className="text-sm font-extrabold text-black/85">My TennisMates</div>
                     <button
                       onClick={() => router.push("/matches")}
                       className="text-xs font-extrabold tracking-wide"
