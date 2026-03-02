@@ -208,16 +208,46 @@ function dayToneClasses(opts: { isSelected: boolean; hasEvents: boolean }) {
 
           {loading ? (
             <div className="text-sm text-slate-500">Loading your events…</div>
-          ) : todaysList.length === 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              No events on this day.
-              <div className="mt-2">
-                <Link href="/events" className="font-semibold text-[#0B3D2E]">
-                  Browse Events →
-                </Link>
-              </div>
-            </div>
-          ) : (
+         ) : todaysList.length === 0 ? (
+  <div className="space-y-3">
+    {[0, 1, 2].map((i) => (
+      <div
+        key={i}
+        className="w-full rounded-2xl border border-slate-200 bg-white p-4"
+      >
+        {/* top row: time + avatars (placeholder) */}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="h-6 w-16 rounded bg-slate-100" />
+            <div className="mt-2 h-3 w-8 rounded bg-slate-100" />
+          </div>
+
+          <div className="flex -space-x-2">
+            <div className="h-9 w-9 rounded-full ring-2 ring-white bg-slate-100" />
+            <div className="h-9 w-9 rounded-full ring-2 ring-white bg-slate-100" />
+          </div>
+        </div>
+
+        {/* title */}
+        <div className="mt-4 h-4 w-48 rounded bg-slate-100" />
+
+        {/* location row */}
+        <div className="mt-3 flex items-center gap-2">
+          <div className="h-4 w-4 rounded bg-slate-100" />
+          <div className="h-3 w-56 rounded bg-slate-100" />
+        </div>
+
+        {/* subtle helper text */}
+        <div className="mt-4 text-xs text-slate-500">
+          Nothing scheduled for this day yet.
+          <Link href="/events" className="ml-2 font-semibold text-[#0B3D2E]">
+            Browse Events →
+          </Link>
+        </div>
+      </div>
+    ))}
+  </div>
+) : (
             <div className="space-y-3">
               {todaysList.map((e: any) => {
                 const start = e?.start ? new Date(e.start) : null;

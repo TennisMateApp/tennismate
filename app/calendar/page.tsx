@@ -242,24 +242,6 @@ const hasEventsISO = (iso?: string) => !!(iso && eventsByISO[iso]?.length);
     setSelectedISO(toISODate(new Date(d.getFullYear(), d.getMonth(), nextDay)));
   };
 
-  /* ------------------------------ Empty State ------------------------------ */
-  if (!loading && events.length === 0) {
-    return (
-      <main className="mx-auto w-full max-w-[420px] px-4 py-8 text-center">
-        <CalendarDays className="mx-auto mb-3 h-8 w-8 text-emerald-600" />
-        <h1 className="text-2xl font-bold">My Calendar</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          When you join or host events, they’ll appear here.
-        </p>
-        <Link
-          href="/events"
-          className="mt-4 inline-flex items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-        >
-          Browse Events
-        </Link>
-      </main>
-    );
-  }
 
 /* ----------------------------- Desktop UI Layout -------------------------- */
 if (isDesktop) {
