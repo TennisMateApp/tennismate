@@ -500,14 +500,19 @@ const [tab, setTab] = useState<"pending" | "accepted">(
         }
         const d = snap.data() as any;
 
-        setMyPlayer({
-          postcode: d.postcode ?? undefined,
-          lat: typeof d.lat === "number" ? d.lat : undefined,
-          lng: typeof d.lng === "number" ? d.lng : undefined,
-          name: d.name ?? undefined,
-          photoURL: d.photoURL ?? d.photoUrl ?? d.avatarUrl ?? undefined,
-          photoThumbURL: d.photoThumbURL ?? undefined,
-        });
+setMyPlayer({
+  postcode: d.postcode ?? undefined,
+  lat: typeof d.lat === "number" ? d.lat : undefined,
+  lng: typeof d.lng === "number" ? d.lng : undefined,
+  name: d.name ?? undefined,
+  photoURL: d.photoURL ?? d.photoUrl ?? d.avatarUrl ?? undefined,
+  photoThumbURL: d.photoThumbURL ?? undefined,
+
+  // ✅ ADD THESE so TMDesktopSidebar can show skill on this page
+  skillLevel: typeof d.skillLevel === "string" ? d.skillLevel : (typeof d.level === "string" ? d.level : null),
+  skillBand: typeof d.skillBand === "string" ? d.skillBand : null,
+  skillBandLabel: typeof d.skillBandLabel === "string" ? d.skillBandLabel : null,
+});
       } catch (e) {
         console.error("Failed to load my player", e);
         setMyPlayer(null);
@@ -979,32 +984,51 @@ const visibleMatches = useMemo(() => {
                   </div>
                 </div>
 
-                {/* Tabs */}
-                <div className="mt-6 border-b border-black/10">
-                  <div className="flex items-center gap-6">
-                    <button
-                      className={`pb-3 text-sm font-semibold ${
-                        tab === "accepted"
-                          ? "text-[#0B3D2E] border-b-2 border-[#39FF14]"
-                          : "text-black/40"
-                      }`}
-                      onClick={() => setTab("accepted")}
-                    >
-                      Confirmed Matches
-                    </button>
+               <button
+  className={`pb-3 text-sm font-semibold ${
+    tab === "accepted"
+      ? "text-[#0B3D2E] border-b-2 border-[#39FF14]"
+      : "text-black/40"
+  }`}
+  onClick={() => setTab("accepted")}
+>
+  <span className="inline-flex items-center gap-2">
+    Confirmed Matches
+    <span
+      className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-2 text-[11px] font-extrabold"
+      style={{
+        background: tab === "accepted" ? "#39FF14" : "rgba(11,61,46,0.10)",
+        color: "#0B3D2E",
+        border: "1px solid rgba(11,61,46,0.18)",
+      }}
+    >
+      {accepted.length}
+    </span>
+  </span>
+</button>
 
-                    <button
-                      className={`pb-3 text-sm font-semibold ${
-                        tab === "pending"
-                          ? "text-[#0B3D2E] border-b-2 border-[#39FF14]"
-                          : "text-black/40"
-                      }`}
-                      onClick={() => setTab("pending")}
-                    >
-                      Pending Requests
-                    </button>
-                  </div>
-                </div>
+<button
+  className={`pb-3 text-sm font-semibold ${
+    tab === "pending"
+      ? "text-[#0B3D2E] border-b-2 border-[#39FF14]"
+      : "text-black/40"
+  }`}
+  onClick={() => setTab("pending")}
+>
+  <span className="inline-flex items-center gap-2">
+    Pending Requests
+    <span
+      className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-2 text-[11px] font-extrabold"
+      style={{
+        background: tab === "pending" ? "#39FF14" : "rgba(11,61,46,0.10)",
+        color: "#0B3D2E",
+        border: "1px solid rgba(11,61,46,0.18)",
+      }}
+    >
+      {pending.length}
+    </span>
+  </span>
+</button>
 
                 {/* Content */}
                 {loading ? (
