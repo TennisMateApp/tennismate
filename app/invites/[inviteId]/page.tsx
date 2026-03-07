@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { ArrowLeft, CheckCircle2, XCircle, MapPin } from "lucide-react";
 
@@ -48,9 +48,6 @@ function mapsUrlFor(labelOrAddress?: string | null) {
 export default function InviteDetailsPage() {
   const { inviteId } = useParams<{ inviteId: string }>();
   const router = useRouter();
-
-  const searchParams = useSearchParams();
-const from = searchParams.get("from");
 
   const [inviteDoc, setInviteDoc] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -296,25 +293,6 @@ await addDoc(
   const otherPhoto = otherProfile?.photoURL || otherProfile?.photoThumbURL || otherProfile?.avatar || null;
 
   function handleBack() {
-  if (typeof window !== "undefined" && window.history.length > 1) {
-    router.back();
-    return;
-  }
-
-  if (inviteDoc?.conversationId) {
-    router.push(`/messages/${inviteDoc.conversationId}`);
-    return;
-  }
-
-  router.push("/messages");
-}
-
-function handleBack() {
-  if (from) {
-    router.push(from);
-    return;
-  }
-
   if (typeof window !== "undefined" && window.history.length > 1) {
     router.back();
     return;
