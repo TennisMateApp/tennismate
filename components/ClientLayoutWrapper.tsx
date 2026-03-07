@@ -219,6 +219,7 @@ const isActive = (href: string) =>
 const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
 
 const [showAgeGate, setShowAgeGate] = useState(false);
+const [ageGateChecked, setAgeGateChecked] = useState(false);
 
 // --- Update players/{uid}.lastActiveAt (throttled) ---
 useEffect(() => {
@@ -288,6 +289,10 @@ const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFe
     unsubInbox(); unsubMessages(); unsubPlayer();
 
    if (u) {
+
+    setAgeGateChecked(false);
+setShowAgeGate(false);
+
   profileTrackedRef.current = false;
 void trackSetUserId(u.uid);
 
@@ -318,12 +323,10 @@ unsubPlayer = onSnapshot(playerRef, (docSnap) => {
   if (docSnap.exists()) {
     const data = docSnap.data() as any;
 
-setPhotoURL(typeof data.photoURL === "string" ? data.photoURL : null);
-setPhotoThumbURL(typeof data.photoThumbURL === "string" ? data.photoThumbURL : null);
-setProfileComplete(data.profileComplete === true);
+    setPhotoURL(typeof data.photoURL === "string" ? data.photoURL : null);
+    setPhotoThumbURL(typeof data.photoThumbURL === "string" ? data.photoThumbURL : null);
+    setProfileComplete(data.profileComplete === true);
 
-
-    // ✅ AGE GATE (birthYear): show modal if missing/invalid or under 18
     const birthYear =
       typeof data.birthYear === "number" && Number.isFinite(data.birthYear)
         ? data.birthYear
@@ -340,22 +343,15 @@ setProfileComplete(data.profileComplete === true);
       computedAge < 18 ||
       computedAge > 110;
 
-    if (canShowGate) {
-      setShowAgeGate(needsBirthYear);
-    } else {
-      setShowAgeGate(false);
-    }
+    setShowAgeGate(canShowGate ? needsBirthYear : false);
+    setAgeGateChecked(true);
   } else {
-    // No player doc
     setPhotoURL(null);
-setPhotoThumbURL(null);
-setProfileComplete(false);
+    setPhotoThumbURL(null);
+    setProfileComplete(false);
 
-    if (canShowGate) {
-      setShowAgeGate(true);
-    } else {
-      setShowAgeGate(false);
-    }
+    setShowAgeGate(canShowGate);
+    setAgeGateChecked(true);
   }
 });
 
@@ -415,6 +411,8 @@ if (hasNewer && inbound) {
   setPhotoURL(null);
   setPhotoThumbURL(null);
   setProfileComplete(null);
+  setShowAgeGate(false);
+  setAgeGateChecked(false);
 }
   });
 
@@ -459,13 +457,13 @@ useEffect(() => {
 }, [pathname, router]);
 
 useEffect(() => {
-  // wait until we know if profile is complete
   if (!user) return;
   if (profileComplete === null) return;
+  if (!ageGateChecked) return;
 
   // don't fight email verification gate
   if (showVerify) return;
-    if (showAgeGate) return; // ✅ don't redirect while age modal is blocking
+  if (showAgeGate) return;
 
 
   // routes we allow even when profile is incomplete
@@ -484,7 +482,7 @@ useEffect(() => {
   if (profileComplete === false) {
     router.replace("/profile?edit=true");
   }
-}, [user, profileComplete, showVerify, showAgeGate, pathname, router]);
+}, [user, profileComplete, showVerify, showAgeGate, ageGateChecked, pathname, router]);
 
 useEffect(() => {
   function handleClickOutside(event: MouseEvent) {
@@ -575,7 +573,13 @@ return (
     <PushClientOnly />
 
    <AgeGateModal
-  isOpen={!!user && showAgeGate && !PUBLIC_ROUTES.has(pathname || "") && !showVerify}
+  isOpen={
+    !!user &&
+    ageGateChecked &&
+    showAgeGate &&
+    !PUBLIC_ROUTES.has(pathname || "") &&
+    !showVerify
+  }
   onSave={async (birthYear) => {
     const u = auth.currentUser;
     if (!u) return;
