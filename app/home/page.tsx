@@ -532,46 +532,50 @@ useEffect(() => {
   const u = auth.currentUser;
   if (!u?.uid) return;
 
-  // ✅ 1) Update lastActiveAt (throttled to once per 10 mins)
   void touchLastActive(u.uid);
 
-  // ✅ 2) Fast UI fallbacks (instant)
+  // fast fallback while Firestore loads
   setUserName(u.displayName || "Player");
   setAvatarUrl(u.photoURL || null);
 
-  // ✅ 3) Enrich header from Firestore (players + users)
-  (async () => {
-    try {
-      const playerSnap = await getDoc(doc(db, "players", u.uid));
-      if (playerSnap.exists()) {
-        const p: any = playerSnap.data();
+  const unsub = onSnapshot(
+    doc(db, "players", u.uid),
+    (snap) => {
+      if (!snap.exists()) return;
 
-        const thumb =
-          typeof p.photoThumbURL === "string" ? p.photoThumbURL : null;
-        const full =
-          typeof p.photoURL === "string" ? p.photoURL : null;
+      const p: any = snap.data();
 
-        setAvatarUrl(thumb || full || u.photoURL || null);
+      const playerName =
+        typeof p.name === "string" && p.name.trim()
+          ? p.name.trim()
+          : null;
 
-        const skill =
-          (typeof p.skillLevel === "string" && p.skillLevel) ||
-          (typeof p.level === "string" && p.level) ||
-          (typeof p.ntrp === "string" && p.ntrp) ||
-          null;
+      const thumb =
+        typeof p.photoThumbURL === "string" ? p.photoThumbURL : null;
+      const full =
+        typeof p.photoURL === "string" ? p.photoURL : null;
+      const avatar =
+        typeof p.avatar === "string" ? p.avatar : null;
 
-        if (skill) setLevelLabel(String(skill).toUpperCase());
+      const skill =
+        (typeof p.skillLevel === "string" && p.skillLevel) ||
+        (typeof p.level === "string" && p.level) ||
+        (typeof p.ntrp === "string" && p.ntrp) ||
+        null;
+
+      if (playerName) setUserName(playerName);
+      setAvatarUrl(thumb || full || avatar || u.photoURL || null);
+
+      if (skill) {
+        setLevelLabel(String(skill).toUpperCase());
       }
-
-      const userSnap = await getDoc(doc(db, "users", u.uid));
-      if (userSnap.exists()) {
-        const data: any = userSnap.data();
-        const name = typeof data.name === "string" ? data.name : null;
-        if (name) setUserName(name);
-      }
-    } catch (e) {
-      console.warn("[Home] Failed to load profile header:", e);
+    },
+    (e) => {
+      console.warn("[Home] Failed to subscribe to player header:", e);
     }
-  })();
+  );
+
+  return () => unsub();
 }, []);
 
 
