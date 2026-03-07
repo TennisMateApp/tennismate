@@ -34,6 +34,7 @@ import { GiTennisBall } from "react-icons/gi";
 import { onAuthStateChanged } from "firebase/auth";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { Capacitor } from "@capacitor/core";
+import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 
 
 const TM = {
@@ -340,6 +341,31 @@ function getNextMatchHref(e: any): string | null {
   return "/calendar";
 }
 
+function getInviteIdFromCalendarEvent(e: any): string | null {
+  if (!e) return null;
+
+  // direct invite id if you stored it
+  if (typeof e?.inviteId === "string" && e.inviteId) {
+    return e.inviteId;
+  }
+
+  // your synced invite calendar items appear to use messageId as the route id
+  if (e?.source === "cf:syncCalendarOnInviteAccepted" && typeof e?.messageId === "string" && e.messageId) {
+    return e.messageId;
+  }
+
+  // fallback if type/source marks it as invite
+  if (
+    (e?.type === "invite" || String(e?.source ?? "").includes("invite")) &&
+    typeof e?.messageId === "string" &&
+    e.messageId
+  ) {
+    return e.messageId;
+  }
+
+  return null;
+}
+
 function formatStartLikeCard(iso?: string | null) {
   if (!iso) return "Time TBD";
   const d = new Date(iso);
@@ -474,6 +500,7 @@ const showDesktopWeb = !isApp && isDesktop;
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   const [uid, setUid] = useState<string | null>(null);
+  const [openInviteId, setOpenInviteId] = useState<string | null>(null);
   
   const [nearbyActive, setNearbyActive] = useState<ActivePlayer[]>([]);
 const [nearbyActiveLoading, setNearbyActiveLoading] = useState(true);
@@ -1011,6 +1038,8 @@ if (showDesktopWeb) {
       const whenLabel = formatStartLikeCard(nextEvent.start);
       const whereLabel = nextEvent.courtName || nextEvent.location || "Court TBA";
       const href = getNextMatchHref(nextEvent as any);
+      const inviteId = getInviteIdFromCalendarEvent(nextEvent as any);
+const isInvite = !!inviteId;
 
       return (
         <div
@@ -1066,11 +1095,20 @@ if (showDesktopWeb) {
             </div>
           </div>
 
-          <button
+<button
   type="button"
   onClick={() => {
-    if (href) router.push(href);
-    else router.push("/calendar");
+    if (isInvite && inviteId) {
+      setOpenInviteId(inviteId);
+      return;
+    }
+
+    if (href) {
+      router.push(href);
+      return;
+    }
+
+    router.push("/calendar");
   }}
   className="mt-4 w-full rounded-2xl px-4 py-3 text-sm font-extrabold"
   style={{ background: matchAccent, color: "white" }}
@@ -1297,6 +1335,38 @@ style={{
           </div>
         </div>
       </div>
+{openInviteId && (
+  <div className="fixed inset-0 z-[999]">
+    <div
+      className="absolute inset-0 bg-black/40"
+      onMouseDown={() => setOpenInviteId(null)}
+    />
+
+    <div className="absolute inset-0 flex items-center justify-center p-4">
+      <div
+        className="w-[900px] max-w-[95vw] h-[85vh] rounded-2xl overflow-hidden shadow-2xl bg-white border border-slate-200"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+          <div className="text-sm font-bold text-slate-900">Match Invite</div>
+
+          <button
+            type="button"
+            onClick={() => setOpenInviteId(null)}
+            className="rounded-lg px-3 py-1.5 text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-100"
+          >
+            Close
+          </button>
+        </div>
+
+        <InviteOverlayCard
+          inviteId={openInviteId}
+          onClose={() => setOpenInviteId(null)}
+        />
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }

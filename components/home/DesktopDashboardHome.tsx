@@ -1,10 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Image from "next/image";
 import { Swords, CalendarDays, MapPin, GraduationCap, MapPin as Pin } from "lucide-react";
 import { GiTennisBall } from "react-icons/gi";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
+import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 
 type ActivePlayer = {
   id: string;
@@ -28,6 +29,7 @@ type CalendarEvent = {
   eventId?: string | null;
   source?: string | null; // e.g. "cf:syncCalendarOnInviteAccepted"
   messageId?: string | null;
+  inviteId?: string | null;
 
   participants?: string[] | null;
 };
@@ -77,6 +79,8 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
     myCalendarEventsLoading,
   } = props;
 
+    const [openInviteId, setOpenInviteId] = useState<string | null>(null);
+
   const TM = {
     forest: "#0B3D2E",
     neon: "#39FF14",
@@ -117,6 +121,7 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
   };
 
   const getNextMatchHref = (e: any): string => {
+  
     if (!e) return "/calendar";
 
     // Invite-based calendar event (your existing pattern)
@@ -128,6 +133,28 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
     if (e?.eventId) return `/events/${e.eventId}`;
 
     return "/calendar";
+  };
+
+    const getInviteIdFromCalendarEvent = (e: any): string | null => {
+    if (!e) return null;
+
+    if (typeof e?.inviteId === "string" && e.inviteId) {
+      return e.inviteId;
+    }
+
+    if (e?.source === "cf:syncCalendarOnInviteAccepted" && typeof e?.messageId === "string" && e.messageId) {
+      return e.messageId;
+    }
+
+    if (
+      (e?.type === "invite" || String(e?.source ?? "").includes("invite")) &&
+      typeof e?.messageId === "string" &&
+      e.messageId
+    ) {
+      return e.messageId;
+    }
+
+    return null;
   };
 
   // ✅ Match status helpers
@@ -358,9 +385,11 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
                       const opponentName = opp?.name || "Opponent";
                       const opponentPhoto = opp?.photoThumbURL || opp?.photoURL || opp?.avatar || null;
 
-                      const whenLabel = formatStartLikeCard(nextEvent.start);
-                      const whereLabel = nextEvent.courtName || nextEvent.location || "Court TBA";
-                      const href = getNextMatchHref(nextEvent);
+                     const whenLabel = formatStartLikeCard(nextEvent.start);
+const whereLabel = nextEvent.courtName || nextEvent.location || "Court TBA";
+const href = getNextMatchHref(nextEvent);
+const inviteId = getInviteIdFromCalendarEvent(nextEvent);
+const isInvite = !!inviteId;
 
                       return (
                         <div
@@ -410,13 +439,20 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
                           </div>
 
                           <button
-                            type="button"
-                            onClick={() => router.push(href)}
-                            className="mt-4 w-full rounded-2xl px-4 py-3 text-sm font-extrabold"
-                            style={{ background: matchAccent, color: "white" }}
-                          >
-                            View Details ›
-                          </button>
+  type="button"
+  onClick={() => {
+    if (isInvite && inviteId) {
+      setOpenInviteId(inviteId);
+      return;
+    }
+
+    router.push(href);
+  }}
+  className="mt-4 w-full rounded-2xl px-4 py-3 text-sm font-extrabold"
+  style={{ background: matchAccent, color: "white" }}
+>
+  View Details ›
+</button>
                         </div>
                       );
                     })()
@@ -630,6 +666,38 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
           </main>
         </div>
       </div>
+            {openInviteId && (
+        <div className="fixed inset-0 z-[999]">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onMouseDown={() => setOpenInviteId(null)}
+          />
+
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div
+              className="w-[900px] max-w-[95vw] h-[85vh] max-h-[85svh] rounded-2xl overflow-hidden shadow-2xl bg-white border border-slate-200"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+                <div className="text-sm font-bold text-slate-900">Match Invite</div>
+
+                <button
+                  type="button"
+                  onClick={() => setOpenInviteId(null)}
+                  className="rounded-lg px-3 py-1.5 text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-100"
+                >
+                  Close
+                </button>
+              </div>
+
+              <InviteOverlayCard
+                inviteId={openInviteId}
+                onClose={() => setOpenInviteId(null)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
