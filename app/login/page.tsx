@@ -47,6 +47,19 @@ useEffect(() => {
   return () => mq.removeEventListener?.("change", apply);
 }, []);
 
+useEffect(() => {
+  const prevBodyOverflow = document.body.style.overflow;
+  const prevHtmlOverflow = document.documentElement.style.overflow;
+
+  document.body.style.overflow = "hidden";
+  document.documentElement.style.overflow = "hidden";
+
+  return () => {
+    document.body.style.overflow = prevBodyOverflow;
+    document.documentElement.style.overflow = prevHtmlOverflow;
+  };
+}, []);
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams?.get("next") || "/home";
@@ -168,7 +181,7 @@ if (isDesktop) {
 }
 
 return (
-  <div className="relative h-[100dvh] overflow-hidden">
+    <div className="fixed inset-0 overflow-hidden bg-black">
     {/* Background */}
     <div className="absolute inset-0 z-0">
       <Image
@@ -182,7 +195,7 @@ return (
     </div>
 
     {/* Content */}
-    <div className="relative z-10 h-[100dvh] flex items-center justify-center px-4">
+    <div className="relative z-10 h-full w-full flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex justify-center mb-8">

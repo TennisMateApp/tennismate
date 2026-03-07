@@ -209,7 +209,7 @@ useEffect(() => {
 
 
 // 👇 routes that should be full-bleed (no boxed max-width)
-const fullBleedRoutes = ["/login", "/signup", "/home", "/match", "/matches", "/messages", "/directory", "/calendar", "/invites", "/courts", "/coaches"];
+const fullBleedRoutes = ["/login", "/signup", "/home", "/match", "/matches", "/messages", "/directory", "/calendar", "/invites", "/courts", "/coaches", "profile"];
 const isFullBleed = fullBleedRoutes.some((r) => pathname.startsWith(r));
 
 
