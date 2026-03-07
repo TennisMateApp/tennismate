@@ -185,7 +185,6 @@ const [participantProfiles, setParticipantProfiles] = useState<
   const [cancelling, setCancelling] = useState(false);
   const [leaving, setLeaving] = useState(false); 
   const [confirmingBooking, setConfirmingBooking] = useState(false);
-  const [activeTab, setActiveTab] = useState<"about" | "players">("about");
 const isDesktop = useIsDesktop();
 const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
 
@@ -772,9 +771,16 @@ const canRequest =
   status !== "completed" &&
   !isFull;
 
-  const visibleRequests = requests.filter(
-  (r) => !(r.status === "accepted" && !(event.participants ?? []).includes(r.userId))
-);
+const visibleRequests = requests
+  .filter(
+    (r) => !(r.status === "accepted" && !(event.participants ?? []).includes(r.userId))
+  )
+  .sort((a, b) => {
+    const order = { pending: 0, accepted: 1, left: 2, declined: 3 } as const;
+    return order[a.status] - order[b.status];
+  });
+
+const pendingRequests = visibleRequests.filter((r) => r.status === "pending");
 
   // ✅ Desktop UI (render the desktop component instead of the mobile layout)
 if (isDesktop) {
@@ -1084,43 +1090,109 @@ if (isDesktop) {
     </section>
 
     {/* PLAYERS (compact row like screenshot) */}
-    <section className="mt-6">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-extrabold text-gray-900">
-          Players{" "}
-          <span className="font-semibold text-gray-500">
-            ({filled}
-            {spotsTotalNum !== null ? `/${spotsTotalNum}` : ""})
-          </span>
-        </h2>
+<section className="mt-6">
+  <div className="mb-3 flex items-center justify-between">
+    <h2 className="text-sm font-extrabold text-gray-900">
+      Players{" "}
+      <span className="font-semibold text-gray-500">
+        ({filled}
+        {spotsTotalNum !== null ? `/${spotsTotalNum}` : ""})
+      </span>
+    </h2>
+  </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("players")}
-          className="text-sm font-extrabold text-green-700 hover:underline"
-        >
-          See All
-        </button>
-      </div>
+      {/* Host join requests - always visible */}
+      {isHost && pendingRequests.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-extrabold text-emerald-900">
+              Join Requests ({pendingRequests.length})
+            </h3>
+          </div>
 
-      <div className="flex items-center gap-3 overflow-x-auto pb-1">
+          <div className="space-y-3">
+            {pendingRequests.map((req) => {
+              const canAccept = req.status === "pending" && !isFull;
+
+              return (
+                <div
+                  key={req.id}
+                  className="flex items-center justify-between gap-3 rounded-xl bg-white p-3 ring-1 ring-emerald-100"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setProfileOpenId(req.userId)}
+                    className="flex min-w-0 items-center gap-3 text-left hover:opacity-90"
+                  >
+                    <img
+                      src={req.profile?.photoURL || "/default-avatar.png"}
+                      alt={req.profile?.name || "Player"}
+                      className="h-10 w-10 rounded-full object-cover"
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-gray-900">
+                        {req.profile?.name || "Unknown Player"}
+                      </p>
+                      {getSkill(req.profile || null) !== null && (
+                        <p className="text-sm text-gray-600">
+                          Skill Level: {getSkill(req.profile || null)}
+                        </p>
+                      )}
+                      <p className="mt-0.5 text-xs font-semibold text-amber-700">
+                        Pending approval
+                      </p>
+                    </div>
+                  </button>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      onClick={() => handleDecline(req)}
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                    >
+                      Decline
+                    </button>
+
+                    <button
+                      onClick={() => handleAccept(req)}
+                      disabled={!canAccept || acceptingId === req.id}
+                      className={`rounded-lg px-3 py-2 text-sm font-semibold text-white ${
+                        canAccept
+                          ? "bg-emerald-600 hover:bg-emerald-700"
+                          : "bg-gray-300"
+                      }`}
+                    >
+                      {acceptingId === req.id ? "Accepting…" : "Accept"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-start gap-3 overflow-x-auto pb-1">
         {/* Host first */}
         {event.hostId && (
         <button
   type="button"
   onClick={() => setProfileOpenId(event.hostId!)}
-  className="shrink-0 text-center"
+  className="shrink-0 w-[72px] text-center"
   title={hostProfile?.name || "Host"}
 >
   <img
     src={hostProfile?.photoURL || "/default-avatar.png"}
-    className="h-14 w-14 rounded-full object-cover ring-2 ring-white"
+    className="mx-auto h-14 w-14 rounded-full object-cover ring-2 ring-white"
     alt={hostProfile?.name || "Host"}
   />
-  <p className="mt-1 text-[11px] font-bold text-gray-800 truncate max-w-[72px]">
-    {hostProfile?.name || "Host"}
+  <div className="mt-1 h-[32px]">
+    <p className="text-[11px] font-bold leading-tight text-gray-800 line-clamp-2">
+      {hostProfile?.name || "Host"}
+    </p>
+  </div>
+  <p className="mt-0.5 text-[10px] font-semibold leading-none text-gray-500">
+    (Host)
   </p>
-  <p className="text-[10px] font-semibold text-gray-500">(Host)</p>
 </button>
         )}
 
@@ -1131,165 +1203,30 @@ if (isDesktop) {
           .map((pid) => {
             const p = participantProfiles[pid];
             return (
-            <button
+<button
   key={pid}
   type="button"
   onClick={() => setProfileOpenId(pid)}
-  className="shrink-0 text-center"
+  className="shrink-0 w-[72px] text-center"
   title={p?.name || "Player"}
 >
   <img
     src={p?.photoURL || "/default-avatar.png"}
-    className="h-14 w-14 rounded-full object-cover ring-2 ring-white"
+    className="mx-auto h-14 w-14 rounded-full object-cover ring-2 ring-white"
     alt={p?.name || "Player"}
   />
-  <p className="mt-1 text-[11px] font-bold text-gray-800 truncate max-w-[72px]">
-    {p?.name || "Player"}
+  <div className="mt-1 h-[32px]">
+    <p className="text-[11px] font-bold leading-tight text-gray-800 line-clamp-2">
+      {p?.name || "Player"}
+    </p>
+  </div>
+  <p className="mt-0.5 text-[10px] font-semibold leading-none text-transparent select-none">
+    (Host)
   </p>
 </button>
             );
           })}
       </div>
-
-      {/* If they tap "See All", show your existing Players tab content below */}
-      {activeTab === "players" && (
-        <div className="mt-4">
-          {/* Keep your existing players tab block (host, accepted, join requests) */}
-          {/* --- BEGIN existing PLAYERS TAB content --- */}
-          <section className="rounded-2xl border bg-white p-5 shadow-sm">
-            <h2 className="mb-3 text-base font-semibold">Players</h2>
-
-            {event.hostId && hostProfile && (
-             <button
-  type="button"
-  onClick={() => setProfileOpenId(event.hostId!)}
-  className="flex items-center gap-3 rounded-xl border p-3 hover:bg-gray-50 transition text-left w-full"
->
-  <img
-    src={hostProfile.photoURL || "/default-avatar.png"}
-    alt={hostProfile.name || "Host"}
-    className="h-12 w-12 rounded-full object-cover"
-  />
-  <div>
-    <p className="font-medium">
-      Host · {hostProfile.name || "Unknown Player"}
-    </p>
-    {getSkill(hostProfile) !== null && (
-      <p className="text-sm text-muted-foreground">
-        Skill Level: {getSkill(hostProfile)}
-      </p>
-    )}
-  </div>
-</button>
-            )}
-
-            {(event.participants?.length ?? 0) > 0 && (
-              <div className="mt-4">
-                <p className="mb-2 text-xs font-medium text-muted-foreground">
-                  Accepted Participants
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  {Array.from(new Set(event.participants ?? []))
-                    .filter((pid) => pid !== event.hostId)
-                    .map((pid) => {
-                      const p = participantProfiles[pid];
-                      return (
-                       <button
-  key={pid}
-  type="button"
-  onClick={() => setProfileOpenId(pid)}
-  className="group relative inline-flex items-center"
-  title={p?.name || pid}
->
-  <img
-    src={p?.photoURL || "/default-avatar.png"}
-    className="h-9 w-9 rounded-full ring-2 ring-white object-cover transition-transform group-hover:scale-105"
-    alt={p?.name || "Player"}
-  />
-</button>
-                      );
-                    })}
-                </div>
-              </div>
-            )}
-          </section>
-
-          {isHost && visibleRequests.length > 0 && (
-            <section className="mt-4 rounded-2xl border bg-white p-5 shadow-sm">
-              <button
-                onClick={() => setRequestsOpen((v) => !v)}
-                className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left"
-              >
-                <h2 className="text-base font-semibold">
-                  Join Requests{" "}
-                  <span className="text-muted-foreground">
-                    ({visibleRequests.length})
-                  </span>
-                </h2>
-                <ChevronDown
-                  className={`h-5 w-5 transition-transform ${
-                    requestsOpen ? "rotate-180" : ""
-                  }`}
-                />
-              </button>
-
-              {requestsOpen && (
-                <div className="mt-3 space-y-3">
-                  {visibleRequests.map((req) => {
-                    const skill = getSkill(req.profile || null);
-                    const canAccept = req.status === "pending" && !isFull;
-
-                    return (
-                      <div
-                        key={req.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border p-3"
-                      >
-                        <button
-  type="button"
-  onClick={() => setProfileOpenId(req.userId)}
-  className="flex items-center gap-3 hover:opacity-90 text-left"
->
-  <img
-    src={req.profile?.photoURL || "/default-avatar.png"}
-    alt={req.profile?.name || "Player"}
-    className="h-10 w-10 rounded-full object-cover"
-  />
-  <div>
-    <p className="font-medium">
-      {req.profile?.name || "Unknown Player"}
-    </p>
-    {getSkill(req.profile || null) !== null && (
-      <p className="text-sm text-muted-foreground">
-        Skill Level: {getSkill(req.profile || null)}
-      </p>
-    )}
-    <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-gray-600">
-      {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
-    </p>
-  </div>
-</button>
-
-                        <button
-                          onClick={() => handleAccept(req)}
-                          disabled={!canAccept || acceptingId === req.id}
-                          className={`rounded-lg px-3 py-2 text-sm font-medium text-white ${
-                            canAccept
-                              ? "bg-emerald-600 hover:bg-emerald-700"
-                              : "bg-gray-300"
-                          }`}
-                        >
-                          {acceptingId === req.id ? "Accepting…" : "Accept"}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          )}
-          {/* --- END existing PLAYERS TAB content --- */}
-        </div>
-      )}
     </section>
 
     {/* ABOUT */}

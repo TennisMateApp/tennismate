@@ -1287,17 +1287,6 @@ return (
         Chat
       </span>
     </button>
-
-    {/* Unmatch */}
-    <button
-      type="button"
-      onClick={() => unmatchMatch(match, otherName, other)}
-      className="w-[52px] rounded-full grid place-items-center bg-red-50 text-red-700 hover:bg-red-100"
-      title="Unmatch"
-      aria-label="Unmatch"
-    >
-      <Trash2 className="h-5 w-5" />
-    </button>
   </div>
 ) : (
 
@@ -1522,8 +1511,7 @@ return (
 
        <div className="h-10 w-10" />
         </div>
-
-       {/* Segmented control */}
+{/* Segmented control */}
 <div className="mt-3 rounded-full bg-white/80 p-1 ring-1 ring-black/5">
   <div className="grid grid-cols-2 gap-1">
     <button
@@ -1532,11 +1520,11 @@ return (
       className="h-9 rounded-full text-sm font-extrabold transition"
       style={
         tab === "accepted"
-          ? { background: "#39FF14", color: "#0B3D2E" } // ✅ neon active
+          ? { background: "#39FF14", color: "#0B3D2E" }
           : { background: "transparent", color: "rgba(15,23,42,0.55)" }
       }
     >
-      Confirmed
+      Confirmed ({acceptedCount})
     </button>
 
     <button
@@ -1545,11 +1533,11 @@ return (
       className="h-9 rounded-full text-sm font-extrabold transition"
       style={
         tab === "pending"
-          ? { background: "#39FF14", color: "#0B3D2E" } // ✅ neon active
+          ? { background: "#39FF14", color: "#0B3D2E" }
           : { background: "transparent", color: "rgba(15,23,42,0.55)" }
       }
     >
-      Pending
+      Pending ({pendingCount})
     </button>
   </div>
 </div>

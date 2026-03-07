@@ -541,7 +541,7 @@ return (
       {/* Paste your existing MOBILE UI here */}
 
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4">
+     <div className="flex items-center justify-between px-3">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -566,7 +566,7 @@ return (
       </div>
 
       {/* Search */}
-      <div className="mt-4 px-4">
+      <div className="mt-4 px-3">
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
             <Search size={16} />
@@ -594,7 +594,7 @@ return (
       </div>
 
       {/* Conversations */}
-      <div className="mt-6 px-4">
+      <div className="mt-6 px-3">
         <p className="text-sm font-semibold text-gray-900 mb-3">
           Conversations
         </p>

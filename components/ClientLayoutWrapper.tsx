@@ -43,7 +43,6 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen'; //
 import { SafeAreaTop, SafeAreaBottom } from "@/components/SafeArea";
 import BackButtonHandler from "@/components/BackButtonHandler";
-import GetTheAppPrompt from "@/components/growth/GetTheAppPrompt";
 import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { track, trackSetUserId } from "@/lib/track";
 import AgeGateModal from "@/components/AgeGateModal";
@@ -210,7 +209,7 @@ useEffect(() => {
 
 
 // 👇 routes that should be full-bleed (no boxed max-width)
-const fullBleedRoutes = ["/login", "/signup", "/home", "/match", "/matches"];
+const fullBleedRoutes = ["/login", "/signup", "/home", "/match", "/matches", "/messages", "/directory", "/calendar", "/invites", "/courts", "/coaches"];
 const isFullBleed = fullBleedRoutes.some((r) => pathname.startsWith(r));
 
 
@@ -699,11 +698,6 @@ return (
 
 
      {user && !hideAllNav && !hideFeedback && !isDesktopWeb && <FloatingFeedbackButton />}
-
-
-     {/* 🔔 Suggest native app for mobile web users after 20s of being logged in */}
-     {user && !hideAllNav && <GetTheAppPrompt />}
-
 
 
     </div>

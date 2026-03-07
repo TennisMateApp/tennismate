@@ -176,7 +176,7 @@ const mapsEmbedUrl = court
   const canConfirmBooking = status === "accepted" && bookingStatus !== "confirmed";
 
   return (
-    <div className="min-w-[240px]">
+    <div className="w-full min-w-0 max-w-full overflow-hidden">
       <div
         className="text-[12px] font-extrabold mb-2"
         style={{ color: isOther ? "#111827" : "white" }}
@@ -192,20 +192,20 @@ const mapsEmbedUrl = court
       </div>
 
       <div
-        className="text-[12px] mt-1"
-        style={{
-          color: isOther ? "rgba(17,24,39,0.75)" : "rgba(255,255,255,0.85)",
-        }}
-      >
-        {duration}
-        {duration && location ? " • " : ""}
-        {location}
-      </div>
+  className="text-[12px] mt-1 break-words"
+  style={{
+    color: isOther ? "rgba(17,24,39,0.75)" : "rgba(255,255,255,0.85)",
+  }}
+>
+  {duration}
+  {duration && location ? " • " : ""}
+  {location}
+</div>
 
       {/* ✅ NEW: Court + Map + Booking link (from invite.court if present) */}
 {(court || mapsEmbedUrl) && (
   <div
-    className="mt-3 rounded-2xl p-3"
+    className="mt-3 rounded-2xl p-2.5 sm:p-3"
     style={{
       background: isOther ? "rgba(17,24,39,0.04)" : "rgba(255,255,255,0.10)",
       border: isOther ? "1px solid rgba(17,24,39,0.10)" : "1px solid rgba(255,255,255,0.20)",
@@ -223,13 +223,13 @@ const mapsEmbedUrl = court
 
     {(courtAddressLine || location) && (
       <div
-        className="mt-1 text-[12px]"
-        style={{
-          color: isOther ? "rgba(17,24,39,0.75)" : "rgba(255,255,255,0.85)",
-        }}
-      >
-        {courtAddressLine || location}
-      </div>
+  className="mt-1 text-[12px] break-words leading-snug"
+  style={{
+    color: isOther ? "rgba(17,24,39,0.75)" : "rgba(255,255,255,0.85)",
+  }}
+>
+  {courtAddressLine || location}
+</div>
     )}
 
     {/* Map iframe (clicking opens google maps) */}
@@ -1317,7 +1317,7 @@ useEffect(() => {
     <div className="flex flex-col h-[100svh] bg-white overflow-hidden">
     {/* Header */}
 <div
-  className="sticky z-10 bg-white/95 backdrop-blur border-b px-4"
+  className="sticky z-10 bg-white/95 backdrop-blur border-b px-3"
   style={{
     top: "env(safe-area-inset-top, 0px)",
     paddingTop: "env(safe-area-inset-top, 0px)",
@@ -1474,7 +1474,7 @@ onClick={async () => {
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 350;
     setShowScrollDown(!nearBottom);
   }}
-  className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
+  className="flex-1 overflow-y-auto overscroll-contain px-3 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
   style={{
     // Reserve room for input bar + keyboard inset so the last message never hides
     scrollPaddingBottom: `${inputBarH + vvBottomInset + 24}px`,
@@ -1537,14 +1537,14 @@ const avatarURL = system
   <div className="mr-8" />
 ) : null}
 
-            <div className={system ? "max-w-[90%] sm:max-w-lg" : "max-w-[75%] sm:max-w-md"}>
-              <div
-               className={[
-  "px-4 py-3 text-[16px] leading-snug shadow-[0_2px_6px_rgba(0,0,0,0.06)]",
-  isOther
-    ? "rounded-[22px] rounded-bl-[10px]"
-    : "rounded-[22px] rounded-br-[10px]",
-].join(" ")}
+            <div className={system ? "max-w-[92%] sm:max-w-lg min-w-0" : "max-w-[86%] sm:max-w-md min-w-0"}>
+  <div
+  className={[
+    "px-4 py-3 text-[16px] leading-snug shadow-[0_2px_6px_rgba(0,0,0,0.06)] min-w-0 overflow-hidden",
+    isOther
+      ? "rounded-[22px] rounded-bl-[10px]"
+      : "rounded-[22px] rounded-br-[10px]",
+  ].join(" ")}
 style={{
   background: system
     ? "rgba(17,24,39,0.06)"
@@ -1628,7 +1628,7 @@ style={{
       {/* Input */}
       <div
   ref={inputBarRef}
-  className="fixed left-0 right-0 z-10 border-t bg-white px-4"
+  className="fixed left-0 right-0 z-10 border-t bg-white px-3"
   style={{
     bottom: vvBottomInset,
     paddingBottom: "calc(env(safe-area-inset-bottom) + 10px)",
@@ -2009,7 +2009,7 @@ style={{
               </button>
             </div>
 
-            <InviteOverlayCard inviteId={inviteOverlayId} />
+            <InviteOverlayCard inviteId={inviteOverlayId} onClose={() => setInviteOverlayId(null)} />
           </div>
         </div>
       </div>

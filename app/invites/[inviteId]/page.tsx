@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { ArrowLeft, CheckCircle2, XCircle, MapPin } from "lucide-react";
 
@@ -49,13 +49,16 @@ export default function InviteDetailsPage() {
   const { inviteId } = useParams<{ inviteId: string }>();
   const router = useRouter();
 
+  const searchParams = useSearchParams();
+const from = searchParams.get("from");
+
   const [inviteDoc, setInviteDoc] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   const [fromProfile, setFromProfile] = useState<any>(null);
   const [toProfile, setToProfile] = useState<any>(null);
 
-    const [showProfile, setShowProfile] = useState(false);
+    const [profileOpen, setProfileOpen] = useState(false);
 
   const me = auth.currentUser?.uid || null;
 
@@ -93,6 +96,29 @@ export default function InviteDetailsPage() {
 
     return () => unsub();
   }, [inviteId]);
+
+useEffect(() => {
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") setProfileOpen(false);
+  };
+  document.addEventListener("keydown", onKey);
+  return () => document.removeEventListener("keydown", onKey);
+}, []);
+
+useEffect(() => {
+  if (!profileOpen) return;
+
+  const prevOverflow = document.body.style.overflow;
+  const prevTouch = document.body.style.touchAction;
+
+  document.body.style.overflow = "hidden";
+  document.body.style.touchAction = "none";
+
+  return () => {
+    document.body.style.overflow = prevOverflow;
+    document.body.style.touchAction = prevTouch;
+  };
+}, [profileOpen]);
 
   const inv = inviteDoc?.invite || {};
   const court = inv?.court || null;
@@ -269,18 +295,51 @@ await addDoc(
   const otherProfile = isSender ? toProfile : fromProfile;
   const otherPhoto = otherProfile?.photoURL || otherProfile?.photoThumbURL || otherProfile?.avatar || null;
 
+  function handleBack() {
+  if (typeof window !== "undefined" && window.history.length > 1) {
+    router.back();
+    return;
+  }
+
+  if (inviteDoc?.conversationId) {
+    router.push(`/messages/${inviteDoc.conversationId}`);
+    return;
+  }
+
+  router.push("/messages");
+}
+
+function handleBack() {
+  if (from) {
+    router.push(from);
+    return;
+  }
+
+  if (typeof window !== "undefined" && window.history.length > 1) {
+    router.back();
+    return;
+  }
+
+  if (inviteDoc?.conversationId) {
+    router.push(`/messages/${inviteDoc.conversationId}`);
+    return;
+  }
+
+  router.push("/messages");
+}
+
   return (
     <div className="min-h-screen bg-white">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b px-4">
         <div className="h-[64px] flex items-center gap-3">
-          <button
-            onClick={() => router.push(`/messages/${inviteDoc.conversationId}`)}
-            className="h-10 w-10 rounded-full grid place-items-center hover:bg-black/5"
-            aria-label="Back"
-          >
-            <ArrowLeft className="w-5 h-5 text-gray-800" />
-          </button>
+<button
+  onClick={handleBack}
+  className="h-10 w-10 rounded-full grid place-items-center hover:bg-black/5"
+  aria-label="Back"
+>
+  <ArrowLeft className="w-5 h-5 text-gray-800" />
+</button>
 
           <div className="flex-1 min-w-0">
             <div className="truncate text-[18px] font-extrabold text-gray-900">{title}</div>
@@ -330,7 +389,7 @@ await addDoc(
 
               <button
                 type="button"
-                onClick={() => setShowProfile(true)}
+                onClick={() => setProfileOpen(true)}
                 className="mt-1 text-[12px] font-extrabold underline"
                 style={{ color: TM.ink }}
               >
@@ -458,13 +517,37 @@ await addDoc(
           </div>
         )}
       </div>
-       {/* Profile overlay */}
-      {showProfile && otherProfile && (
-        <PlayerProfileView
-          playerId={isSender ? inviteDoc?.toUserId : inviteDoc?.fromUserId}
-          onClose={() => setShowProfile(false)}
-        />
-      )}
+       {/* Profile overlay modal */}
+{profileOpen && otherProfile && (
+  <div className="fixed inset-0 z-[9999]">
+    {/* Backdrop */}
+    <div
+      className="absolute inset-0 bg-black/60"
+      onMouseDown={() => setProfileOpen(false)}
+    />
+
+    {/* Panel */}
+    <div className="absolute inset-0 flex items-start justify-center px-3 pt-3 pb-4 sm:items-center sm:p-6">
+      <div
+        className="w-full max-w-[560px] rounded-2xl shadow-2xl overflow-hidden"
+        style={{ background: "#071B15" }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            height: "min(88dvh, 820px)",
+            maxHeight: "min(88dvh, 820px)",
+          }}
+        >
+          <PlayerProfileView
+            playerId={isSender ? inviteDoc?.toUserId : inviteDoc?.fromUserId}
+            onClose={() => setProfileOpen(false)}
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }
