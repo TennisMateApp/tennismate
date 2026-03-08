@@ -6,6 +6,7 @@ import { Swords, CalendarDays, MapPin, GraduationCap, MapPin as Pin } from "luci
 import { GiTennisBall } from "react-icons/gi";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
+import PlayerProfileView from "@/components/players/PlayerProfileView";
 
 type ActivePlayer = {
   id: string;
@@ -80,6 +81,8 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
   } = props;
 
     const [openInviteId, setOpenInviteId] = useState<string | null>(null);
+    const [openPlayerId, setOpenPlayerId] = useState<string | null>(null);
+const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
 
   const TM = {
     forest: "#0B3D2E",
@@ -156,6 +159,13 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
 
     return null;
   };
+
+  const openConversationWithPlayer = (otherUid: string) => {
+  if (!uid || !otherUid) return;
+
+  const conversationId = [uid, otherUid].sort().join("_");
+  router.push(`/messages/${conversationId}`);
+};
 
   // ✅ Match status helpers
   const getMatchStatus = (m: any) => {
@@ -590,7 +600,12 @@ const isInvite = !!inviteId;
                         return (
                           <button
                             key={m.id}
-                            onClick={() => router.push("/matches")}
+                            onClick={() => {
+  setOpenPlayerId(otherUid);
+  setOpenPlayerCanMessage(
+    ["accepted", "confirmed"].includes(String(m.status || "").toLowerCase())
+  );
+}}
                             className="relative w-full min-h-[120px] overflow-hidden rounded-3xl p-5 text-left shadow-sm transition-transform hover:-translate-y-[1px]"
                             style={{
                               border: "1px solid rgba(0,0,0,0.08)",
@@ -618,17 +633,17 @@ const isInvite = !!inviteId;
                                 </div>
 
                                 <div className="mt-2 flex items-center gap-2 text-sm text-black/60">
-                                  <span
-                                    className="grid h-5 w-5 place-items-center rounded-full"
-                                    style={{
-                                      background: "rgba(22,163,74,0.12)",
-                                      border: "1px solid rgba(22,163,74,0.25)",
-                                    }}
-                                  >
-                                    <GiTennisBall size={12} color={matchAccent} />
-                                  </span>
-                                  <span>Tap to open</span>
-                                </div>
+  <span
+    className="grid h-5 w-5 place-items-center rounded-full"
+    style={{
+      background: "rgba(22,163,74,0.12)",
+      border: "1px solid rgba(22,163,74,0.25)",
+    }}
+  >
+    <GiTennisBall size={12} color={matchAccent} />
+  </span>
+  <span>Tap to view profile</span>
+</div>
                               </div>
 
                               <div
@@ -666,6 +681,59 @@ const isInvite = !!inviteId;
           </main>
         </div>
       </div>
+
+      {openPlayerId && (
+  <div className="fixed inset-0 z-[999]">
+    <div
+      className="absolute inset-0 bg-black/40"
+      onMouseDown={() => setOpenPlayerId(null)}
+    />
+
+    <div className="absolute inset-0 flex items-center justify-center p-4">
+      <div
+        className="w-full max-w-[560px] rounded-2xl overflow-hidden shadow-2xl"
+        style={{ background: "#071B15" }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div
+          className="relative"
+          style={{
+            height: "min(88dvh, 820px)",
+            maxHeight: "min(88dvh, 820px)",
+          }}
+        >
+          <PlayerProfileView
+            playerId={openPlayerId}
+            onClose={() => setOpenPlayerId(null)}
+          />
+
+          {openPlayerCanMessage && (
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/35 to-transparent pointer-events-none">
+              <div className="pointer-events-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const playerId = openPlayerId;
+                    setOpenPlayerId(null);
+                    if (playerId) openConversationWithPlayer(playerId);
+                  }}
+                  className="w-full rounded-2xl px-4 py-3 text-sm font-extrabold"
+                  style={{
+                    background: TM.neon,
+                    color: TM.forest,
+                  }}
+                >
+                  Send Message
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
             {openInviteId && (
         <div className="fixed inset-0 z-[999]">
           <div

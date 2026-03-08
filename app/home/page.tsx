@@ -35,6 +35,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { Capacitor } from "@capacitor/core";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
+import PlayerProfileView from "@/components/players/PlayerProfileView";
 
 
 const TM = {
@@ -501,6 +502,9 @@ const showDesktopWeb = !isApp && isDesktop;
 
   const [uid, setUid] = useState<string | null>(null);
   const [openInviteId, setOpenInviteId] = useState<string | null>(null);
+
+  const [openPlayerId, setOpenPlayerId] = useState<string | null>(null);
+const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
   
   const [nearbyActive, setNearbyActive] = useState<ActivePlayer[]>([]);
 const [nearbyActiveLoading, setNearbyActiveLoading] = useState(true);
@@ -867,6 +871,13 @@ useEffect(() => {
   };
 }, []);
 
+function openConversationWithPlayer(otherUid: string) {
+  if (!uid || !otherUid) return;
+
+  const conversationId = [uid, otherUid].sort().join("_");
+  router.push(`/messages/${conversationId}`);
+}
+
 const nextEvent = myCalendarEvents?.[0] ?? null;
 
 // ✅ DESKTOP WEB (not app) layout
@@ -1193,7 +1204,14 @@ const opponentName = directName || cachedName || "Player";
         return (
          <button
   key={m.id}
-  onClick={() => router.push("/matches")}
+  onClick={() => {
+  if (!otherUserId) return;
+
+  setOpenPlayerId(otherUserId);
+  setOpenPlayerCanMessage(
+    ["accepted", "confirmed"].includes(String(m.status || "").toLowerCase())
+  );
+}}
   className="group relative min-w-[240px] overflow-hidden rounded-3xl border text-left transition active:scale-[0.985] snap-start"
 style={{
   borderColor: CARD_BORDER,
@@ -1261,9 +1279,9 @@ style={{
 
 
 
-  <div className="mt-2 flex items-center gap-2 text-xs text-black/60">
+<div className="mt-2 flex items-center gap-2 text-xs text-black/60">
   <GiTennisBall className="h-4 w-4" style={{ color: matchAccent }} />
-  <span>Tap to open</span>
+  <span>Tap to view profile</span>
 </div>
 
 </div>
@@ -1339,6 +1357,59 @@ style={{
           </div>
         </div>
       </div>
+
+      {openPlayerId && (
+  <div className="fixed inset-0 z-[999]">
+    <div
+      className="absolute inset-0 bg-black/40"
+      onMouseDown={() => setOpenPlayerId(null)}
+    />
+
+    <div className="absolute inset-0 flex items-center justify-center p-4">
+      <div
+        className="w-full max-w-[560px] rounded-2xl overflow-hidden shadow-2xl"
+        style={{ background: "#071B15" }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div
+          className="relative"
+          style={{
+            height: "min(88dvh, 820px)",
+            maxHeight: "min(88dvh, 820px)",
+          }}
+        >
+          <PlayerProfileView
+            playerId={openPlayerId}
+            onClose={() => setOpenPlayerId(null)}
+          />
+
+          {openPlayerCanMessage && (
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/35 to-transparent pointer-events-none">
+              <div className="pointer-events-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const playerId = openPlayerId;
+                    setOpenPlayerId(null);
+                    if (playerId) openConversationWithPlayer(playerId);
+                  }}
+                  className="w-full rounded-2xl px-4 py-3 text-sm font-extrabold"
+                  style={{
+                    background: TM.neon,
+                    color: TM.forest,
+                  }}
+                >
+                  Send Message
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
 {openInviteId && (
   <div className="fixed inset-0 z-[999]">
     <div

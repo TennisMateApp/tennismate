@@ -1314,12 +1314,11 @@ useEffect(() => {
 
   // ===== RENDER =====
   return (
-    <div className="flex flex-col h-[100svh] bg-white overflow-hidden">
+   <div className="flex h-[100svh] flex-col bg-white overflow-hidden">
     {/* Header */}
 <div
-  className="sticky z-10 bg-white/95 backdrop-blur border-b px-3"
+  className="relative z-20 border-b bg-white px-3"
   style={{
-    top: "env(safe-area-inset-top, 0px)",
     paddingTop: "env(safe-area-inset-top, 0px)",
   }}
 >

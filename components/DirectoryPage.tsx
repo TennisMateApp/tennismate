@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, SlidersHorizontal, ChevronDown } from "lucide-react";
+import { Search, ChevronDown } from "lucide-react";
 import {
   collection,
   getDocs,
@@ -502,23 +502,11 @@ useEffect(() => {
     <div className="min-h-screen" style={{ background: TM.bg, color: TM.ink }}>
       <div className="mx-auto w-full max-w-md px-4 py-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-[22px] font-extrabold tracking-tight" style={{ color: TM.forest }}>
-            Players
-          </h1>
-
-          <button
-            type="button"
-            className="rounded-xl p-2 border"
-            style={{
-              borderColor: "rgba(11,61,46,0.12)",
-              background: "rgba(255,255,255,0.8)",
-            }}
-            aria-label="Filters"
-          >
-            <SlidersHorizontal className="h-5 w-5" style={{ color: TM.forest }} />
-          </button>
-        </div>
+        <div className="mb-3">
+  <h1 className="text-[22px] font-extrabold tracking-tight" style={{ color: TM.forest }}>
+    Players
+  </h1>
+</div>
 
         {/* Search */}
         <div
