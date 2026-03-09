@@ -475,11 +475,13 @@ function ChatPage() {
   const [isEventChat, setIsEventChat] = useState(false);
   const [eventTitle, setEventTitle] = useState<string | null>(null);
 
-  const [lastReadAt, setLastReadAt] = useState<number | null>(null);
-  const [showScrollDown, setShowScrollDown] = useState(false);
-  const [vvBottomInset, setVvBottomInset] = useState(0);
-  const [vvTopInset, setVvTopInset] = useState(0);
-  const [inputBarH, setInputBarH] = useState(56); // measured later
+const [lastReadAt, setLastReadAt] = useState<number | null>(null);
+const [showScrollDown, setShowScrollDown] = useState(false);
+const [vvBottomInset, setVvBottomInset] = useState(0);
+const [vvTopInset, setVvTopInset] = useState(0);
+const [inputBarH, setInputBarH] = useState(56); // measured later
+
+const headerTopOffset = Math.max(vvTopInset, 20);
 
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
 const [isOtherOnline, setIsOtherOnline] = useState(false);
@@ -1329,10 +1331,10 @@ useEffect(() => {
 <div
   className="relative z-20 border-b bg-white px-3"
   style={{
-    paddingTop: `${vvTopInset}px`,
+    paddingTop: `${headerTopOffset}px`,
   }}
 >
-  <div className="min-h-[64px] flex items-center gap-3 py-2">
+  <div className="min-h-[68px] flex items-center gap-3 py-2">
     {/* Back */}
     <button
       onClick={() => router.push("/messages")}
