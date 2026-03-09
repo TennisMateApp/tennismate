@@ -478,6 +478,7 @@ function ChatPage() {
   const [lastReadAt, setLastReadAt] = useState<number | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [vvBottomInset, setVvBottomInset] = useState(0);
+  const [vvTopInset, setVvTopInset] = useState(0);
   const [inputBarH, setInputBarH] = useState(56); // measured later
 
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
@@ -872,22 +873,31 @@ await clearMessageNotifsForConversation(u.uid, String(conversationID));
 
   // ===== VISUAL VIEWPORT (mobile keyboards) =====
   useEffect(() => {
-    const vv = (window as any).visualViewport;
-    if (!vv) return;
+  const vv = window.visualViewport;
+  if (!vv) return;
 
-    const computeInset = () => {
-      const bottomInset = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
-      setVvBottomInset(bottomInset);
-    };
+  const computeInset = () => {
+    const topInset = Math.max(0, vv.offsetTop);
+    const bottomInset = Math.max(
+      0,
+      window.innerHeight - (vv.height + vv.offsetTop)
+    );
 
-    computeInset();
-    vv.addEventListener("resize", computeInset);
-    vv.addEventListener("scroll", computeInset);
-    return () => {
-      vv.removeEventListener("resize", computeInset);
-      vv.removeEventListener("scroll", computeInset);
-    };
-  }, []);
+    setVvTopInset(topInset);
+    setVvBottomInset(bottomInset);
+  };
+
+  computeInset();
+  vv.addEventListener("resize", computeInset);
+  vv.addEventListener("scroll", computeInset);
+  window.addEventListener("resize", computeInset);
+
+  return () => {
+    vv.removeEventListener("resize", computeInset);
+    vv.removeEventListener("scroll", computeInset);
+    window.removeEventListener("resize", computeInset);
+  };
+}, []);
 
  useEffect(() => {
   // If the textarea is focused (keyboard up), always keep latest visible.
@@ -1319,10 +1329,10 @@ useEffect(() => {
 <div
   className="relative z-20 border-b bg-white px-3"
   style={{
-    paddingTop: "env(safe-area-inset-top, 0px)",
+    paddingTop: `${vvTopInset}px`,
   }}
 >
-  <div className="h-[64px] flex items-center gap-3">
+  <div className="min-h-[64px] flex items-center gap-3 py-2">
     {/* Back */}
     <button
       onClick={() => router.push("/messages")}
