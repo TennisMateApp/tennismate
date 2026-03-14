@@ -616,17 +616,6 @@ await addDoc(
   </div>
 )}
 
-            {canConfirmBooking && bookingStatus !== "confirmed" && (
-              <button
-                onClick={confirmBooked}
-                className="mt-3 w-full rounded-2xl py-3 text-sm font-extrabold"
-                style={{ background: TM.neon, color: TM.ink }}
-              >
-                I’ve booked the court ✅
-              </button>
-            )}
-          </div>
-        )}
       </div>
        {/* Profile overlay modal */}
 {profileOpen && otherProfile && (
