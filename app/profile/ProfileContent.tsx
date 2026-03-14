@@ -425,71 +425,70 @@ const getLatLngForPostcode = async (postcode: string): Promise<{ lat: number; ln
   return { lat, lng };
 };
 
-const saveProfile = async () => {
-  if (!user) return;
+const saveProfile = async (): Promise<boolean> => {
+  if (!user) return false;
 
   // Require a profile photo to save
-  if (!hasPhoto) {
-    setStatus("Please add a profile photo to continue.");
-    return;
-  }
+if (!hasPhoto) {
+  setStatus("Please add a profile photo to continue.");
+  return false;
+}
 
   // basic client-side validation
-  if (!formData.name.trim()) {
-    setStatus("Please enter your name.");
-    return;
-  }
-  if (!formData.skillBand) {
-    setStatus("Please choose a skill level.");
-    return;
-  }
-  if (!formData.availability || formData.availability.length === 0) {
-    setStatus("Please select at least one availability option.");
-    return;
-  }
+if (!formData.name.trim()) {
+  setStatus("Please enter your name.");
+  return false;
+}
+if (!formData.skillBand) {
+  setStatus("Please choose a skill level.");
+  return false;
+}
+if (!formData.availability || formData.availability.length === 0) {
+  setStatus("Please select at least one availability option.");
+  return false;
+}
 
   // Birth Year validation (18+)
   const currentYear = new Date().getFullYear();
   const by = typeof formData.birthYear === "number" ? formData.birthYear : null;
 
-  if (!by) {
-    setStatus("Please enter your birth year.");
-    return;
-  }
+if (!by) {
+  setStatus("Please enter your birth year.");
+  return false;
+}
 
   const age = currentYear - by;
 
-  if (!Number.isFinite(by) || by < 1900 || by > currentYear) {
-    setStatus("Please enter a valid birth year (e.g. 1994).");
-    return;
-  }
+if (!Number.isFinite(by) || by < 1900 || by > currentYear) {
+  setStatus("Please enter a valid birth year (e.g. 1994).");
+  return false;
+}
 
   if (age < 18) {
-    setStatus("TennisMate is for adults only (18+).");
-    return;
-  }
+  setStatus("TennisMate is for adults only (18+).");
+  return false;
+}
 
-  if (age > 110) {
-    setStatus("Please enter a valid birth year (e.g. 1994).");
-    return;
-  }
+if (age > 110) {
+  setStatus("Please enter a valid birth year (e.g. 1994).");
+  return false;
+}
 
   // AU postcode (4 digits), VIC + NSW only for now
   const trimmedPostcode = formData.postcode.trim();
 
-  if (!/^\d{4}$/.test(trimmedPostcode)) {
-    setStatus("Enter a valid 4-digit postcode.");
-    return;
-  }
+if (!/^\d{4}$/.test(trimmedPostcode)) {
+  setStatus("Enter a valid 4-digit postcode.");
+  return false;
+}
 
   const firstDigit = trimmedPostcode.charAt(0);
-  if (firstDigit !== "2" && firstDigit !== "3") {
-    setStatus(
-      "For now TennisMate is only available in VIC and NSW (postcodes starting with 2 or 3)."
-    );
-    return;
-  }
-
+if (firstDigit !== "2" && firstDigit !== "3") {
+  setStatus(
+    "For now TennisMate is only available in VIC and NSW (postcodes starting with 2 or 3)."
+  );
+  return false;
+}
   const newPostcode = trimmedPostcode;
   const oldPostcode = (originalPostcodeRef.current || "").trim();
   const postcodeChanged = newPostcode !== oldPostcode;
@@ -511,8 +510,8 @@ const saveProfile = async () => {
       } catch (err) {
         console.error("[Profile] postcode lookup failed", err);
         setStatus("❌ Could not find coordinates for that postcode. Please check it and try again.");
-        setSaving(false);
-        return;
+     setSaving(false);
+return false;
       }
     }
 
@@ -560,24 +559,23 @@ const saveProfile = async () => {
     originalPostcodeRef.current = newPostcode;
 
     setStatus("✅ Profile saved successfully!");
+    return true;
   } catch (e) {
     console.error(e);
     setStatus("❌ Error saving profile.");
+    return false;
   } finally {
     setSaving(false);
   }
 };
 
-
 const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
 
-  const before = saving; // not required, just clarity
-  await saveProfile();
+  const ok = await saveProfile();
 
-  // Only leave edit mode if save succeeded
-  if (!saving && status.includes("✅")) {
-    router.push("/profile");
+  if (ok) {
+    router.replace("/profile");
   }
 };
 
@@ -666,14 +664,14 @@ return (
     {/* TOP BAR */}
     <div className="flex items-center justify-between pt-2">
       <button
-        type="button"
-        onClick={() => router.back()}
-        className="h-10 w-10 rounded-full grid place-items-center"
-        style={{ background: "rgba(0,0,0,0.04)" }}
-        aria-label="Back"
-      >
-        <span className="text-xl" style={{ color: TM.forest }}>‹</span>
-      </button>
+  type="button"
+  onClick={() => router.push("/home")}
+  className="h-10 w-10 rounded-full grid place-items-center"
+  style={{ background: "rgba(0,0,0,0.04)" }}
+  aria-label="Back"
+>
+  <span className="text-xl" style={{ color: TM.forest }}>‹</span>
+</button>
 
       <div className="text-base font-extrabold" style={{ color: TM.forest }}>
         My Profile

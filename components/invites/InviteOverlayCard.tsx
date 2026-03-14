@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { CheckCircle2, XCircle, MapPin } from "lucide-react";
 import { auth, db } from "@/lib/firebaseConfig";
@@ -50,10 +51,15 @@ export default function InviteOverlayCard({
   inviteId: string;
   onClose?: () => void;
 }) {
-  const [inviteDoc, setInviteDoc] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [fromProfile, setFromProfile] = useState<any>(null);
-  const [toProfile, setToProfile] = useState<any>(null);
+  const router = useRouter();
+
+const [inviteDoc, setInviteDoc] = useState<any>(null);
+const [loading, setLoading] = useState(true);
+const [fromProfile, setFromProfile] = useState<any>(null);
+const [toProfile, setToProfile] = useState<any>(null);
+const [error, setError] = useState<string | null>(null);
+const [openingScore, setOpeningScore] = useState(false);
+const [scoreError, setScoreError] = useState<string | null>(null);
 
   // ✅ Auth can be null on first render — track it in state
   const [me, setMe] = useState<string | null>(null);
@@ -168,10 +174,13 @@ export default function InviteOverlayCard({
   const isRecipient = !!me && inviteDoc?.toUserId === me;
   const isSender = !!me && inviteDoc?.fromUserId === me;
 
-  const canConfirmBooking =
-    status === "accepted" && bookingStatus !== "confirmed" && (isSender || isRecipient);
+const canConfirmBooking =
+  status === "accepted" && bookingStatus !== "confirmed" && (isSender || isRecipient);
 
-    const [error, setError] = useState<string | null>(null);
+const canRecordScore =
+  status === "accepted" &&
+  bookingStatus === "confirmed" &&
+  (isSender || isRecipient);
 
   // ✅ Keep invite doc + message doc in sync (same as InviteDetailsPage)
   async function updateInviteEverywhere(patch: Record<string, any>) {
@@ -226,6 +235,103 @@ export default function InviteOverlayCard({
     });
   }
 
+  async function resolveMatchIdForInvite(): Promise<string | null> {
+  if (!inviteDoc) return null;
+
+  // Best case: invite already stores matchId
+  if (typeof inviteDoc.matchId === "string" && inviteDoc.matchId.trim()) {
+    return inviteDoc.matchId.trim();
+  }
+
+  const fromUserId = inviteDoc.fromUserId;
+  const toUserId = inviteDoc.toUserId;
+  const conversationId = inviteDoc.conversationId;
+
+  // Try by conversation first
+  if (conversationId) {
+    const byConversationQ = query(
+      collection(db, "match_requests"),
+      where("conversationId", "==", conversationId)
+    );
+
+    const byConversationSnap = await getDocs(byConversationQ);
+
+    const candidates = byConversationSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as any))
+      .filter((m) => {
+        const a = m.fromUserId;
+        const b = m.toUserId;
+        return (
+          (a === fromUserId && b === toUserId) ||
+          (a === toUserId && b === fromUserId)
+        );
+      });
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => {
+        const aMs = a.updatedAt?.toMillis?.() ?? a.createdAt?.toMillis?.() ?? 0;
+        const bMs = b.updatedAt?.toMillis?.() ?? b.createdAt?.toMillis?.() ?? 0;
+        return bMs - aMs;
+      });
+
+      return candidates[0].id;
+    }
+  }
+
+  // Fallback: direct pair lookup
+  const q1 = query(
+    collection(db, "match_requests"),
+    where("fromUserId", "==", fromUserId),
+    where("toUserId", "==", toUserId)
+  );
+
+  const q2 = query(
+    collection(db, "match_requests"),
+    where("fromUserId", "==", toUserId),
+    where("toUserId", "==", fromUserId)
+  );
+
+  const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+
+  const candidates = [...snap1.docs, ...snap2.docs].map((d) => ({
+    id: d.id,
+    ...d.data(),
+  })) as any[];
+
+  if (!candidates.length) return null;
+
+  candidates.sort((a, b) => {
+    const aMs = a.updatedAt?.toMillis?.() ?? a.createdAt?.toMillis?.() ?? 0;
+    const bMs = b.updatedAt?.toMillis?.() ?? b.createdAt?.toMillis?.() ?? 0;
+    return bMs - aMs;
+  });
+
+  return candidates[0].id;
+}
+
+async function goToRecordScore() {
+  if (!inviteDoc) return;
+
+  try {
+    setOpeningScore(true);
+    setScoreError(null);
+
+    const matchId = await resolveMatchIdForInvite();
+
+    if (!matchId) {
+      setScoreError("Could not find the linked match for this invite yet.");
+      return;
+    }
+
+    onClose?.();
+    router.push(`/matches/${matchId}/complete/details?fromInvite=${inviteId}`);
+  } catch (err) {
+    console.error("InviteOverlayCard: failed to open score entry", err);
+    setScoreError("Could not open score entry.");
+  } finally {
+    setOpeningScore(false);
+  }
+}
   async function deleteRelatedCalendarEvents(conversationId: string, messageId: string) {
     const qRef = query(
       collection(db, "calendar_events"),
@@ -343,10 +449,13 @@ const mapsEmbedSrc = mapQuery
   }
 
   return (
-    <div className="h-full flex flex-col">
+   <div className="h-full min-h-0 flex flex-col">
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-4 space-y-4">
+      <div
+  className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4 [-webkit-overflow-scrolling:touch]"
+  style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 120px)" }}
+>
         {/* Opponent */}
         <div className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center gap-3">
           {otherPhoto ? (
@@ -466,28 +575,46 @@ const mapsEmbedSrc = mapQuery
   </div>
 )}
 
-        {status === "accepted" && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-3">
-            <div className="text-xs font-extrabold text-slate-700">COURT BOOKING</div>
-            <div className="mt-2 text-sm font-extrabold">
-              {bookingStatus === "confirmed" ? (
-                <span className="text-green-700">🟢 Confirmed</span>
-              ) : (
-                <span className="text-red-600">🔴 Not confirmed</span>
-                
-              )}
-            </div>
-            {canConfirmBooking && bookingStatus !== "confirmed" && (
-  <button
-    onClick={confirmBooked}
-    className="mt-3 w-full rounded-2xl py-3 text-sm font-extrabold"
-    style={{ background: TM.neon, color: TM.ink }}
-  >
-    I’ve booked the court ✅
-  </button>
+{status === "accepted" && (
+  <div className="rounded-2xl border border-slate-200 bg-white p-3">
+    <div className="text-xs font-extrabold text-slate-700">COURT BOOKING</div>
+
+    <div className="mt-2 text-sm font-extrabold">
+      {bookingStatus === "confirmed" ? (
+        <span className="text-green-700">🟢 Confirmed</span>
+      ) : (
+        <span className="text-red-600">🔴 Not confirmed</span>
+      )}
+    </div>
+
+    {canConfirmBooking && bookingStatus !== "confirmed" && (
+      <button
+        onClick={confirmBooked}
+        className="mt-3 w-full rounded-2xl py-3 text-sm font-extrabold"
+        style={{ background: TM.neon, color: TM.ink }}
+      >
+        I’ve booked the court ✅
+      </button>
+    )}
+
+    {canRecordScore && (
+      <button
+        onClick={goToRecordScore}
+        disabled={openingScore}
+        className="mt-3 w-full rounded-2xl py-3 text-sm font-extrabold disabled:opacity-60"
+        style={{ background: "#16A34A", color: "white" }}
+      >
+        {openingScore ? "Opening score entry…" : "Record Match Score"}
+      </button>
+    )}
+
+    {scoreError && (
+      <div className="mt-3 text-xs font-bold text-red-600">
+        {scoreError}
+      </div>
+    )}
+  </div>
 )}
-          </div>
-        )}
       </div>
     </div>
   );

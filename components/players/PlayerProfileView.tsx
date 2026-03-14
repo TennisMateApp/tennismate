@@ -10,6 +10,8 @@ import {
   where,
   getDocs,
   getCountFromServer,
+  addDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import Image from "next/image";
 import { onAuthStateChanged } from "firebase/auth";
@@ -108,6 +110,10 @@ export default function PlayerProfileView({
   });
   const [showFullBio, setShowFullBio] = useState(false);
   const [hasPendingOrAccepted, setHasPendingOrAccepted] = useState(false);
+  const [sendingInvite, setSendingInvite] = useState(false);
+const [inviteError, setInviteError] = useState<string | null>(null);
+const [inviteSent, setInviteSent] = useState(false);
+const [currentUid, setCurrentUid] = useState<string | null>(null);
 
   useEffect(() => {
     if (!playerId) return;
@@ -241,16 +247,133 @@ export default function PlayerProfileView({
       }
     };
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) fetchPlayerAndStats(user.uid);
-      else {
-        console.warn("User not signed in");
-        setLoading(false);
-      }
-    });
+   const unsubscribe = onAuthStateChanged(auth, (user) => {
+  if (user) {
+    setCurrentUid(user.uid);
+    fetchPlayerAndStats(user.uid);
+  } else {
+    console.warn("User not signed in");
+    setCurrentUid(null);
+    setLoading(false);
+  }
+});
 
     return () => unsubscribe();
   }, [playerId]);
+
+  const resolveRecipientUid = (): string | null => {
+  if (!player) return null;
+
+  const uid =
+    typeof player.userId === "string" && player.userId.trim()
+      ? player.userId.trim()
+      : typeof playerId === "string" && playerId.trim()
+      ? playerId.trim()
+      : null;
+
+  console.log("[PlayerProfileView] Derived recipient UID:", {
+    playerId,
+    playerUserId: player.userId,
+    finalUid: uid,
+  });
+
+  return uid;
+};
+
+const handleInviteToPlay = async () => {
+  if (!player || !currentUid) return;
+  if (sendingInvite) return;
+
+  const toUid = resolveRecipientUid();
+
+  if (!toUid) {
+    console.error("[PlayerProfileView] Missing recipient UID", { player, playerId });
+    setInviteError("Could not send request. Please refresh and try again.");
+    return;
+  }
+
+  if (toUid === currentUid) {
+    setInviteError("You cannot send a match request to yourself.");
+    return;
+  }
+
+  try {
+    setSendingInvite(true);
+    setInviteError(null);
+
+    // same defensive check style as Match page
+    const activeStatuses = ["pending", "accepted", "unread", "requested"];
+
+    const q1 = query(
+      collection(db, "match_requests"),
+      where("fromUserId", "==", currentUid),
+      where("toUserId", "==", toUid),
+      where("status", "in", activeStatuses)
+    );
+
+    const q2 = query(
+      collection(db, "match_requests"),
+      where("fromUserId", "==", toUid),
+      where("toUserId", "==", currentUid),
+      where("status", "in", activeStatuses)
+    );
+
+    const [existingSent, existingReceived] = await Promise.all([
+      getDocs(q1),
+      getDocs(q2),
+    ]);
+
+    if (!existingSent.empty || !existingReceived.empty) {
+      setHasPendingOrAccepted(true);
+      setInviteSent(true);
+      return;
+    }
+
+    // load my profile so this matches the Match page payload
+    const myProfileSnap = await getDoc(doc(db, "players", currentUid));
+    const myProfileData = myProfileSnap.exists() ? (myProfileSnap.data() as any) : null;
+
+    const fromName =
+      typeof myProfileData?.name === "string" ? myProfileData.name : null;
+
+    const fromPostcode =
+      typeof myProfileData?.postcode === "string" ? myProfileData.postcode : null;
+
+    const fromPhotoURL =
+      myProfileData?.photoThumbURL ||
+      myProfileData?.photoURL ||
+      myProfileData?.avatar ||
+      null;
+
+    const ref = await addDoc(collection(db, "match_requests"), {
+      fromUserId: currentUid,
+      toUserId: toUid,
+      status: "pending",
+      timestamp: serverTimestamp(),
+
+      fromName,
+      fromPostcode,
+      fromPhotoURL,
+
+      toName: player.name ?? null,
+      toPostcode: player.postcode ?? null,
+      toPhotoURL: player.photoURL ?? null,
+    });
+
+    console.log("[PlayerProfileView] ✅ match_requests created:", ref.id, {
+      from: currentUid,
+      to: toUid,
+    });
+
+    setInviteSent(true);
+    setHasPendingOrAccepted(true);
+  } catch (err: any) {
+    console.error("Failed to send match request from profile view:", err);
+    setInviteError(err?.message ?? "Could not send request.");
+  } finally {
+    setSendingInvite(false);
+  }
+};
 
   if (loading) {
     return (
@@ -277,8 +400,9 @@ export default function PlayerProfileView({
       ? player.utr
       : null;
 
-  const showInviteCTA = !hasPendingOrAccepted;
-  const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
+ const showInviteCTA = !!player && currentUid !== player.userId;
+const isPendingState = hasPendingOrAccepted || inviteSent;
+const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
 
  return (
 <div
@@ -502,41 +626,49 @@ export default function PlayerProfileView({
 
     {/* ✅ CTA is OUTSIDE scroll container */}
         {/* ✅ CTA is OUTSIDE scroll container */}
-    {showInviteCTA && (
-      <div
-        className="sticky bottom-0 p-4"
+{showInviteCTA && (
+  <div
+    className="sticky bottom-0 p-4"
+    style={{
+      background:
+        "linear-gradient(180deg, rgba(7,27,21,0) 0%, rgba(7,27,21,0.92) 40%, rgba(7,27,21,0.98) 100%)",
+      paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+      borderTop: "1px solid rgba(255,255,255,0.08)",
+      backdropFilter: "blur(10px)",
+      WebkitBackdropFilter: "blur(10px)",
+    }}
+  >
+    <button
+      type="button"
+      onClick={handleInviteToPlay}
+      disabled={sendingInvite}
+      className="w-full h-16 rounded-full flex items-center justify-center gap-4 font-extrabold tracking-wide transition active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+      style={{
+        background: TM.neon,
+        color: TM.forest,
+        boxShadow: "0 14px 36px rgba(57,255,20,0.45)",
+      }}
+    >
+      <span
+        aria-hidden
         style={{
-          background:
-            "linear-gradient(180deg, rgba(7,27,21,0) 0%, rgba(7,27,21,0.92) 40%, rgba(7,27,21,0.98) 100%)",
-          paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
-          borderTop: "1px solid rgba(255,255,255,0.08)",
-          backdropFilter: "blur(10px)",
-          WebkitBackdropFilter: "blur(10px)",
+          width: 0,
+          height: 0,
+          borderTop: "9px solid transparent",
+          borderBottom: "9px solid transparent",
+          borderLeft: "16px solid #000000",
         }}
-      >
-        <button
-          className="w-full h-16 rounded-full flex items-center justify-center gap-4 font-extrabold tracking-wide transition active:scale-[0.98]"
-          style={{
-            background: TM.neon,
-            color: TM.forest,
-            boxShadow: "0 14px 36px rgba(57,255,20,0.45)",
-          }}
-        >
-          <span
-            aria-hidden
-            style={{
-              width: 0,
-              height: 0,
-              borderTop: "9px solid transparent",
-              borderBottom: "9px solid transparent",
-              borderLeft: "16px solid #000000",
-            }}
-          />
-          <span className="text-base">Invite to Play</span>
-        </button>
-      </div>
-    )}
+      />
+      <span className="text-base">
+        {sendingInvite ? "Sending…" : "Invite to Play"}
+      </span>
+    </button>
 
+    {inviteError && (
+      <p className="mt-3 text-sm text-center text-red-300">{inviteError}</p>
+    )}
+  </div>
+)}
   </div>
 );
 

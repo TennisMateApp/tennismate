@@ -56,8 +56,33 @@ export default function InviteDetailsPage() {
   const [toProfile, setToProfile] = useState<any>(null);
 
     const [profileOpen, setProfileOpen] = useState(false);
+    const [openingScore, setOpeningScore] = useState(false);
+const [scoreError, setScoreError] = useState<string | null>(null);
 
   const me = auth.currentUser?.uid || null;
+
+  async function goToRecordScore() {
+  if (!inviteDoc) return;
+
+  try {
+    setOpeningScore(true);
+    setScoreError(null);
+
+    const matchId = await resolveMatchIdForInvite();
+
+    if (!matchId) {
+      setScoreError("Could not find the linked match for this invite yet.");
+      return;
+    }
+
+    router.push(`/matches/${matchId}/complete/details?fromInvite=${inviteId}`);
+  } catch (err) {
+    console.error("Failed to open score entry:", err);
+    setScoreError("Could not open score entry.");
+  } finally {
+    setOpeningScore(false);
+  }
+}
 
   // Live subscribe to invite doc
   useEffect(() => {
@@ -137,6 +162,10 @@ useEffect(() => {
   const bookingStatus = inviteDoc?.inviteBookingStatus || "not_confirmed";
   const canConfirmBooking = status === "accepted" && bookingStatus !== "confirmed" && (isSender || isRecipient);
 
+  const canRecordScore =
+  status === "accepted" &&
+  (isSender || isRecipient);
+
   async function updateInviteEverywhere(patch: Record<string, any>) {
     if (!inviteDoc?.conversationId || !inviteDoc?.messageId) return;
 
@@ -203,6 +232,81 @@ useEffect(() => {
 
   // Delete them all
   await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+}
+
+async function resolveMatchIdForInvite(): Promise<string | null> {
+  if (!inviteDoc) return null;
+
+  // 1) Best case: already linked directly on invite doc
+  if (typeof inviteDoc.matchId === "string" && inviteDoc.matchId.trim()) {
+    return inviteDoc.matchId.trim();
+  }
+
+  // 2) Fallback: try to find a match_request linked to this invite/conversation/users
+  const fromUserId = inviteDoc.fromUserId;
+  const toUserId = inviteDoc.toUserId;
+  const conversationId = inviteDoc.conversationId;
+
+  // Try by conversation first
+  if (conversationId) {
+    const byConversationQ = query(
+      collection(db, "match_requests"),
+      where("conversationId", "==", conversationId)
+    );
+
+    const byConversationSnap = await getDocs(byConversationQ);
+
+    const candidates = byConversationSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as any))
+      .filter((m) => {
+        const a = m.fromUserId;
+        const b = m.toUserId;
+        return (
+          (a === fromUserId && b === toUserId) ||
+          (a === toUserId && b === fromUserId)
+        );
+      });
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => {
+        const aMs = a.updatedAt?.toMillis?.() ?? a.createdAt?.toMillis?.() ?? 0;
+        const bMs = b.updatedAt?.toMillis?.() ?? b.createdAt?.toMillis?.() ?? 0;
+        return bMs - aMs;
+      });
+
+      return candidates[0].id;
+    }
+  }
+
+  // 3) Fallback: direct pair lookup
+  const q1 = query(
+    collection(db, "match_requests"),
+    where("fromUserId", "==", fromUserId),
+    where("toUserId", "==", toUserId)
+  );
+
+  const q2 = query(
+    collection(db, "match_requests"),
+    where("fromUserId", "==", toUserId),
+    where("toUserId", "==", fromUserId)
+  );
+
+  const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+
+  const candidates = [...snap1.docs, ...snap2.docs].map((d) => ({
+    id: d.id,
+    ...d.data(),
+  })) as any[];
+
+  if (!candidates.length) return null;
+
+  candidates.sort((a, b) => {
+    const aMs = a.updatedAt?.toMillis?.() ?? a.createdAt?.toMillis?.() ?? 0;
+    const bMs = b.updatedAt?.toMillis?.() ?? b.createdAt?.toMillis?.() ?? 0;
+    return bMs - aMs;
+  });
+
+  return candidates[0].id;
 }
 
 async function cancelInvite() {
@@ -469,19 +573,48 @@ await addDoc(
           </div>
         )}
 
-        {status === "accepted" && (
-          <div className="rounded-3xl border p-4" style={{ borderColor: "rgba(11,61,46,0.10)" }}>
-            <div className="text-[12px] font-extrabold text-black/70">COURT BOOKING</div>
+     {status === "accepted" && (
+  <div className="rounded-3xl border p-4" style={{ borderColor: "rgba(11,61,46,0.10)" }}>
+    <div className="text-[12px] font-extrabold text-black/70">COURT BOOKING</div>
 
-            {bookingStatus === "confirmed" ? (
-              <div className="mt-2 text-[13px] font-extrabold" style={{ color: "#16A34A" }}>
-                🟢 Confirmed
-              </div>
-            ) : (
-              <div className="mt-2 text-[13px] font-extrabold" style={{ color: "#DC2626" }}>
-                🔴 Not confirmed
-              </div>
-            )}
+    {bookingStatus === "confirmed" ? (
+      <div className="mt-2 text-[13px] font-extrabold" style={{ color: "#16A34A" }}>
+        🟢 Confirmed
+      </div>
+    ) : (
+      <div className="mt-2 text-[13px] font-extrabold" style={{ color: "#DC2626" }}>
+        🔴 Not confirmed
+      </div>
+    )}
+
+    {canConfirmBooking && bookingStatus !== "confirmed" && (
+      <button
+        onClick={confirmBooked}
+        className="mt-3 w-full rounded-2xl py-3 text-sm font-extrabold"
+        style={{ background: TM.neon, color: TM.ink }}
+      >
+        I’ve booked the court ✅
+      </button>
+    )}
+
+    {canRecordScore && (
+      <button
+        onClick={goToRecordScore}
+        disabled={openingScore}
+        className="mt-3 w-full rounded-2xl py-3 text-sm font-extrabold disabled:opacity-60"
+        style={{ background: "#16A34A", color: "white" }}
+      >
+        {openingScore ? "Opening score entry…" : "Record Match Score"}
+      </button>
+    )}
+
+    {scoreError && (
+      <div className="mt-3 text-[12px] font-bold text-red-600">
+        {scoreError}
+      </div>
+    )}
+  </div>
+)}
 
             {canConfirmBooking && bookingStatus !== "confirmed" && (
               <button

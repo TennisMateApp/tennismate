@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   collection,
   doc,
@@ -83,6 +84,7 @@ return player;
 type Filter = "all" | "singles" | "doubles" | "social" | "mine";
 
 export default function EventsPage() {
+  const router = useRouter();
   const [events, setEvents] = useState<EnrichedEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
@@ -139,16 +141,25 @@ const ev: EnrichedEvent = { ...data, id: d.id };
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-6">
-{/* HEADER (matches screenshot) */}
+{/* HEADER */}
 <section className="mb-6">
-  {/* Top row: icon + title (NO human icon) */}
-  <div className="flex items-center gap-2 px-1">
+  {/* Top row: back + icon + title */}
+  <div className="flex items-center gap-3 px-1">
+    <button
+      type="button"
+      onClick={() => router.push("/home")}
+      className="h-10 w-10 rounded-full grid place-items-center"
+      style={{ background: "rgba(0,0,0,0.04)" }}
+      aria-label="Back"
+    >
+      <span className="text-xl" style={{ color: "#0B3D2E" }}>‹</span>
+    </button>
+
     <div
       className="h-7 w-7 rounded-full grid place-items-center"
-      style={{ background: "#39FF14" }} // TM neon
+      style={{ background: "#39FF14" }}
       aria-hidden="true"
     >
-      {/* simple “events” glyph */}
       <CalendarDays className="h-4 w-4" style={{ color: "#0B3D2E" }} />
     </div>
 

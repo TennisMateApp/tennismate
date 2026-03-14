@@ -166,13 +166,12 @@ const ACTIVE_RADIUS_KM = 10;
 const ACTIVE_LOOKBACK_DAYS = 7;
 const ACTIVE_LOOKBACK_HOURS = ACTIVE_LOOKBACK_DAYS * 24;
 const MAX_BOUND_READS = 60;   // max docs per geohash bound query (read safety)
-const SHOW_TOP_N = 8;
 const MAX_ACTIVE_AVATARS = 15;
 
 // -----------------------
 // Nearby Active cache
 // -----------------------
-const NEARBY_ACTIVE_CACHE_KEY = "tm_nearbyActive_v1";
+const NEARBY_ACTIVE_CACHE_KEY = "tm_nearbyActive_v3";
 const NEARBY_ACTIVE_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 
@@ -413,41 +412,39 @@ async function loadNearbyActivePlayers(uid: string): Promise<ActivePlayer[]> {
   const seen = new Set<string>();
   const candidates: ActivePlayer[] = [];
 
-await Promise.all(
-  bounds.map(async ([start, end]) => {
-    const q = query(
-      collection(db, "players"),
-      orderBy("geohash"),
-      startAt(start),
-      endAt(end),
-      limit(MAX_BOUND_READS)
-    );
+  await Promise.all(
+    bounds.map(async ([start, end]) => {
+      const q = query(
+        collection(db, "players"),
+        orderBy("geohash"),
+        startAt(start),
+        endAt(end),
+        limit(MAX_BOUND_READS)
+      );
 
-    const snap = await getDocs(q);
+      const snap = await getDocs(q);
 
-    snap.forEach((d) => {
-      if (d.id === uid) return;
-      if (seen.has(d.id)) return;
-      seen.add(d.id);
+      snap.forEach((d) => {
+        if (d.id === uid) return;
+        if (seen.has(d.id)) return;
+        seen.add(d.id);
 
-      const p: any = d.data();
-      candidates.push({
-        id: d.id,
-        name: typeof p.name === "string" ? p.name : undefined,
-        photoThumbURL: typeof p.photoThumbURL === "string" ? p.photoThumbURL : null,
-        photoURL: typeof p.photoURL === "string" ? p.photoURL : null,
-        avatar: typeof p.avatar === "string" ? p.avatar : null,
-        lastActiveAt: p.lastActiveAt ?? null,
-        lat: typeof p.lat === "number" ? p.lat : null,
-        lng: typeof p.lng === "number" ? p.lng : null,
+        const p: any = d.data();
+        candidates.push({
+          id: d.id,
+          name: typeof p.name === "string" ? p.name : undefined,
+          photoThumbURL: typeof p.photoThumbURL === "string" ? p.photoThumbURL : null,
+          photoURL: typeof p.photoURL === "string" ? p.photoURL : null,
+          avatar: typeof p.avatar === "string" ? p.avatar : null,
+          lastActiveAt: p.lastActiveAt ?? null,
+          lat: typeof p.lat === "number" ? p.lat : null,
+          lng: typeof p.lng === "number" ? p.lng : null,
+        });
       });
-    });
-  })
-);
+    })
+  );
 
-
-
-  // 4) Filter to last 48h + exact 10km + sort most recent
+  // 4) Filter to exact 10km + recent activity + sort most recent
   const sinceMs = Date.now() - ACTIVE_LOOKBACK_HOURS * 60 * 60 * 1000;
 
   const filtered = candidates
@@ -466,7 +463,7 @@ await Promise.all(
 
   filtered.sort((a, b) => b._lastActiveMs - a._lastActiveMs);
 
-  return filtered.slice(0, SHOW_TOP_N);
+  return filtered;
 }
 
 function getOtherUserId(m: any, myUid: string) {
@@ -841,22 +838,23 @@ useEffect(() => {
 
   (async () => {
     try {
-      // ✅ 1) Try cache first (no Firestore reads)
       const cached = loadNearbyActiveCache(u.uid);
+
       if (cached && alive) {
+        console.log("[Home] nearby active loaded from cache:", cached.length);
         setNearbyActive(cached);
         setNearbyActiveLoading(false);
         return;
       }
 
-      // ✅ 2) No cache (or expired) -> fetch from Firestore
       setNearbyActiveLoading(true);
+
       const players = await loadNearbyActivePlayers(u.uid);
       if (!alive) return;
 
-      setNearbyActive(players);
+      console.log("[Home] nearby active fetched from firestore:", players.length);
 
-      // ✅ 3) Save to cache
+      setNearbyActive(players);
       saveNearbyActiveCache(u.uid, players);
     } catch (e) {
       console.warn("[Home] loadNearbyActivePlayers failed:", e);
