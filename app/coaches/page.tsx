@@ -23,8 +23,6 @@ import { TMDesktopCoachDirectory } from "@/components/coachdirectory/TMDesktopCo
 
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 
-
-
 type CoachListItem = {
   id: string;
   name: string;
@@ -205,6 +203,7 @@ export default function CoachesListPage() {
   const [error, setError] = useState<string | null>(null);
   const [canSeeCoaches, setCanSeeCoaches] = useState<boolean>(true);
   const [search, setSearch] = useState("");
+  const [isCoachRole, setIsCoachRole] = useState(false); // ✅ ADD
 
   // ✅ MUST be here (top-level hook)
   const [sidebarPlayer, setSidebarPlayer] = useState<{
@@ -233,8 +232,18 @@ export default function CoachesListPage() {
           if (!cancelled) {
             setCanSeeCoaches(false);
             setCoaches([]);
+            setIsCoachRole(false);
           }
           return;
+        }
+
+        // ✅ Check user role
+        const userSnap = await getDoc(doc(db, "users", uid));
+        const userData = (userSnap.data() as any) || {};
+        const role = String(userData?.role ?? "").toLowerCase();
+
+        if (!cancelled) {
+          setIsCoachRole(role === "coach");
         }
 
         const playerSnap = await getDoc(doc(db, "players", uid));
@@ -292,7 +301,6 @@ export default function CoachesListPage() {
     };
   }, [coachesCol]);
 
-
   const visibleCoaches = useMemo(() => {
     const s = search.trim().toLowerCase();
     if (!s) return coaches;
@@ -311,43 +319,55 @@ export default function CoachesListPage() {
     });
   }, [coaches, search]);
 
- if (!loading && !error && canSeeCoaches && isDesktop) {
-  return (
-    <div className="min-h-screen" style={{ background: "#F7FAF8" }}>
-      <div className="w-full px-8 2xl:px-12 py-8">
-        <div className="grid gap-4 xl:grid-cols-[280px_1fr]">
-          {/* Sidebar */}
-          <TMDesktopSidebar
-            active="Search"  // or "Home" if your sidebar doesn’t support Coaches yet
-            player={{
-              name: sidebarPlayer.name,
-              skillLevel: sidebarPlayer.skillLevel,
-              photoURL: sidebarPlayer.avatarUrl,
-              photoThumbURL: sidebarPlayer.avatarUrl,
-              avatar: sidebarPlayer.avatarUrl,
-            }}
-          />
+  if (!loading && !error && canSeeCoaches && isDesktop) {
+    return (
+      <div className="min-h-screen" style={{ background: "#F7FAF8" }}>
+        <div className="w-full px-8 2xl:px-12 py-8">
+          <div className="grid gap-4 xl:grid-cols-[280px_1fr]">
+            {/* Sidebar */}
+            <TMDesktopSidebar
+              active="Search"
+              player={{
+                name: sidebarPlayer.name,
+                skillLevel: sidebarPlayer.skillLevel,
+                photoURL: sidebarPlayer.avatarUrl,
+                photoThumbURL: sidebarPlayer.avatarUrl,
+                avatar: sidebarPlayer.avatarUrl,
+              }}
+            />
 
-          {/* Main */}
-          <main className="min-w-0">
-            <div className="mx-auto max-w-6xl">
-            <TMDesktopCoachDirectory
-  loading={loading}
-  coaches={visibleCoaches}
-  totalCoaches={coaches.length} // or null if you don’t want it
-  search={search}
-  setSearch={setSearch}
-  onViewProfile={(coachId) => recordCoachProfileClickUnique(coachId)}
-  onContactCoach={(coachId) => handleContactCoach(coachId)}
-/>
-            </div>
-          </main>
+            {/* Main */}
+            <main className="min-w-0">
+              <div className="mx-auto max-w-6xl">
+                {/* ✅ ADD: coach-only CTA */}
+                {isCoachRole && (
+                  <div className="mb-4 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => router.push("/coach/profile")}
+                      className="inline-flex items-center justify-center rounded-xl bg-[#39FF14] px-4 py-2.5 text-sm font-semibold text-[#0B3D2E] shadow-sm hover:brightness-95"
+                    >
+                      Create Coach Profile
+                    </button>
+                  </div>
+                )}
+
+                <TMDesktopCoachDirectory
+                  loading={loading}
+                  coaches={visibleCoaches}
+                  totalCoaches={coaches.length}
+                  search={search}
+                  setSearch={setSearch}
+                  onViewProfile={(coachId) => recordCoachProfileClickUnique(coachId)}
+                  onContactCoach={(coachId) => handleContactCoach(coachId)}
+                />
+              </div>
+            </main>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
-
+    );
+  }
 
   // ----- Existing Loading / Error / Mobile UI below -----
 
@@ -439,6 +459,19 @@ export default function CoachesListPage() {
               />
             </div>
           </div>
+
+          {/* ✅ ADD: coach-only CTA on mobile */}
+          {isCoachRole && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => router.push("/coach/profile")}
+                className="w-full rounded-2xl bg-[#39FF14] px-4 py-3 text-sm font-semibold text-[#0B3D2E] shadow-sm hover:brightness-95"
+              >
+                Create Coach Profile
+              </button>
+            </div>
+          )}
         </div>
 
         {!canSeeCoaches ? (
