@@ -8,6 +8,7 @@ import Image from "next/image";
 import withAuth from "@/components/withAuth";
 import { ComponentType } from "react";
 import { GiTennisBall } from "react-icons/gi";
+import ClientLayoutWrapper from "@/components/ClientLayoutWrapper";
 
 type Player = { id: string; name?: string; photoURL?: string };
 
@@ -280,6 +281,13 @@ const [matchComments, setMatchComments] = useState("");
     const scoreText = formatScoreline(clean);
     const winnerId = computeWinner(clean, playerA, playerB);
 
+const cleanedSets = clean.map(s => ({
+  A: s.A,
+  B: s.B,
+  ...(s.tieBreakA != null ? { tieBreakA: s.tieBreakA } : {}),
+  ...(s.tieBreakB != null ? { tieBreakB: s.tieBreakB } : {}),
+}));
+
 await setDoc(
   doc(db, "match_scores", matchId as string),
   {
@@ -288,24 +296,48 @@ await setDoc(
     livePoints,
     tiebreakMode,
     matchComments,
-    sets: clean.map(s => ({
-      A: s.A,
-      B: s.B,
-      ...(s.tieBreakA != null ? { tieBreakA: s.tieBreakA } : {}),
-      ...(s.tieBreakB != null ? { tieBreakB: s.tieBreakB } : {}),
-    })),
+    sets: cleanedSets,
     updatedAt: serverTimestamp(),
   },
   { merge: true }
 );
 
-  await updateDoc(doc(db, "match_requests", matchId as string), {
+await updateDoc(doc(db, "match_requests", matchId as string), {
   matchType: type,
   score: scoreText,
   completed: true,
+  status: "completed",
   winnerId,
   ...(fromInvite ? { inviteId: fromInvite, completedFrom: "invite" } : {}),
 });
+
+// ✅ CREATE / UPDATE MATCH HISTORY
+await setDoc(
+  doc(db, "match_history", matchId as string),
+  {
+    matchRequestId: matchId,
+    players: [playerA.id, playerB.id],
+    fromUserId: playerA.id,
+    toUserId: playerB.id,
+    fromName: playerA.name ?? null,
+    toName: playerB.name ?? null,
+    fromPhotoURL: playerA.photoURL ?? null,
+    toPhotoURL: playerB.photoURL ?? null,
+    matchType: type ?? null,
+    score: scoreText,
+    sets: cleanedSets,
+    livePoints,
+    tiebreakMode,
+    matchComments,
+    completed: true,
+    status: "completed",
+    winnerId: winnerId ?? null,
+    completedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...(fromInvite ? { inviteId: fromInvite, completedFrom: "invite" } : {}),
+  },
+  { merge: true }
+);
 
     // Love-hold badge if any 6–0
     if (clean.some(s => (s.A === 6 && s.B === 0) || (s.B === 6 && s.A === 0))) {

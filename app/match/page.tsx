@@ -238,6 +238,7 @@ export default function MatchPage() {
   const [rawMatches, setRawMatches] = useState<Player[]>([]);
   const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [blockedMatchUserIds, setBlockedMatchUserIds] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<string>("score");
   const PAGE_SIZE = 10;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -448,6 +449,46 @@ out.push({
   [db]
 );
 
+const loadBlockedMatchUserIds = useCallback(async (currentUid: string) => {
+  const blocked = new Set<string>();
+  const statusesToBlock = ["pending", "confirmed", "accepted"];
+
+  const snaps = await Promise.all(
+    statusesToBlock.flatMap((status) => [
+      getDocs(
+        query(
+          collection(db, "match_requests"),
+          where("fromUserId", "==", currentUid),
+          where("status", "==", status)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, "match_requests"),
+          where("toUserId", "==", currentUid),
+          where("status", "==", status)
+        )
+      ),
+    ])
+  );
+
+  snaps.forEach((snap) => {
+    snap.forEach((d) => {
+      const data = d.data() as any;
+
+      const fromUid =
+        typeof data.fromUserId === "string" ? data.fromUserId.trim() : null;
+      const toUid =
+        typeof data.toUserId === "string" ? data.toUserId.trim() : null;
+
+      if (fromUid === currentUid && toUid) blocked.add(toUid);
+      if (toUid === currentUid && fromUid) blocked.add(fromUid);
+    });
+  });
+
+  blocked.delete(currentUid);
+  return blocked;
+}, []);
 
 const refreshMatches = useCallback(async () => {
   if (!auth.currentUser) return;
@@ -538,6 +579,10 @@ const refreshMatches = useCallback(async () => {
 
     setSentRequests(sentTo);
 
+        // 2b) Block users with an active relationship so they do not appear in Match Me
+    const blockedIds = await loadBlockedMatchUserIds(auth.currentUser.uid);
+    setBlockedMatchUserIds(blockedIds);
+
     // 3) Load nearby players only (geohash bounds)
     if (myLat == null || myLng == null) {
       setRawMatches([]);
@@ -551,8 +596,15 @@ const refreshMatches = useCallback(async () => {
 
     // 4) Score + distance filter
     const scoredPlayers: ScoredPlayer[] = allPlayers
-      .filter((p) => p.id !== auth.currentUser!.uid)
+      .filter((p) => {
+        const candidateUid = uidOf(p);
+        return !!candidateUid && candidateUid !== auth.currentUser!.uid;
+      })
       .filter((p) => p.isMatchable !== false)
+      .filter((p) => {
+        const candidateUid = uidOf(p);
+        return !!candidateUid && !blockedIds.has(candidateUid);
+      })
       .map((p) => {
         let score = 0;
         let distance = Infinity;
@@ -622,7 +674,7 @@ const refreshMatches = useCallback(async () => {
     refreshingRef.current = false;
     setRefreshing(false);
   }
-}, [matchMode, lastUpdated, loadNearbyPlayers]);
+}, [matchMode, lastUpdated, loadNearbyPlayers, loadBlockedMatchUserIds]);
 
 
 
@@ -867,6 +919,12 @@ setSentRequests((prev) => {
   return next;
 });
 
+setBlockedMatchUserIds((prev) => {
+  const next = new Set(prev);
+  next.add(toUid);
+  return next;
+});
+
     // ✅ Update localStorage cache so hideContacted works instantly
     if (auth.currentUser?.uid) {
       const merged = new Set(sentRequests);
@@ -888,11 +946,17 @@ setSentRequests((prev) => {
 
   // Sort matches based on user choice
 const filteredMatches = useMemo(() => {
-  if (!myProfile) return rawMatches;
+  if (!myProfile || !user) return rawMatches;
 
   return rawMatches.filter((m) => {
-  const toUid = uidOf(m);
-  if (!toUid) return false;
+    const toUid = uidOf(m);
+    if (!toUid) return false;
+
+    // Never show myself
+    if (toUid === user.uid) return false;
+
+    // Never show players where there is already a pending / confirmed / accepted match relationship
+    if (blockedMatchUserIds.has(toUid)) return false;
 
     // Hide already contacted?
     if (hideContacted && sentRequests.has(toUid)) return false;
@@ -905,7 +969,16 @@ const filteredMatches = useMemo(() => {
 
     return true;
   });
-}, [rawMatches, hideContacted, myProfile, sentRequests, ageBand, genderFilter]);
+}, [
+  rawMatches,
+  hideContacted,
+  myProfile,
+  user,
+  sentRequests,
+  blockedMatchUserIds,
+  ageBand,
+  genderFilter,
+]);
 
 
 

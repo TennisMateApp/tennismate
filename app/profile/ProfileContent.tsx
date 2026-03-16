@@ -14,7 +14,6 @@ import {
   setDoc,
   serverTimestamp,
   where,
-  getCountFromServer,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import Cropper from "react-easy-crop";
@@ -84,7 +83,27 @@ const toSkillLabel = (band: SkillBand | "" | undefined): string | null => {
 const getSkillLabel = (band: SkillBand | "" | undefined) =>
   toSkillLabel(band) ?? "—";
 
+const normalizeBadges = (raw: any): string[] => {
+  if (Array.isArray(raw)) {
+    return raw.filter((b): b is string => typeof b === "string" && b.trim().length > 0);
+  }
 
+  // Support old object format like { firstWin: true, loveHold: true }
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw)
+      .filter(([_, value]) => value === true)
+      .map(([key]) => key);
+  }
+
+  return [];
+};
+
+const arraysEqualUnordered = (a: string[], b: string[]) => {
+  if (a.length !== b.length) return false;
+  const as = [...a].sort();
+  const bs = [...b].sort();
+  return as.every((v, i) => v === bs[i]);
+};
 
 const legacyToBand = (level?: string): SkillBand | "" => {
   if (!level) return "";
@@ -194,7 +213,7 @@ setFormData({
   isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
   bio: data.bio || "",
   photoURL: data.photoURL || "",
-  badges: Array.isArray(data.badges) ? data.badges : [],
+  badges: normalizeBadges(data.badges),
   birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
   gender: typeof data.gender === "string" ? data.gender : "",
   timestamp: data.timestamp || null,
@@ -204,47 +223,116 @@ originalPostcodeRef.current = String(data.postcode || "").trim();
 
     if (data.photoURL) setPreviewURL(data.photoURL);
 
-    // ✅ Matches = accepted match requests (sent or received)
-const acceptedFromQ = query(
-  collection(db, "match_requests"),
-  where("fromUserId", "==", currentUser.uid),
-  where("status", "==", "accepted")
-);
+    // ✅ Matches = accepted OR confirmed match requests (sent or received)
+   const requestStatusesToCount = ["accepted", "confirmed", "completed"];
 
-const acceptedToQ = query(
-  collection(db, "match_requests"),
-  where("toUserId", "==", currentUser.uid),
-  where("status", "==", "accepted")
-);
+    const requestSnaps = await Promise.all(
+      requestStatusesToCount.flatMap((status) => [
+        getDocs(
+          query(
+            collection(db, "match_requests"),
+            where("fromUserId", "==", currentUser.uid),
+            where("status", "==", status)
+          )
+        ),
+        getDocs(
+          query(
+            collection(db, "match_requests"),
+            where("toUserId", "==", currentUser.uid),
+            where("status", "==", status)
+          )
+        ),
+      ])
+    );
 
-// Use count aggregation (faster/cheaper than getDocs)
-const [acceptedFromCount, acceptedToCount] = await Promise.all([
-  getCountFromServer(acceptedFromQ),
-  getCountFromServer(acceptedToQ),
-]);
+    // Deduplicate in case the same request is seen more than once
+    const acceptedRequestIds = new Set<string>();
+    requestSnaps.forEach((snap) => {
+      snap.forEach((docSnap) => acceptedRequestIds.add(docSnap.id));
+    });
 
-const acceptedMatches =
-  (acceptedFromCount.data().count ?? 0) + (acceptedToCount.data().count ?? 0);
+    const acceptedMatches = acceptedRequestIds.size;
 
-// ✅ Completed + Wins = from match_history
-const historyQ = query(
-  collection(db, "match_history"),
-  where("players", "array-contains", currentUser.uid)
-);
+    // ✅ Completed + Wins = from match_history
+    const historyQ = query(
+      collection(db, "match_history"),
+      where("players", "array-contains", currentUser.uid)
+    );
 
-const historySnap = await getDocs(historyQ);
+    const historySnap = await getDocs(historyQ);
 
-let completed = 0;
-let wins = 0;
+    let completed = 0;
+    let wins = 0;
+    let hasLoveHold = false;
 
-historySnap.forEach((d) => {
-  const m = d.data() as any;
-  if (m.completed === true || m.status === "completed") completed++;
-  if (m.winnerId === currentUser.uid) wins++;
-});
+    historySnap.forEach((d) => {
+      const m = d.data() as any;
 
-setMatchStats({ matches: acceptedMatches, completed, wins });
-setLoading(false);
+      const isCompleted =
+        m.completed === true ||
+        m.status === "completed";
+
+      if (isCompleted) {
+        completed++;
+      }
+
+      // Win detection
+      const isWin =
+        m.winnerId === currentUser.uid ||
+        (Array.isArray(m.winnerIds) && m.winnerIds.includes(currentUser.uid)) ||
+        (Array.isArray(m.completedByWinner) && m.completedByWinner.includes(currentUser.uid));
+
+      if (isWin) {
+        wins++;
+      }
+
+      // Love Hold badge: user must be the winner and one set must be 6-0
+      if (isWin && Array.isArray(m.sets)) {
+        const wonWithBagel = m.sets.some((s: any) => {
+          const a = typeof s?.A === "number" ? s.A : null;
+          const b = typeof s?.B === "number" ? s.B : null;
+          if (a == null || b == null) return false;
+          return (a === 6 && b === 0) || (a === 0 && b === 6);
+        });
+
+        if (wonWithBagel) {
+          hasLoveHold = true;
+        }
+      }
+    });
+
+    setMatchStats({
+      matches: acceptedMatches,
+      completed,
+      wins,
+    });
+
+    // ✅ Derive badges from real stats/history
+    const existingBadges = normalizeBadges(data.badges);
+    const earnedBadges: string[] = [];
+
+    if (acceptedMatches >= 1) earnedBadges.push("firstMatch");
+    if (completed >= 1) earnedBadges.push("firstMatchComplete");
+    if (wins >= 1) earnedBadges.push("firstWin");
+    if (hasLoveHold) earnedBadges.push("loveHold");
+
+    const mergedBadges = Array.from(new Set([...existingBadges, ...earnedBadges]));
+
+    // If badges were in old object format, or any new ones were earned, normalize/write back
+    if (!arraysEqualUnordered(existingBadges, mergedBadges)) {
+      await setDoc(
+        doc(db, "players", currentUser.uid),
+        { badges: mergedBadges },
+        { merge: true }
+      );
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      badges: mergedBadges,
+    }));
+
+    setLoading(false);
 
   });
   return () => unsubscribe();
@@ -928,6 +1016,7 @@ return (
         />
         <div className="text-[11px] font-semibold mt-1">First Win</div>
       </div>
+
     </div>
 
 {/* BOTTOM CTA */}

@@ -171,7 +171,7 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
           if (currentUid === playerUserId) {
             setHasPendingOrAccepted(true);
           } else {
-            const activeStatuses = ["pending", "accepted", "unread", "requested"];
+            const activeStatuses = ["pending", "accepted", "confirmed", "completed", "unread", "requested"];
 
             const q1 = query(
               collection(db, "match_requests"),
@@ -302,7 +302,7 @@ const handleInviteToPlay = async () => {
     setInviteError(null);
 
     // same defensive check style as Match page
-    const activeStatuses = ["pending", "accepted", "unread", "requested"];
+    const activeStatuses = ["pending", "accepted", "confirmed", "completed", "unread", "requested"];
 
     const q1 = query(
       collection(db, "match_requests"),
@@ -400,7 +400,8 @@ const handleInviteToPlay = async () => {
       ? player.utr
       : null;
 
- const showInviteCTA = !!player && currentUid !== player.userId;
+ const recipientUid = resolveRecipientUid();
+const showInviteCTA = !!player && !!currentUid && !!recipientUid && currentUid !== recipientUid;
 const isPendingState = hasPendingOrAccepted || inviteSent;
 const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
 
@@ -625,7 +626,6 @@ const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
     </div>
 
     {/* ✅ CTA is OUTSIDE scroll container */}
-        {/* ✅ CTA is OUTSIDE scroll container */}
 {showInviteCTA && (
   <div
     className="sticky bottom-0 p-4"
@@ -638,30 +638,41 @@ const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
       WebkitBackdropFilter: "blur(10px)",
     }}
   >
-    <button
-      type="button"
-      onClick={handleInviteToPlay}
-      disabled={sendingInvite}
-      className="w-full h-16 rounded-full flex items-center justify-center gap-4 font-extrabold tracking-wide transition active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-      style={{
-        background: TM.neon,
-        color: TM.forest,
-        boxShadow: "0 14px 36px rgba(57,255,20,0.45)",
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          width: 0,
-          height: 0,
-          borderTop: "9px solid transparent",
-          borderBottom: "9px solid transparent",
-          borderLeft: "16px solid #000000",
-        }}
-      />
-      <span className="text-base">
-        {sendingInvite ? "Sending…" : "Invite to Play"}
-      </span>
+<button
+  type="button"
+  onClick={handleInviteToPlay}
+  disabled={sendingInvite || isPendingState}
+  className="w-full h-16 rounded-full flex items-center justify-center gap-4 font-extrabold tracking-wide transition active:scale-[0.98] disabled:cursor-not-allowed"
+  style={{
+    background: isPendingState ? "rgba(255,255,255,0.08)" : TM.neon,
+    color: isPendingState ? TM.ink : TM.forest,
+    boxShadow: isPendingState
+      ? "none"
+      : "0 14px 36px rgba(57,255,20,0.45)",
+    border: isPendingState ? "1px solid rgba(255,255,255,0.14)" : "none",
+    opacity: sendingInvite ? 0.7 : 1,
+  }}
+>
+      {!isPendingState && (
+        <span
+          aria-hidden
+          style={{
+            width: 0,
+            height: 0,
+            borderTop: "9px solid transparent",
+            borderBottom: "9px solid transparent",
+            borderLeft: "16px solid #000000",
+          }}
+        />
+      )}
+
+     <span className="text-base">
+  {sendingInvite
+    ? "Sending…"
+    : isPendingState
+    ? "✓ Request Pending"
+    : "Invite to Play"}
+</span>
     </button>
 
     {inviteError && (

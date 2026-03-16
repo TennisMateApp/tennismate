@@ -11,7 +11,7 @@ import {
   getDocs,
   query,
   where,
-  getCountFromServer,
+  setDoc,
 } from "firebase/firestore";
 import { auth, db, storage } from "@/lib/firebaseConfig";
 import { Edit2, CheckCircle2, CalendarDays, Trophy } from "lucide-react";
@@ -62,6 +62,28 @@ const legacyToBand = (level?: string): SkillBand | "" => {
   if (norm.includes("intermediate")) return "intermediate";
   if (norm.includes("advanced") || norm.includes("advance")) return "advanced";
   return "";
+};
+
+const normalizeBadges = (raw: any): string[] => {
+  if (Array.isArray(raw)) {
+    return raw.filter((b): b is string => typeof b === "string" && b.trim().length > 0);
+  }
+
+  // support old object format like { firstWin: true, loveHold: true }
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw)
+      .filter(([_, value]) => value === true)
+      .map(([key]) => key);
+  }
+
+  return [];
+};
+
+const arraysEqualUnordered = (a: string[], b: string[]) => {
+  if (a.length !== b.length) return false;
+  const as = [...a].sort();
+  const bs = [...b].sort();
+  return as.every((v, i) => v === bs[i]);
 };
 
 type MatchStats = { matches: number; completed: number; wins: number };
@@ -258,46 +280,117 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
         rating: typeof ratingNumber === "number" ? ratingNumber : "",
         bio: data.bio || "",
         photoURL: data.photoURL || "",
-        badges: Array.isArray(data.badges) ? data.badges : [],
+        badges: normalizeBadges(data.badges),
         birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
         gender: typeof data.gender === "string" ? data.gender : "",
         availability: normalizeAvailability(data.availability),
         memberSince: data.memberSince || "", // optional if you store it
       });
 
-      // ✅ Matches accepted (match_requests)
-      const acceptedFromQ = query(
-        collection(db, "match_requests"),
-        where("fromUserId", "==", u.uid),
-        where("status", "==", "accepted")
+      // ✅ Matches = accepted OR confirmed OR completed match requests
+      const requestStatusesToCount = ["accepted", "confirmed", "completed"];
+
+      const requestSnaps = await Promise.all(
+        requestStatusesToCount.flatMap((status) => [
+          getDocs(
+            query(
+              collection(db, "match_requests"),
+              where("fromUserId", "==", u.uid),
+              where("status", "==", status)
+            )
+          ),
+          getDocs(
+            query(
+              collection(db, "match_requests"),
+              where("toUserId", "==", u.uid),
+              where("status", "==", status)
+            )
+          ),
+        ])
       );
-      const acceptedToQ = query(
-        collection(db, "match_requests"),
-        where("toUserId", "==", u.uid),
-        where("status", "==", "accepted")
+
+      const acceptedRequestIds = new Set<string>();
+      requestSnaps.forEach((snap) => {
+        snap.forEach((docSnap) => acceptedRequestIds.add(docSnap.id));
+      });
+
+      const acceptedMatches = acceptedRequestIds.size;
+
+      // ✅ Completed + Wins + badge derivation from match_history
+      const historyQ = query(
+        collection(db, "match_history"),
+        where("players", "array-contains", u.uid)
       );
-
-      const [fromCount, toCount] = await Promise.all([
-        getCountFromServer(acceptedFromQ),
-        getCountFromServer(acceptedToQ),
-      ]);
-
-      const acceptedMatches = (fromCount.data().count ?? 0) + (toCount.data().count ?? 0);
-
-      // ✅ Completed + Wins (match_history)
-      const historyQ = query(collection(db, "match_history"), where("players", "array-contains", u.uid));
       const historySnap = await getDocs(historyQ);
 
       let completed = 0;
       let wins = 0;
+      let hasLoveHold = false;
 
       historySnap.forEach((d) => {
         const m = d.data() as any;
-        if (m.completed === true || m.status === "completed") completed++;
-        if (m.winnerId === u.uid) wins++;
+
+        const isCompleted =
+          m.completed === true ||
+          m.status === "completed";
+
+        if (isCompleted) {
+          completed++;
+        }
+
+        const isWin =
+          m.winnerId === u.uid ||
+          (Array.isArray(m.winnerIds) && m.winnerIds.includes(u.uid)) ||
+          (Array.isArray(m.completedByWinner) && m.completedByWinner.includes(u.uid));
+
+        if (isWin) {
+          wins++;
+        }
+
+        if (isWin && Array.isArray(m.sets)) {
+          const wonWithBagel = m.sets.some((s: any) => {
+            const a = typeof s?.A === "number" ? s.A : null;
+            const b = typeof s?.B === "number" ? s.B : null;
+            if (a == null || b == null) return false;
+            return (a === 6 && b === 0) || (a === 0 && b === 6);
+          });
+
+          if (wonWithBagel) {
+            hasLoveHold = true;
+          }
+        }
       });
 
-      setMatchStats({ matches: acceptedMatches, completed, wins });
+      setMatchStats({
+        matches: acceptedMatches,
+        completed,
+        wins,
+      });
+
+      // ✅ Derive + normalize badges
+      const existingBadges = normalizeBadges(data.badges);
+      const earnedBadges: string[] = [];
+
+      if (acceptedMatches >= 1) earnedBadges.push("firstMatch");
+      if (completed >= 1) earnedBadges.push("firstMatchComplete");
+      if (wins >= 1) earnedBadges.push("firstWin");
+      if (hasLoveHold) earnedBadges.push("loveHold");
+
+      const mergedBadges = Array.from(new Set([...existingBadges, ...earnedBadges]));
+
+      if (!arraysEqualUnordered(existingBadges, mergedBadges)) {
+        await setDoc(
+          doc(db, "players", u.uid),
+          { badges: mergedBadges },
+          { merge: true }
+        );
+      }
+
+      setProfile((prev) => ({
+        ...prev,
+        badges: mergedBadges,
+      }));
+
       setLoading(false);
     });
 
