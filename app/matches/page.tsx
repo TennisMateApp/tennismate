@@ -41,6 +41,7 @@ import { suggestCourt } from "@/lib/suggestCourt";
 import { track } from "@/lib/track";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import DesktopMatches from "@/components/matches/DesktopMatches";
+import { trackEvent } from "@/lib/mixpanel";
 
 
 // --- Helpers ---
@@ -844,7 +845,6 @@ setOppCache((prev) => ({
 
 // Accept a match and award badge + prompt to chat
 const acceptMatch = async (matchId: string, currentUserId: string) => {
-  // Snapshot of previous status (for revert)
   const prevStatus = matches.find((m) => m.id === matchId)?.status;
 
   try {
@@ -868,10 +868,16 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
     });
 
     track("match_request_accepted", {
-  match_id: matchId,
-  from_user_id: fromUserId,
-  to_user_id: toUserId,
-});
+      match_id: matchId,
+      from_user_id: fromUserId,
+      to_user_id: toUserId,
+    });
+
+    trackEvent("match_request_accepted", {
+      matchId,
+      fromUserId,
+      toUserId,
+    });
 
     await Promise.all([
       setDoc(
@@ -886,7 +892,6 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
       ),
     ]);
 
-    // ⭐ After success – set up the tennis-y chat prompt modal
     const localMatch = matches.find((m) => m.id === matchId);
     if (localMatch) {
       const isMine = localMatch.playerId === currentUserId;
@@ -909,12 +914,13 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
     }
   } catch (err) {
     console.error("❌ Error accepting match:", err);
-    // Revert optimistic flip
+
     setMatches((prev) =>
       prev.map((m) =>
         m.id === matchId ? { ...m, status: prevStatus ?? "pending" } : m
       )
     );
+
     alert("Could not accept the request. Please try again.");
   } finally {
     setAcceptingId(null);

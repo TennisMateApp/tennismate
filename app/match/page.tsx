@@ -30,6 +30,7 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import DesktopMatchPage from "@/components/match/DesktopMatchPage";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
+import { trackEvent } from "@/lib/mixpanel";
 
 
 
@@ -903,6 +904,16 @@ const ref = await addDoc(collection(db, "match_requests"), {
   toPostcode: matchPlayer?.postcode ?? null,
   toPhotoURL:
     matchPlayer?.photoThumbURL || matchPlayer?.photoURL || matchPlayer?.avatar || null,
+});
+
+trackEvent("match_request_sent", {
+  requestId: ref.id,
+  fromUserId: user.uid,
+  toUserId: toUid,
+  matchMode,
+  distanceKm: typeof matchPlayer?.distance === "number" ? matchPlayer.distance : null,
+  targetPostcode: matchPlayer?.postcode ?? null,
+  targetSkillBand: matchPlayer?.skillBand ?? null,
 });
 
 console.log("[TM] ✅ match_requests created:", ref.id, { toUid });

@@ -49,7 +49,7 @@ import AgeGateModal from "@/components/AgeGateModal";
 import Image from "next/image";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { cn } from "@/lib/utils";
-
+import { initMixpanel, identifyUser } from "@/lib/mixpanel";
 
 
 const TM = {
@@ -77,15 +77,13 @@ function useAppBootLoader() {
 // ---- Add the useSystemTheme hook after imports ----
 function useSystemTheme() {
   useEffect(() => {
-    if (typeof window === "undefined") return; // SSR guard
+    if (typeof window === "undefined") return;
 
-    // Ensure matchMedia exists
-if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-  return;
-}
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
 
-const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
-
+    const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
     const root = document.documentElement;
 
     const updateTheme = (e?: MediaQueryListEvent) => {
@@ -99,7 +97,6 @@ const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
     updateTheme();
 
-    // ✅ Use optional chaining to avoid calling undefined
     matchMedia.addEventListener?.("change", updateTheme);
 
     return () => {
@@ -123,7 +120,11 @@ function shouldPingLastActive(uid: string) {
 }
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
-  useSystemTheme(); // <-- Call the hook at the top of your component
+  useSystemTheme();
+
+  useEffect(() => {
+    initMixpanel();
+  }, []);
 
 
   // 🔔 Kick off native push once on app boot (Android + iOS native only)
@@ -307,12 +308,15 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
   setProfileGateReady(false);
 
   if (u) {
-
     setAgeGateChecked(false);
     setShowAgeGate(false);
 
-  profileTrackedRef.current = false;
-void trackSetUserId(u.uid);
+    profileTrackedRef.current = false;
+    void trackSetUserId(u.uid);
+
+    identifyUser(u.uid, {
+      email: u.email ?? undefined,
+    });
 
   // ✅ Track login only once per browser session (prevents firing on every refresh)
   const loginKey = `ga_login_tracked_${u.uid}`;
