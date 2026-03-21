@@ -1031,7 +1031,7 @@ return (
     type="button"
     onClick={saveProfile}
     disabled={saving}
-    className="w-full rounded-[26px] py-4 text-base font-black shadow disabled:opacity-50 disabled:cursor-not-allowed"
+    className="touch-manipulation w-full rounded-[26px] py-4 text-base font-black shadow disabled:opacity-50 disabled:cursor-not-allowed"
     style={{ background: TM.neon, color: TM.forest }}
   >
     {saving ? "Saving…" : "Save Changes"}
@@ -1144,7 +1144,7 @@ return (
             required
             value={formData.name}
             onChange={handleChange}
-            className="mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none"
+            className="mt-2 w-full rounded-2xl border px-4 py-3 text-[16px] outline-none"
             style={{ borderColor: "rgba(11,61,46,0.18)" }}
           />
         </div>
@@ -1162,7 +1162,7 @@ return (
               onChange={(e) =>
                 setFormData((prev) => ({ ...prev, skillBand: e.target.value as SkillBand }))
               }
-              className="mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none bg-white"
+              className="mt-2 w-full rounded-2xl border px-4 py-3 text-[16px] outline-none bg-white"
               style={{ borderColor: "rgba(11,61,46,0.18)" }}
             >
               <option value="" disabled>Select your level…</option>
@@ -1187,7 +1187,7 @@ return (
               placeholder="e.g., 6.20"
               value={formData.rating}
               onChange={(e) => handleRatingChange(e.target.value)}
-              className="mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none bg-white"
+              className="mt-2 w-full rounded-2xl border px-4 py-3 text-[16px] outline-none bg-white"
               style={{ borderColor: "rgba(11,61,46,0.18)" }}
             />
             <p className="mt-1 text-[11px]" style={{ color: "rgba(11,61,46,0.65)" }}>
@@ -1209,7 +1209,7 @@ return (
               placeholder="e.g. 3000"
               value={formData.postcode}
               onChange={handleChange}
-              className="mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none"
+              className="mt-2 w-full rounded-2xl border px-4 py-3 text-[16px] outline-none"
               style={{ borderColor: "rgba(11,61,46,0.18)" }}
             />
             <p className="mt-1 text-[11px]" style={{ color: "rgba(11,61,46,0.65)" }}>
@@ -1273,7 +1273,7 @@ return (
             onChange={handleChange}
             maxLength={4}
             required
-            className="mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none"
+            className="mt-2 w-full rounded-2xl border px-4 py-3 text-[16px] outline-none"
             style={{ borderColor: "rgba(11,61,46,0.18)" }}
           />
           <p className="mt-1 text-[11px]" style={{ color: "rgba(11,61,46,0.65)" }}>
@@ -1293,7 +1293,7 @@ return (
             placeholder="Tell others about your game, favorite courts, preferred times…"
             value={formData.bio}
             onChange={handleChange}
-            className="mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none"
+            className="mt-2 w-full rounded-2xl border px-4 py-3 text-[16px] outline-none"
             style={{ borderColor: "rgba(11,61,46,0.18)" }}
           />
           <div className="mt-1 text-[11px]" style={{ color: "rgba(11,61,46,0.55)" }}>
@@ -1447,7 +1447,7 @@ return (
           !formData.name.trim() ||
           !formData.skillBand
         }
-        className="w-full rounded-[26px] py-4 text-base font-black shadow disabled:opacity-50 disabled:cursor-not-allowed"
+        className="touch-manipulation w-full rounded-[26px] py-4 text-base font-black shadow disabled:opacity-50 disabled:cursor-not-allowed"
         style={{ background: TM.neon, color: TM.forest }}
       >
         {saving ? "Saving…" : "Save Changes"}

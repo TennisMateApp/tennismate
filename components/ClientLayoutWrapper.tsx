@@ -209,7 +209,20 @@ useEffect(() => {
 
 
 // 👇 routes that should be full-bleed (no boxed max-width)
-const fullBleedRoutes = ["/login", "/signup", "/home", "/match", "/matches", "/messages", "/directory", "/calendar", "/invites", "/courts", "/coaches", "profile"];
+const fullBleedRoutes = [
+  "/login",
+  "/signup",
+  "/home",
+  "/match",
+  "/matches",
+  "/messages",
+  "/directory",
+  "/calendar",
+  "/invites",
+  "/courts",
+  "/coaches",
+  "/profile",
+];
 const isFullBleed = fullBleedRoutes.some((r) => pathname.startsWith(r));
 
 
@@ -220,6 +233,7 @@ const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
 
 const [showAgeGate, setShowAgeGate] = useState(false);
 const [ageGateChecked, setAgeGateChecked] = useState(false);
+const [profileGateReady, setProfileGateReady] = useState(false);
 
 // --- Update players/{uid}.lastActiveAt (throttled) ---
 useEffect(() => {
@@ -284,14 +298,18 @@ const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFe
   let unsubMessages: () => void = () => {};
   let unsubPlayer: () => void = () => {};
 
-  unsubAuth = onAuthStateChanged(auth, async (u) => {
-    // tear down any prior listeners before wiring fresh ones on user switch
-    unsubInbox(); unsubMessages(); unsubPlayer();
+unsubAuth = onAuthStateChanged(auth, async (u) => {
+  // tear down any prior listeners before wiring fresh ones on user switch
+  unsubInbox();
+  unsubMessages();
+  unsubPlayer();
 
-   if (u) {
+  setProfileGateReady(false);
+
+  if (u) {
 
     setAgeGateChecked(false);
-setShowAgeGate(false);
+    setShowAgeGate(false);
 
   profileTrackedRef.current = false;
 void trackSetUserId(u.uid);
@@ -317,7 +335,6 @@ void trackSetUserId(u.uid);
 const playerRef = doc(db, "players", u.uid);
 
 unsubPlayer = onSnapshot(playerRef, (docSnap) => {
-  // Always block age gate on public routes / verify flow
   const canShowGate = !PUBLIC_ROUTES.has(pathname || "") && !showVerify;
 
   if (docSnap.exists()) {
@@ -345,6 +362,7 @@ unsubPlayer = onSnapshot(playerRef, (docSnap) => {
 
     setShowAgeGate(canShowGate ? needsBirthYear : false);
     setAgeGateChecked(true);
+    setProfileGateReady(true);
   } else {
     setPhotoURL(null);
     setPhotoThumbURL(null);
@@ -352,6 +370,7 @@ unsubPlayer = onSnapshot(playerRef, (docSnap) => {
 
     setShowAgeGate(canShowGate);
     setAgeGateChecked(true);
+    setProfileGateReady(true);
   }
 });
 
@@ -413,6 +432,7 @@ if (hasNewer && inbound) {
   setProfileComplete(null);
   setShowAgeGate(false);
   setAgeGateChecked(false);
+  setProfileGateReady(true);
 }
   });
 
@@ -572,34 +592,36 @@ return (
 
     <PushClientOnly />
 
-   <AgeGateModal
-  isOpen={
-    !!user &&
-    ageGateChecked &&
-    showAgeGate &&
-    !PUBLIC_ROUTES.has(pathname || "") &&
-    !showVerify
-  }
-  onSave={async (birthYear) => {
-    const u = auth.currentUser;
-    if (!u) return;
+{profileGateReady && (
+  <AgeGateModal
+    isOpen={
+      !!user &&
+      ageGateChecked &&
+      showAgeGate &&
+      !PUBLIC_ROUTES.has(pathname || "") &&
+      !showVerify
+    }
+    onSave={async (birthYear) => {
+      const u = auth.currentUser;
+      if (!u) return;
 
-    await setDoc(
-      doc(db, "players", u.uid),
-      {
-        birthYear, // ✅ now defined (it's the param)
-        birthYearUpdatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+      await setDoc(
+        doc(db, "players", u.uid),
+        {
+          birthYear,
+          birthYearUpdatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
-    setShowAgeGate(false);
-  }}
-  onSignOut={async () => {
-    await signOut(auth);
-    router.push("/login");
-  }}
-/>
+      setShowAgeGate(false);
+    }}
+    onSignOut={async () => {
+      await signOut(auth);
+      router.push("/login");
+    }}
+  />
+)}
 
 
 <main

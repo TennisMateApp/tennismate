@@ -26,11 +26,11 @@ type CalendarEvent = {
   courtName?: string | null;
   status?: string | null;
 
-  // event vs invite routing
   eventId?: string | null;
-  source?: string | null; // e.g. "cf:syncCalendarOnInviteAccepted"
+  source?: string | null;
   messageId?: string | null;
   inviteId?: string | null;
+  type?: string | null;
 
   participants?: string[] | null;
 };
@@ -59,13 +59,14 @@ type DesktopDashboardHomeProps = {
   nearbyActive: ActivePlayer[];
   nearbyActiveLoading: boolean;
 
-  // ✅ NEW: for Next Match on desktop
   myCalendarEvents: CalendarEvent[];
   myCalendarEventsLoading: boolean;
+
+  homeBootstrapping?: boolean;
 };
 
 export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
-  const {
+   const {
     userName,
     levelLabel,
     avatarUrl,
@@ -78,6 +79,7 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
     nearbyActiveLoading,
     myCalendarEvents,
     myCalendarEventsLoading,
+    homeBootstrapping = false,
   } = props;
 
     const [openInviteId, setOpenInviteId] = useState<string | null>(null);
@@ -97,6 +99,18 @@ const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
   const getOtherUserId = (m: any, myUid: string) => {
     if (m.fromUserId === myUid) return m.toUserId;
     if (m.toUserId === myUid) return m.fromUserId;
+    return null;
+  };
+
+    const getOpponentName = (m: any, myUid: string) => {
+    if (m.fromUserId === myUid) {
+      return m.toName || m.toUserName || m.toDisplayName || null;
+    }
+
+    if (m.toUserId === myUid) {
+      return m.fromName || m.fromUserName || m.fromDisplayName || null;
+    }
+
     return null;
   };
 
@@ -124,15 +138,16 @@ const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
   };
 
   const getNextMatchHref = (e: any): string => {
-  
     if (!e) return "/calendar";
 
-    // Invite-based calendar event (your existing pattern)
     if (e?.source === "cf:syncCalendarOnInviteAccepted" && e?.messageId) {
       return `/invites/${e.messageId}`;
     }
 
-    // Normal event
+    if ((e?.type === "invite" || String(e?.source ?? "").includes("invite")) && e?.inviteId) {
+      return `/invites/${e.inviteId}`;
+    }
+
     if (e?.eventId) return `/events/${e.eventId}`;
 
     return "/calendar";
@@ -315,13 +330,13 @@ const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
                     )}
                   </div>
 
-                  {nearbyActiveLoading ? (
+                    {homeBootstrapping || nearbyActiveLoading ? (
                     <div className="mt-3 flex items-center gap-3">
                       <div className="h-4 w-40 rounded bg-black/5 animate-pulse" />
                       <div className="h-9 flex-1 rounded bg-black/5 animate-pulse" />
                     </div>
-                  ) : nearbyActive.length > 0 ? (
-                    <div className="mt-3 flex items-center justify-between gap-4">
+                                      ) : nearbyActive.length > 0 ? (
+                    <div className="mt-3">
                       <div className="flex items-center -space-x-2">
                         {nearbyActive.slice(0, 12).map((p) => {
                           const src = p.photoThumbURL || p.photoURL || p.avatar || null;
@@ -356,14 +371,6 @@ const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
                           </div>
                         )}
                       </div>
-
-                      <button
-                        onClick={() => router.push("/directory")}
-                        className="shrink-0 rounded-2xl px-3 py-2 text-xs font-extrabold"
-                        style={{ background: TM.neon, color: TM.forest }}
-                      >
-                        View
-                      </button>
                     </div>
                   ) : (
                     <div className="mt-3 text-sm text-black/55">
@@ -385,7 +392,7 @@ const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
                     </button>
                   </div>
 
-                  {myCalendarEventsLoading ? (
+                  {homeBootstrapping || myCalendarEventsLoading ? (
                     <div className="mt-4 h-[96px] w-full rounded-2xl bg-black/5 animate-pulse" />
                   ) : nextEvent ? (
                     (() => {
@@ -575,7 +582,7 @@ const isInvite = !!inviteId;
                   </div>
 
                   <div className="mt-4 space-y-3">
-                    {myMatchesLoading ? (
+                    {homeBootstrapping || myMatchesLoading ? (
                       <>
                         <div className="h-14 rounded-2xl bg-black/5 animate-pulse" />
                         <div className="h-14 rounded-2xl bg-black/5 animate-pulse" />
@@ -589,8 +596,10 @@ const isInvite = !!inviteId;
                         const otherUid = myUid ? getOtherUserId(m, myUid) : null;
                         if (!otherUid) return null;
 
+                                               const directName = myUid ? getOpponentName(m, myUid) : null;
                         const cached = oppByUid?.[otherUid] ?? null;
-                        const name = cached?.name || "Player";
+
+                        const name = directName || cached?.name || "Player";
                         const photo =
                           cached?.photoThumbURL || cached?.photoURL || cached?.avatar || null;
 

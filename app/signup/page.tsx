@@ -221,202 +221,215 @@ if (name === "birthYear") {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-    if (!isPasswordValid) {
-      setStatus("⚠️ Please meet all password requirements.");
+  if (!isPasswordValid) {
+    setStatus("⚠️ Please meet all password requirements.");
+    return;
+  }
+
+  const newErrors: { [k: string]: string } = {};
+  if (!formData.name) newErrors.name = "Name is required.";
+  if (!formData.email) newErrors.email = "Email is required.";
+  if (!formData.password) newErrors.password = "Password is required.";
+  if (!formData.postcode) newErrors.postcode = "Postcode is required.";
+  if (!formData.skillBand) newErrors.skillBand = "Skill level is required.";
+  if (formData.availability.length === 0) {
+    newErrors.availability = "Pick at least one time slot.";
+  }
+
+  if (!hasPhoto) {
+    newErrors.photo = "A profile photo is required. Please upload and confirm the crop.";
+  }
+
+  if (formData.rating !== "" && (formData.rating < 1 || formData.rating > 16.5)) {
+    newErrors.rating = "TMR must be between 1.00 and 16.50.";
+  }
+
+  const currentYear = new Date().getFullYear();
+
+  if (!formData.birthYear) {
+    newErrors.birthYear = "Birth year is required (18+).";
+  } else {
+    const by = Number(formData.birthYear);
+    const age = currentYear - by;
+
+    if (!Number.isFinite(by) || by < 1900 || by > currentYear) {
+      newErrors.birthYear = "Please enter a valid year (e.g. 1994).";
+    } else if (age < 18) {
+      newErrors.birthYear = "TennisMate is for adults only (18+).";
+    } else if (age > 110) {
+      newErrors.birthYear = "Please enter a valid year (e.g. 1994).";
+    }
+  }
+
+  setErrors(newErrors);
+  if (Object.keys(newErrors).length > 0) return;
+
+  setStatus("Submitting...");
+
+  const firstDigit = formData.postcode.trim().charAt(0);
+  const isSupportedRegion = firstDigit === "3" || firstDigit === "2";
+
+  try {
+    // 1) Create Auth user
+    const email = formData.email.trim().toLowerCase();
+
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      email,
+      formData.password
+    );
+
+    const user = userCredential.user;
+
+    // 2) Upload REQUIRED profile photo (FULL + THUMB)
+    if (!croppedImage) {
+      setErrors((prev) => ({ ...prev, photo: "Please add a profile photo." }));
+      setStatus("");
       return;
     }
 
-    const newErrors: { [k: string]: string } = {};
-    if (!formData.name) newErrors.name = "Name is required.";
-    if (!formData.email) newErrors.email = "Email is required.";
-    if (!formData.password) newErrors.password = "Password is required.";
-    if (!formData.postcode) newErrors.postcode = "Postcode is required.";
-    if (!formData.skillBand) newErrors.skillBand = "Skill level is required.";
-    if (formData.availability.length === 0)
-      newErrors.availability = "Pick at least one time slot.";
+    let photoURL = DEFAULT_AVATAR;
+    let photoThumbURL: string | null = null;
 
-    if (!hasPhoto) {
-      newErrors.photo = "A profile photo is required. Please upload and confirm the crop.";
-    }
+    const fullRef = ref(storage, `profile_pictures/${user.uid}/avatar_full.jpg`);
+    await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
+    photoURL = await getDownloadURL(fullRef);
 
-    if (formData.rating !== "" && (formData.rating < 1 || formData.rating > 16.5)) {
-      newErrors.rating = "TMR must be between 1.00 and 16.50.";
-    }
+    const thumbFile = await makeAvatarThumb(croppedImage, 160, 0.72);
+    const thumbRef = ref(storage, `profile_pictures/${user.uid}/avatar_thumb.jpg`);
+    await uploadBytes(thumbRef, thumbFile, { contentType: "image/jpeg" });
+    photoThumbURL = await getDownloadURL(thumbRef);
 
-const currentYear = new Date().getFullYear();
+    // 3) users/{uid} - create once, keep createdAt forever
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
 
-if (!formData.birthYear) {
-  newErrors.birthYear = "Birth year is required (18+).";
-} else {
-  const by = Number(formData.birthYear);
-  const age = currentYear - by;
-
-  // Reasonable bounds to prevent typos
-  if (!Number.isFinite(by) || by < 1900 || by > currentYear) {
-    newErrors.birthYear = "Please enter a valid year (e.g. 1994).";
-  } else if (age < 18) {
-    newErrors.birthYear = "TennisMate is for adults only (18+).";
-  } else if (age > 110) {
-    newErrors.birthYear = "Please enter a valid year (e.g. 1994).";
-  }
-}
-
-setErrors(newErrors);
-if (Object.keys(newErrors).length > 0) return;
-
-
-    setStatus("Submitting...");
-
-    const firstDigit = formData.postcode.trim().charAt(0);
-const isSupportedRegion = firstDigit === "3" || firstDigit === "2";
-
-    try {
-      // 1) Create Auth user
-const email = formData.email.trim().toLowerCase();
-
-const userCredential = await createUserWithEmailAndPassword(
-  auth,
-  email,
-  formData.password
-);
-
-      const user = userCredential.user;
-
-// 2) Upload REQUIRED profile photo (FULL + THUMB)
-if (!croppedImage) {
-  setErrors((prev) => ({ ...prev, photo: "Please add a profile photo." }));
-  setStatus("");
-  return;
-}
-
-let photoURL = DEFAULT_AVATAR;
-let photoThumbURL: string | null = null;
-
-// Full-size (for profile pages)
-const fullRef = ref(storage, `profile_pictures/${user.uid}/avatar_full.jpg`);
-await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
-photoURL = await getDownloadURL(fullRef);
-
-// Thumbnail (for lists/messages)
-const thumbFile = await makeAvatarThumb(croppedImage, 160, 0.72);
-const thumbRef = ref(storage, `profile_pictures/${user.uid}/avatar_thumb.jpg`);
-await uploadBytes(thumbRef, thumbFile, { contentType: "image/jpeg" });
-photoThumbURL = await getDownloadURL(thumbRef);
-
-
-      // 3) users/{uid}
+    if (!userSnap.exists()) {
+      await setDoc(userRef, {
+        name: formData.name,
+        email,
+        photoURL,
+        photoThumbURL,
+        requireVerification: true,
+        createdAt: serverTimestamp(),
+      });
+    } else {
       await setDoc(
-        doc(db, "users", user.uid),
+        userRef,
         {
           name: formData.name,
           email,
           photoURL,
           photoThumbURL,
           requireVerification: true,
-          createdAt: serverTimestamp(),
         },
         { merge: true }
       );
-
-if (isSupportedRegion) {
-  const ratingOrNull = formData.rating === "" ? null : formData.rating;
-
-  const skillBandValue = formData.skillBand || null;
-  const skillBandLabel = toSkillLabel(skillBandValue);
-
-  let lat: number | null = null;
-  let lng: number | null = null;
-  let geohash: string | null = null;
-
-  try {
-    const pcSnap = await getDoc(doc(db, "postcodes", formData.postcode));
-   if (pcSnap.exists()) {
-  const pc = pcSnap.data() as any;
-
-  if (typeof pc.lat === "number" && typeof pc.lng === "number") {
-    lat = pc.lat;
-    lng = pc.lng;
-
-    // ✅ use the proven-number values directly
-    geohash = geohashForLocation([pc.lat, pc.lng]);
-  }
-}
-
-  } catch (e) {
-    console.warn("Postcode lookup failed; continuing without lat/lng/geohash", e);
-  }
-
-  await setDoc(
-    doc(db, "players", user.uid),
-    {
-      name: formData.name,
-      nameLower: (formData.name || "").toLowerCase(),
-      email,
-      postcode: formData.postcode,
-
-      gender: formData.gender || null,
-      birthYear: formData.birthYear ? Number(formData.birthYear) : null,
-
-      isMatchable: true,
-
-      lat,
-      lng,
-      geohash,
-
-      skillRating: ratingOrNull,
-      utr: ratingOrNull,
-      skillBand: skillBandValue,
-      skillBandLabel,
-      availability: formData.availability,
-      bio: formData.bio,
-      photoURL,
-      photoThumbURL,
-      profileComplete: true,
-      timestamp: serverTimestamp(),
-    },
-    { merge: true }
-  );
-
-  setStatus("");
-  router.replace("/verify-email");
-  return;
-} else {
-  await setDoc(doc(db, "waitlist_users", user.uid), {
-    name: formData.name,
-    email,
-    postcode: formData.postcode,
-    timestamp: serverTimestamp(),
-    source: "signupForm",
-  });
-
-  setShowWaitlistModal(true);
-  setStatus("");
-  return;
-}
-
-    } catch (error: any) {
-      if (error?.code === "auth/email-already-in-use") {
-        const email = formData.email.trim().toLowerCase();
-        setExistingEmail(email);
-        setShowEmailExistsModal(true);
-        setStatus("");
-        return;
-      } else if (error?.code === "auth/weak-password") {
-        setStatus("⚠️ Password must be at least 6 characters.");
-        return;
-      } else {
-        console.error("Signup error:", error);
-        setStatus("❌ Something went wrong. Please try again.");
-        return;
-      }
     }
 
+    // 4) Read users.createdAt back so it becomes source of truth for players.createdAt
+    const freshUserSnap = await getDoc(userRef);
+    const userCreatedAt = freshUserSnap.data()?.createdAt ?? null;
 
+    if (isSupportedRegion) {
+      const ratingOrNull = formData.rating === "" ? null : formData.rating;
+      const skillBandValue = formData.skillBand || null;
+      const skillBandLabel = toSkillLabel(skillBandValue);
 
-  }; // handleSubmit
+      let lat: number | null = null;
+      let lng: number | null = null;
+      let geohash: string | null = null;
+
+      try {
+        const pcSnap = await getDoc(doc(db, "postcodes", formData.postcode));
+        if (pcSnap.exists()) {
+          const pc = pcSnap.data() as any;
+
+          if (typeof pc.lat === "number" && typeof pc.lng === "number") {
+            lat = pc.lat;
+            lng = pc.lng;
+            geohash = geohashForLocation([pc.lat, pc.lng]);
+          }
+        }
+      } catch (e) {
+        console.warn("Postcode lookup failed; continuing without lat/lng/geohash", e);
+      }
+
+      const playerRef = doc(db, "players", user.uid);
+      const playerSnap = await getDoc(playerRef);
+
+      const playerData = {
+        name: formData.name,
+        nameLower: (formData.name || "").toLowerCase(),
+        email,
+        postcode: formData.postcode,
+
+        gender: formData.gender || null,
+        birthYear: formData.birthYear ? Number(formData.birthYear) : null,
+
+        isMatchable: true,
+
+        lat,
+        lng,
+        geohash,
+
+        skillRating: ratingOrNull,
+        utr: ratingOrNull,
+        skillBand: skillBandValue,
+        skillBandLabel,
+        availability: formData.availability,
+        bio: formData.bio,
+        photoURL,
+        photoThumbURL,
+        profileComplete: true,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (!playerSnap.exists()) {
+        await setDoc(playerRef, {
+          ...playerData,
+          createdAt: userCreatedAt || serverTimestamp(),
+        });
+      } else {
+        await setDoc(playerRef, playerData, { merge: true });
+      }
+
+      setStatus("");
+      router.replace("/verify-email");
+      return;
+    } else {
+      await setDoc(doc(db, "waitlist_users", user.uid), {
+        name: formData.name,
+        email,
+        postcode: formData.postcode,
+        timestamp: serverTimestamp(),
+        source: "signupForm",
+      });
+
+      setShowWaitlistModal(true);
+      setStatus("");
+      return;
+    }
+  } catch (error: any) {
+    if (error?.code === "auth/email-already-in-use") {
+      const email = formData.email.trim().toLowerCase();
+      setExistingEmail(email);
+      setShowEmailExistsModal(true);
+      setStatus("");
+      return;
+    } else if (error?.code === "auth/weak-password") {
+      setStatus("⚠️ Password must be at least 6 characters.");
+      return;
+    } else {
+      console.error("Signup error:", error);
+      setStatus("❌ Something went wrong. Please try again.");
+      return;
+    }
+  }
+};
 
   return (
     <>

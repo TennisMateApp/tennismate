@@ -226,6 +226,52 @@ function saveNearbyActiveCache(uid: string, data: ActivePlayer[]) {
 }
 
 // -----------------------
+// Next Events cache
+// -----------------------
+const NEXT_EVENTS_CACHE_KEY = "tm_nextEvents_v1";
+const NEXT_EVENTS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+type NextEventsCache = {
+  savedAt: number;
+  uid: string;
+  data: CalendarEvent[];
+};
+
+function loadNextEventsCache(uid: string): CalendarEvent[] | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = localStorage.getItem(NEXT_EVENTS_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as NextEventsCache;
+
+    if (parsed.uid !== uid) return null;
+    if (Date.now() - parsed.savedAt > NEXT_EVENTS_CACHE_TTL_MS) return null;
+
+    return Array.isArray(parsed.data) ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveNextEventsCache(uid: string, data: CalendarEvent[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const payload: NextEventsCache = {
+      savedAt: Date.now(),
+      uid,
+      data,
+    };
+
+    localStorage.setItem(NEXT_EVENTS_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+// -----------------------
 // Opponent profile cache (localStorage) - name + avatar
 // -----------------------
 const OPP_PROFILE_CACHE_KEY = "tm_opponentProfile_v5";
@@ -398,12 +444,23 @@ type ActivePlayer = {
 async function loadNearbyActivePlayers(uid: string): Promise<ActivePlayer[]> {
   // 1) Load my profile for lat/lng
   const meSnap = await getDoc(doc(db, "players", uid));
-  if (!meSnap.exists()) return [];
+  if (!meSnap.exists()) {
+    console.warn("[Home] current player doc missing for nearby active:", uid);
+    return [];
+  }
 
   const me: any = meSnap.data();
   const myLat = typeof me.lat === "number" ? me.lat : null;
   const myLng = typeof me.lng === "number" ? me.lng : null;
-  if (myLat == null || myLng == null) return [];
+
+  if (myLat == null || myLng == null) {
+    console.warn("[Home] current player has no lat/lng for nearby active:", {
+      uid,
+      lat: me.lat,
+      lng: me.lng,
+    });
+    return [];
+  }
 
   // 2) Build geohash bounds around me
   const bounds = geohashQueryBounds([myLat, myLng], ACTIVE_RADIUS_KM * 1000);
@@ -414,7 +471,7 @@ async function loadNearbyActivePlayers(uid: string): Promise<ActivePlayer[]> {
 
   await Promise.all(
     bounds.map(async ([start, end]) => {
-      const q = query(
+      const qRef = query(
         collection(db, "players"),
         orderBy("geohash"),
         startAt(start),
@@ -422,7 +479,7 @@ async function loadNearbyActivePlayers(uid: string): Promise<ActivePlayer[]> {
         limit(MAX_BOUND_READS)
       );
 
-      const snap = await getDocs(q);
+      const snap = await getDocs(qRef);
 
       snap.forEach((d) => {
         if (d.id === uid) return;
@@ -459,7 +516,7 @@ async function loadNearbyActivePlayers(uid: string): Promise<ActivePlayer[]> {
 
       return { ...p, _lastActiveMs: d.getTime() };
     })
-    .filter(Boolean) as any[];
+    .filter(Boolean) as Array<ActivePlayer & { _lastActiveMs: number }>;
 
   filtered.sort((a, b) => b._lastActiveMs - a._lastActiveMs);
 
@@ -497,6 +554,8 @@ const showDesktopWeb = !isApp && isDesktop;
   const [levelLabel, setLevelLabel] = useState('AMATEUR');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
+  const [homeBootstrapping, setHomeBootstrapping] = useState(true);
+
   const [uid, setUid] = useState<string | null>(null);
   const [openInviteId, setOpenInviteId] = useState<string | null>(null);
 
@@ -530,17 +589,18 @@ useEffect(() => {
 
 
 useEffect(() => {
-  const u = auth.currentUser;
-  if (!u?.uid) return;
+  if (!uid) return;
 
-  void touchLastActive(u.uid);
+  const authUser = auth.currentUser;
+
+  void touchLastActive(uid);
 
   // fast fallback while Firestore loads
-  setUserName(u.displayName || "Player");
-  setAvatarUrl(u.photoURL || null);
+  setUserName(authUser?.displayName || "Player");
+  setAvatarUrl(authUser?.photoURL || null);
 
   const unsub = onSnapshot(
-    doc(db, "players", u.uid),
+    doc(db, "players", uid),
     (snap) => {
       if (!snap.exists()) return;
 
@@ -551,12 +611,9 @@ useEffect(() => {
           ? p.name.trim()
           : null;
 
-      const thumb =
-        typeof p.photoThumbURL === "string" ? p.photoThumbURL : null;
-      const full =
-        typeof p.photoURL === "string" ? p.photoURL : null;
-      const avatar =
-        typeof p.avatar === "string" ? p.avatar : null;
+      const thumb = typeof p.photoThumbURL === "string" ? p.photoThumbURL : null;
+      const full = typeof p.photoURL === "string" ? p.photoURL : null;
+      const avatar = typeof p.avatar === "string" ? p.avatar : null;
 
       const skill =
         (typeof p.skillLevel === "string" && p.skillLevel) ||
@@ -565,7 +622,7 @@ useEffect(() => {
         null;
 
       if (playerName) setUserName(playerName);
-      setAvatarUrl(thumb || full || avatar || u.photoURL || null);
+      setAvatarUrl(thumb || full || avatar || authUser?.photoURL || null);
 
       if (skill) {
         setLevelLabel(String(skill).toUpperCase());
@@ -577,7 +634,7 @@ useEffect(() => {
   );
 
   return () => unsub();
-}, []);
+}, [uid]);
 
 
 useEffect(() => {
@@ -729,32 +786,6 @@ setOppByUid((prev) => {
 
 useEffect(() => {
   if (!uid) return;
-
-  setMyCalendarEventsLoading(true);
-
-  const qRef = query(
-    collection(db, "calendar_events"),
-    where("ownerId", "==", uid)
-  );
-
-  const offSnap = onSnapshot(qRef, (snap) => {
-    const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as any));
-    const now = Date.now();
-
-    const upcoming = all
-      .filter((e) => isoToMs(e?.start) >= now)
-      .sort((a, b) => isoToMs(a?.start) - isoToMs(b?.start))
-      .slice(0, 10);
-
-    setMyCalendarEvents(upcoming);
-    setMyCalendarEventsLoading(false);
-  });
-
-  return () => offSnap();
-}, [uid]);
-
-useEffect(() => {
-  if (!uid) return;
   if (!myCalendarEvents.length) return;
 
   // collect opponent ids from calendar events
@@ -831,43 +862,101 @@ useEffect(() => {
 }, [uid, myCalendarEvents]);
 
 useEffect(() => {
-  const u = auth.currentUser;
-  if (!u?.uid) return;
+  if (!uid) return;
 
   let alive = true;
+  let offCalendar: (() => void) | null = null;
 
-  (async () => {
-    try {
-      const cached = loadNearbyActiveCache(u.uid);
+  setHomeBootstrapping(true);
 
-      if (cached && alive) {
-        console.log("[Home] nearby active loaded from cache:", cached.length);
-        setNearbyActive(cached);
-        setNearbyActiveLoading(false);
-        return;
-      }
+  // -----------------------
+  // Instant paint from cache: nearby active
+  // -----------------------
+  const cachedNearby = loadNearbyActiveCache(uid);
+  if (cachedNearby) {
+    setNearbyActive(cachedNearby);
+    setNearbyActiveLoading(false);
+  } else {
+    setNearbyActive([]);
+    setNearbyActiveLoading(true);
+  }
 
-      setNearbyActiveLoading(true);
+  // -----------------------
+  // Instant paint from cache: next events
+  // -----------------------
+  const cachedEvents = loadNextEventsCache(uid);
+  if (cachedEvents) {
+    setMyCalendarEvents(cachedEvents);
+    setMyCalendarEventsLoading(false);
+  } else {
+    setMyCalendarEvents([]);
+    setMyCalendarEventsLoading(true);
+  }
 
-      const players = await loadNearbyActivePlayers(u.uid);
+  // -----------------------
+  // Start real-time calendar immediately
+  // -----------------------
+  const qRef = query(
+    collection(db, "calendar_events"),
+    where("ownerId", "==", uid)
+  );
+
+  offCalendar = onSnapshot(
+    qRef,
+    (snap) => {
       if (!alive) return;
 
-      console.log("[Home] nearby active fetched from firestore:", players.length);
+      const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as any));
+      const now = Date.now();
+
+      const upcoming = all
+        .filter((e) => isoToMs(e?.start) >= now)
+        .sort((a, b) => isoToMs(a?.start) - isoToMs(b?.start))
+        .slice(0, 10);
+
+      setMyCalendarEvents(upcoming);
+      saveNextEventsCache(uid, upcoming);
+      setMyCalendarEventsLoading(false);
+    },
+    (err) => {
+      console.warn("[Home] calendar snapshot failed:", err);
+      if (!alive) return;
+
+      setMyCalendarEvents([]);
+      setMyCalendarEventsLoading(false);
+    }
+  );
+
+  // -----------------------
+  // Fetch nearby active fresh in background
+  // -----------------------
+  (async () => {
+    try {
+      const players = await loadNearbyActivePlayers(uid);
+      if (!alive) return;
 
       setNearbyActive(players);
-      saveNearbyActiveCache(u.uid, players);
+      saveNearbyActiveCache(uid, players);
     } catch (e) {
       console.warn("[Home] loadNearbyActivePlayers failed:", e);
-      if (alive) setNearbyActive([]);
+      if (!alive) return;
+
+      if (!cachedNearby) {
+        setNearbyActive([]);
+      }
     } finally {
-      if (alive) setNearbyActiveLoading(false);
+      if (alive) {
+        setNearbyActiveLoading(false);
+        setHomeBootstrapping(false);
+      }
     }
   })();
 
   return () => {
     alive = false;
+    if (offCalendar) offCalendar();
   };
-}, []);
+}, [uid]);
 
 function openConversationWithPlayer(otherUid: string) {
   if (!uid || !otherUid) return;
@@ -887,7 +976,7 @@ if (showDesktopWeb) {
   });
 
   return (
-    <DesktopDashboardHome
+       <DesktopDashboardHome
       userName={userName}
       levelLabel={levelLabel}
       avatarUrl={avatarUrl}
@@ -900,6 +989,7 @@ if (showDesktopWeb) {
       nearbyActiveLoading={nearbyActiveLoading}
       myCalendarEvents={myCalendarEvents}
       myCalendarEventsLoading={myCalendarEventsLoading}
+      homeBootstrapping={homeBootstrapping}
     />
   );
 }
