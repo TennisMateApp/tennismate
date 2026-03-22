@@ -49,7 +49,7 @@ import AgeGateModal from "@/components/AgeGateModal";
 import Image from "next/image";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { cn } from "@/lib/utils";
-import { initMixpanel, identifyUser } from "@/lib/mixpanel";
+import { initMixpanel, identifyUser, trackEvent } from "@/lib/mixpanel";
 
 
 const TM = {
@@ -122,10 +122,9 @@ function shouldPingLastActive(uid: string) {
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   useSystemTheme();
 
-  useEffect(() => {
-    initMixpanel();
-  }, []);
-
+useEffect(() => {
+  initMixpanel();
+}, []);
 
   // 🔔 Kick off native push once on app boot (Android + iOS native only)
   useEffect(() => {
@@ -573,6 +572,12 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
     showVerify &&
     !pathname.startsWith("/verify-email");
 
+    const shouldHoldProtectedRender =
+  !!user &&
+  !PUBLIC_ROUTES.has(pathname || "") &&
+  !pathname.startsWith("/verify-email") &&
+  !profileGateReady;
+
 if (shouldGateToVerify) {
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-white">
@@ -580,6 +585,18 @@ if (shouldGateToVerify) {
       <img src="/logo.png" alt="TennisMate" className="w-28 h-28" />
       <div className="mt-4 text-green-700 font-semibold">
         One last step… check your email to verify your account.
+      </div>
+    </div>
+  );
+}
+
+if (shouldHoldProtectedRender) {
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-white">
+      <BackButtonHandler />
+      <img src="/logo.png" alt="TennisMate" className="w-28 h-28" />
+      <div className="mt-4 text-green-700 font-semibold">
+        Loading TennisMate...
       </div>
     </div>
   );

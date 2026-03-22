@@ -7,6 +7,7 @@ export function initMixpanel() {
   if (initialized) return;
 
   const token = process.env.NEXT_PUBLIC_MIXPANEL_TOKEN;
+  console.log("[Mixpanel] token:", token);
 
   if (!token) {
     console.warn("[Mixpanel] Missing NEXT_PUBLIC_MIXPANEL_TOKEN");
@@ -30,17 +31,21 @@ export function initMixpanel() {
 export function trackEvent(name: string, props?: Record<string, any>) {
   if (typeof window === "undefined") return;
 
+  console.log("[Mixpanel] trackEvent called:", name, props);
+
   if (!initialized) {
+    console.warn("[Mixpanel] trackEvent called before init, attempting init now");
     initMixpanel();
   }
 
   if (!initialized) {
-    console.warn(`[Mixpanel] skipped "${name}" because Mixpanel is not initialized`);
+    console.warn(`[Mixpanel] skipped "${name}" because Mixpanel is still not initialized`);
     return;
   }
 
   try {
     mixpanel.track(name, props ?? {});
+    console.log("[Mixpanel] event sent:", name);
   } catch (err) {
     console.error(`[Mixpanel] track failed for "${name}"`, err);
   }
@@ -48,6 +53,8 @@ export function trackEvent(name: string, props?: Record<string, any>) {
 
 export function identifyUser(userId: string, props?: Record<string, any>) {
   if (typeof window === "undefined") return;
+
+  console.log("[Mixpanel] identifyUser called:", userId, props);
 
   if (!initialized) {
     initMixpanel();
@@ -63,6 +70,7 @@ export function identifyUser(userId: string, props?: Record<string, any>) {
     if (props) {
       mixpanel.people.set(props);
     }
+    console.log("[Mixpanel] user identified:", userId);
   } catch (err) {
     console.error("[Mixpanel] identify failed", err);
   }
@@ -73,6 +81,7 @@ export function resetMixpanel() {
 
   try {
     mixpanel.reset();
+    console.log("[Mixpanel] reset");
   } catch (err) {
     console.error("[Mixpanel] reset failed", err);
   }
