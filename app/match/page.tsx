@@ -222,6 +222,37 @@ if (mins < 30) return { label: `ACTIVE ${mins}M AGO`, level: "hot" };
   return { label: `Active ${days}d ago`, level: "cool" };
 };
 
+type ActivityLevel = "online" | "recent" | "inactive";
+
+const getActivityLevel = (ts: any): ActivityLevel => {
+  if (!ts) return "inactive";
+
+  const d: Date =
+    typeof ts?.toDate === "function"
+      ? ts.toDate()
+      : ts instanceof Date
+      ? ts
+      : new Date(ts);
+
+  const diffMs = Date.now() - d.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "inactive";
+
+  const mins = diffMs / 60000;
+  const days = mins / (60 * 24);
+
+  if (mins <= 5) return "online";
+  if (days <= 14) return "recent";
+  return "inactive";
+};
+
+const activityPoints = (ts: any): number => {
+  const level = getActivityLevel(ts);
+
+  if (level === "online") return 5;
+  if (level === "recent") return 2;
+  return -1;
+};
+
 const formatAvailability = (slots: string[] | undefined | null) => {
   const a = Array.isArray(slots) ? slots : [];
   if (a.length === 0) return "Availability unknown";
@@ -633,13 +664,18 @@ const refreshMatches = useCallback(async () => {
           }
         }
 
-        // Availability (cap 4)
-        const shared = A(p.availability).filter((a) => A(myData.availability).includes(a)).length;
-        score += Math.min(shared, 4);
+      // Availability (cap 4)
+const shared = A(p.availability).filter((a) =>
+  A(myData.availability).includes(a)
+).length;
+score += Math.min(shared, 4);
 
-        // Distance bonus + HARD FILTER
-        const theirLat = typeof p.lat === "number" ? p.lat : null;
-        const theirLng = typeof p.lng === "number" ? p.lng : null;
+// Activity boost based on lastActiveAt
+score += activityPoints(p.lastActiveAt);
+
+// Distance bonus + HARD FILTER
+const theirLat = typeof p.lat === "number" ? p.lat : null;
+const theirLng = typeof p.lng === "number" ? p.lng : null;
 
         if (myLat != null && myLng != null && theirLat != null && theirLng != null) {
           distance = getDistanceFromLatLonInKm(myLat, myLng, theirLat, theirLng);
