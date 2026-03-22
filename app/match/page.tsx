@@ -1596,14 +1596,6 @@ style={{
 }}
 >
 
-{/* Activity badge */}
-<div
-  className="absolute top-4 right-4 rounded-full px-2 py-[3px] text-[10px] font-bold uppercase tracking-[0.03em] whitespace-nowrap"
-  style={activityBadge.style}
->
-  {activityBadge.label}
-</div>
-
   {/* Avatar top-right */}
 <div
   className="absolute top-5 left-5 w-16 h-16 rounded-full overflow-hidden"
@@ -1627,59 +1619,71 @@ style={{
     )}
   </div>
 
-  {/* Content area (pad-right so text doesn't go under avatar) */}
-  <div className="pl-24">
-    {/* Name */}
-    <div className="text-[16px] font-extrabold truncate" style={{ color: TM.forest }}>
-      {match.name}
+{/* Content area */}
+<div className="pl-24">
+  <div className="mb-2">
+    <div
+      className="inline-flex rounded-full px-2 py-[3px] text-[10px] font-bold uppercase tracking-[0.03em] whitespace-nowrap"
+      style={activityBadge.style}
+    >
+      {activityBadge.label}
     </div>
+  </div>
 
-{(() => {
-  const numeric =
-    typeof (match.skillRating ?? match.utr) === "number"
-      ? (match.skillRating ?? match.utr)!
-      : null;
+  {/* Name */}
+  <div
+    className="text-[16px] font-extrabold truncate"
+    style={{ color: TM.forest }}
+  >
+    {match.name}
+  </div>
 
-  const bandLabel = labelForBand(
-    match.skillBand ||
-      skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
-      legacyToBand(match.skillLevel),
-    match.skillBandLabel
-  );
+  {(() => {
+    const numeric =
+      typeof (match.skillRating ?? match.utr) === "number"
+        ? (match.skillRating ?? match.utr)!
+        : null;
 
-  const levelText = numeric != null ? numeric.toFixed(1) : bandLabel.toUpperCase();
+    const bandLabel = labelForBand(
+      match.skillBand ||
+        skillFromUTR((match.skillRating ?? match.utr) ?? null) ||
+        legacyToBand(match.skillLevel),
+      match.skillBandLabel
+    );
 
-  const distText =
-    typeof match.distance === "number" ? `${match.distance} KM away` : null;
+    const levelText = numeric != null ? numeric.toFixed(1) : bandLabel.toUpperCase();
 
-  const pcText = match.postcode ? String(match.postcode) : null;
+    const distText =
+      typeof match.distance === "number" ? `${match.distance} KM away` : null;
 
-  return (
-    <div className="mt-2 flex items-center gap-2 flex-wrap">
-      {/* Skill pill */}
-      <span
-        className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-extrabold"
-        style={{
-          background: "rgba(57,255,20,0.14)",
-          border: "1px solid rgba(57,255,20,0.35)",
-          color: TM.forest,
-        }}
-      >
-        LEVEL {levelText}
-      </span>
+    const pcText = match.postcode ? String(match.postcode) : null;
 
-      {/* Distance + postcode */}
-      <span
-        className="text-[12px] font-semibold"
-        style={{ color: "rgba(15,23,42,0.65)" }}
-      >
-        {distText ? distText : ""}
-        {distText && pcText ? " • " : ""}
-        {pcText ? pcText : ""}
-      </span>
-    </div>
-  );
-})()}
+    return (
+      <div className="mt-2 flex items-center gap-2 flex-wrap">
+        {/* Skill pill */}
+        <span
+          className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-extrabold"
+          style={{
+            background: "rgba(57,255,20,0.14)",
+            border: "1px solid rgba(57,255,20,0.35)",
+            color: TM.forest,
+          }}
+        >
+          LEVEL {levelText}
+        </span>
+
+        {/* Distance + postcode */}
+        <span
+          className="text-[12px] font-semibold"
+          style={{ color: "rgba(15,23,42,0.65)" }}
+        >
+          {distText ? distText : ""}
+          {distText && pcText ? " • " : ""}
+          {pcText ? pcText : ""}
+        </span>
+      </div>
+    );
+  })()}
 
 
 <div
