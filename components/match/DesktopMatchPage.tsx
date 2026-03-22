@@ -13,6 +13,63 @@ const TM = {
   sub: "rgba(234,247,240,0.75)",
 };
 
+type ActivityLevel = "online" | "recent" | "inactive";
+
+const getActivityLevel = (lastActiveAt: any): ActivityLevel => {
+  if (!lastActiveAt) return "inactive";
+
+  const lastActive =
+    typeof lastActiveAt?.toDate === "function"
+      ? lastActiveAt.toDate()
+      : new Date(lastActiveAt);
+
+  const diffMs = Date.now() - lastActive.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "inactive";
+
+  const mins = diffMs / (1000 * 60);
+  const days = mins / (60 * 24);
+
+  if (mins <= 5) return "online";
+  if (days <= 14) return "recent";
+  return "inactive";
+};
+
+const getActivityBadge = (lastActiveAt: any) => {
+  const level = getActivityLevel(lastActiveAt);
+
+  if (level === "online") {
+    return {
+      label: "ONLINE NOW",
+      style: {
+        background: "rgba(57,255,20,0.18)",
+        border: "1.5px solid #39FF14",
+        color: "#0B3D2E",
+        boxShadow: "0 0 12px rgba(57,255,20,0.7)",
+      } as React.CSSProperties,
+    };
+  }
+
+  if (level === "recent") {
+    return {
+      label: "ACTIVE RECENTLY",
+      style: {
+        background: "rgba(255,200,0,0.15)",
+        border: "1px solid rgba(255,200,0,0.6)",
+        color: "#0B3D2E",
+      } as React.CSSProperties,
+    };
+  }
+
+  return {
+    label: "INACTIVE",
+    style: {
+      background: "rgba(15,23,42,0.06)",
+      border: "1px solid rgba(15,23,42,0.12)",
+      color: "rgba(15,23,42,0.6)",
+    } as React.CSSProperties,
+  };
+};
+
 type AgeBand = "" | "18-24" | "25-34" | "35-44" | "45-54" | "55+";
 type GenderFilter = "" | "Male" | "Female" | "Non-binary" | "Other";
 
@@ -221,127 +278,124 @@ const handleInvite = useCallback(
               ) : (
                 <>
                   <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4">
-                    {visibleMatches.map((p) => (
-                      <div
-                        key={p.id}
-                        className="rounded-2xl p-4 shadow-sm"
-                        style={{
-                          background: "#ffffff",
-                          border: "1px solid rgba(0,0,0,0.10)",
-                          boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
-                        }}
-                      >
-                        {/* image */}
-                        <div
-                          className="relative w-full aspect-square rounded-xl overflow-hidden"
-                          style={{
-                            background: "rgba(0,0,0,0.04)",
-                            border: "1px solid rgba(0,0,0,0.08)",
-                          }}
-                        >
-                          {p.photoThumbURL || p.photoURL ? (
-                            <>
-                              <Image
-                                src={p.photoThumbURL || p.photoURL}
-                                alt={p.name}
-                                fill
-                                sizes="260px"
-                                className="object-cover object-center"
-                              />
-                              <div
-                                className="absolute inset-0"
-                                style={{
-                                  background:
-                                    "linear-gradient(180deg, rgba(0,0,0,0.04) 0%, rgba(0,0,0,0.10) 100%)",
-                                }}
-                              />
-                            </>
-                          ) : (
-                            <div className="h-full w-full grid place-items-center text-2xl font-black text-black/50">
-                              {(p.name || "?").slice(0, 1).toUpperCase()}
-                            </div>
-                          )}
-                        </div>
+{visibleMatches.map((p) => {
+  const activityBadge = getActivityBadge(p.lastActiveAt);
 
-                        {/* name/postcode/level */}
-                        <div className="mt-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div
-                                className="font-extrabold text-gray-900 text-base leading-snug"
-                                style={{
-                                  display: "-webkit-box",
-                                  WebkitLineClamp: 2,
-                                  WebkitBoxOrient: "vertical",
-                                  overflow: "hidden",
-                                }}
-                              >
-                                {p.name}
-                              </div>
-                            </div>
+  return (
+    <div
+      key={p.id}
+      className="rounded-2xl p-4 shadow-sm"
+      style={{
+        background: "#F6F7F8",
+        border: "1px solid rgba(15,23,42,0.08)",
+      }}
+    >
+      <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-black/5">
 
-                            <div className="shrink-0 text-[12px] text-gray-500 font-semibold pt-[2px]">
-                              {p.postcode || ""}
-                            </div>
-                          </div>
+        {p.photoURL ? (
+          <Image
+            src={p.photoURL}
+            alt={p.name}
+            fill
+            className="object-cover"
+          />
+        ) : (
+          <div className="h-full w-full flex items-center justify-center text-3xl font-bold text-slate-400">
+            {(p.name || "?").charAt(0).toUpperCase()}
+          </div>
+        )}
+      </div>
 
-                          {!!getSkillLabel(p) && (
-                            <div className="mt-2">
-                              <span
-                                className="inline-flex rounded-full px-2 py-[2px] text-[11px] font-extrabold tracking-wide"
-                                style={{ background: TM.neon, color: TM.forest }}
-                              >
-                                LEVEL {String(getSkillLabel(p)).toUpperCase()}
-                              </span>
-                            </div>
-                          )}
-                        </div>
+<div className="mt-3">
+  <div className="flex items-start justify-between gap-3">
+    <div className="min-w-0 flex-1">
+      <div className="mb-2">
+        <div
+          className="inline-flex rounded-full px-2 py-[3px] text-[10px] font-bold uppercase tracking-[0.03em] whitespace-nowrap"
+          style={activityBadge.style}
+        >
+          {activityBadge.label}
+        </div>
+      </div>
 
-                        {!!formatAvailabilityLine(p) && (
-                          <div className="mt-2 flex items-center gap-2 text-[12px] text-gray-600">
-                            <CalendarDays size={14} className="shrink-0 opacity-80" />
-                            <span className="truncate">{formatAvailabilityLine(p)}</span>
-                          </div>
-                        )}
+      <div
+        className="text-base font-extrabold truncate"
+        style={{ color: TM.forest }}
+      >
+        {p.name}
+      </div>
 
-                        {!!formatDistanceAway(p) && (
-                          <div className="mt-1 flex items-center gap-2 text-[12px] text-gray-600">
-                            <MapPin size={14} className="shrink-0 opacity-80" />
-                            <span>{formatDistanceAway(p)}</span>
-                          </div>
-                        )}
+            <div
+              className="mt-1 text-sm font-semibold"
+              style={{ color: "rgba(11,61,46,0.70)" }}
+            >
+              {typeof p.distance === "number" ? `${p.distance} km away` : "Distance unknown"}
+              {p.postcode ? ` • ${p.postcode}` : ""}
+            </div>
+          </div>
+        </div>
 
-                        {/* actions */}
-                        <div className="mt-3 flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleInvite(p)}
-                            className="flex-1 rounded-xl py-2 text-sm font-extrabold"
-                            style={{
-                              background: TM.neon,
-                              color: TM.forest,
-                            }}
-                          >
-                            Invite to Play
-                          </button>
+        <div
+          className="mt-2 inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-extrabold"
+          style={{
+            background: "rgba(57,255,20,0.14)",
+            border: "1px solid rgba(57,255,20,0.35)",
+            color: TM.forest,
+          }}
+        >
+          LEVEL{" "}
+          {typeof (p.skillRating ?? p.utr) === "number"
+            ? (p.skillRating ?? p.utr)!.toFixed(1)
+            : p.skillBandLabel || p.skillLevel || "Unknown"}
+        </div>
 
-                          <button
-                            type="button"
-                           onClick={() => setProfileOpenId(p.docId || p.id)}
-                            className="rounded-xl px-3 py-2 text-sm font-semibold"
-                            style={{
-                              color: "#0B3D2E",
-                              background: "#ffffff",
-                              border: "1px solid rgba(11,61,46,0.25)",
-                            }}
-                          >
-                            View Profile
-                          </button>
-                        </div>
+        <div
+          className="mt-2 flex items-center gap-2 text-sm"
+          style={{ color: "rgba(11,61,46,0.70)" }}
+        >
+          <CalendarDays size={14} />
+          <span>{Array.isArray(p.availability) && p.availability.length > 0 ? p.availability.slice(0, 2).join(" & ") : "Availability unknown"}</span>
+        </div>
 
-                      </div>
-                    ))}
-                  </div>
+        <div
+          className="mt-1 flex items-center gap-2 text-sm"
+          style={{ color: "rgba(11,61,46,0.70)" }}
+        >
+          <MapPin size={14} />
+          <span>{p.postcode || "Location unknown"}</span>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleInvite(p)}
+            className="flex-1 rounded-xl py-2 text-sm font-extrabold"
+            style={{
+              background: TM.neon,
+              color: TM.forest,
+            }}
+          >
+            Invite to Play
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setProfileOpenId(p.docId || p.id)}
+            className="rounded-xl px-3 py-2 text-sm font-semibold"
+            style={{
+              color: "#0B3D2E",
+              background: "#ffffff",
+              border: "1px solid rgba(11,61,46,0.25)",
+            }}
+          >
+            View Profile
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+})}
+</div>
 
                   {sortedMatches.length > visibleCount && (
                     <div className="mt-6 flex justify-center">

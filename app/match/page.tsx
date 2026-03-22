@@ -253,6 +253,42 @@ const activityPoints = (ts: any): number => {
   return -1;
 };
 
+const getActivityBadge = (ts: any) => {
+  const level = getActivityLevel(ts);
+
+  if (level === "online") {
+    return {
+      label: "ONLINE NOW",
+      style: {
+        background: "rgba(57,255,20,0.18)",
+        border: "1.5px solid #39FF14",
+        color: "#0B3D2E",
+        boxShadow: "0 0 12px rgba(57,255,20,0.7)",
+      } as React.CSSProperties,
+    };
+  }
+
+  if (level === "recent") {
+    return {
+      label: "Active recently",
+      style: {
+        background: "rgba(255,200,0,0.15)",
+        border: "1px solid rgba(255,200,0,0.6)",
+        color: "#0B3D2E",
+      } as React.CSSProperties,
+    };
+  }
+
+  return {
+    label: "Inactive",
+    style: {
+      background: "rgba(15,23,42,0.06)",
+      border: "1px solid rgba(15,23,42,0.12)",
+      color: "rgba(15,23,42,0.6)",
+    } as React.CSSProperties,
+  };
+};
+
 const formatAvailability = (slots: string[] | undefined | null) => {
   const a = Array.isArray(slots) ? slots : [];
   if (a.length === 0) return "Availability unknown";
@@ -1531,11 +1567,13 @@ return (
 ) : (
   <>
     <ul className="space-y-3">
-          {visibleMatches.map((match, index) => {
-             const avatarSrc = match.photoThumbURL || match.photoURL || null;
+{visibleMatches.map((match, index) => {
+  const avatarSrc = match.photoThumbURL || match.photoURL || null;
   const initials = (match.name || "?").trim().charAt(0).toUpperCase();
-            const toUid = uidOf(match); // ✅ auth uid (prod)
-            if (!toUid) return null; // safety: skip broken entries
+  const toUid = uidOf(match);
+  const activityBadge = getActivityBadge(match.lastActiveAt);
+
+  if (!toUid) return null;
 const alreadySent = sentRequests.has(toUid);
             const isNew =
               match.timestamp &&
@@ -1557,6 +1595,15 @@ style={{
   boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
 }}
 >
+
+{/* Activity badge */}
+<div
+  className="absolute top-4 right-4 rounded-full px-2 py-[3px] text-[10px] font-bold uppercase tracking-[0.03em] whitespace-nowrap"
+  style={activityBadge.style}
+>
+  {activityBadge.label}
+</div>
+
   {/* Avatar top-right */}
 <div
   className="absolute top-5 left-5 w-16 h-16 rounded-full overflow-hidden"
