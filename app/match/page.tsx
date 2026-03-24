@@ -314,6 +314,7 @@ export default function MatchPage() {
   const [matchMode, setMatchMode] = useState<"auto"|"skill"|"utr">("auto");
   const [myProfileHidden, setMyProfileHidden] = useState(false);
   const refreshingRef = useRef(false);
+  const matchPageTrackedRef = useRef(false);
   const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
   const isDesktop = useIsDesktop();
 
@@ -875,6 +876,38 @@ useEffect(() => {
   return () => unsub();
 }, [router, params, refreshMatches]);
 
+useEffect(() => {
+  matchPageTrackedRef.current = false;
+}, [user?.uid]);
+
+useEffect(() => {
+  if (!user?.uid) return;
+  if (loading) return;
+
+  const key = `tm_match_page_opened_${user.uid}`;
+  const now = Date.now();
+  const lastTracked = sessionStorage.getItem(key);
+
+  // prevent noisy repeat fires when bouncing around quickly
+  if (lastTracked && now - Number(lastTracked) < 5 * 60 * 1000) {
+    return;
+  }
+
+  // extra guard for same mount/render cycle
+  if (matchPageTrackedRef.current) return;
+  matchPageTrackedRef.current = true;
+
+  sessionStorage.setItem(key, String(now));
+
+  trackEvent("match_page_opened", {
+    userId: user.uid,
+    platform: typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches
+      ? "desktop"
+      : "mobile",
+    matchMode,
+    hideContacted,
+  });
+}, [user?.uid, loading, matchMode, hideContacted]);
 
 useEffect(() => {
   if (!user) return;

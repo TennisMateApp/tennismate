@@ -36,6 +36,7 @@ import { useIsDesktop } from "@/lib/useIsDesktop";
 import { Capacitor } from "@capacitor/core";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
+import { trackEvent } from "@/lib/mixpanel";
 
 
 const TM = {
@@ -561,6 +562,8 @@ const showDesktopWeb = !isApp && isDesktop;
 
   const [openPlayerId, setOpenPlayerId] = useState<string | null>(null);
 const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
+
+const homeTrackedRef = useRef(false);
   
   const [nearbyActive, setNearbyActive] = useState<ActivePlayer[]>([]);
 const [nearbyActiveLoading, setNearbyActiveLoading] = useState(true);
@@ -644,6 +647,25 @@ useEffect(() => {
   return () => unsub();
 }, []);
 
+useEffect(() => {
+  if (!uid) return;
+
+  const lastTracked = sessionStorage.getItem("home_last_tracked");
+  const now = Date.now();
+
+  // 5 min cooldown (adjust if needed)
+  if (lastTracked && now - Number(lastTracked) < 5 * 60 * 1000) {
+    return;
+  }
+
+  sessionStorage.setItem("home_last_tracked", String(now));
+
+  trackEvent("home_page_opened", {
+    userId: uid,
+    platform: Capacitor.isNativePlatform() ? "native" : "web",
+    isDesktopWeb: showDesktopWeb,
+  });
+}, [uid, showDesktopWeb]);
 
 useEffect(() => {
   if (!uid) return;
