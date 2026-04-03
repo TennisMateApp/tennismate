@@ -99,19 +99,20 @@ export default function DesktopProfileEditPage() {
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
   const [showCropper, setShowCropper] = useState(false);
 
-  const [formData, setFormData] = useState({
-    name: "",
-    postcode: "",
-    skillBand: "" as SkillBand | "",
-    rating: "" as number | "",
-    availability: [] as string[],
-    bio: "",
-    photoURL: "",
-    birthYear: "" as number | "",
-    gender: "",
-    isMatchable: true,
-    badges: [] as string[],
-  });
+const [formData, setFormData] = useState({
+  name: "",
+  postcode: "",
+  skillBand: "" as SkillBand | "",
+  rating: "" as number | "",
+  availability: [] as string[],
+  bio: "",
+  photoURL: "",
+  photoThumbURL: "",
+  birthYear: "" as number | "",
+  gender: "",
+  isMatchable: true,
+  badges: [] as string[],
+});
 
   const hasPhoto = useMemo(
     () => Boolean(previewURL || formData.photoURL || croppedImage),
@@ -147,19 +148,20 @@ export default function DesktopProfileEditPage() {
         legacyToBand(data.skillLevel) ||
         "";
 
-      setFormData({
-        name: data.name || "",
-        postcode: data.postcode || "",
-        skillBand: derivedBand || "",
-        rating: typeof ratingNumber === "number" ? ratingNumber : "",
-        availability: normalizeAvailability(data.availability),
-        bio: data.bio || "",
-        photoURL: data.photoURL || "",
-        birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
-        gender: typeof data.gender === "string" ? data.gender : "",
-        isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
-        badges: Array.isArray(data.badges) ? data.badges : [],
-      });
+setFormData({
+  name: data.name || "",
+  postcode: data.postcode || "",
+  skillBand: derivedBand || "",
+  rating: typeof ratingNumber === "number" ? ratingNumber : "",
+  availability: normalizeAvailability(data.availability),
+  bio: data.bio || "",
+  photoURL: data.photoURL || "",
+  photoThumbURL: data.photoThumbURL || "",
+  birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
+  gender: typeof data.gender === "string" ? data.gender : "",
+  isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
+  badges: Array.isArray(data.badges) ? data.badges : [],
+});
 
       originalPostcodeRef.current = String(data.postcode || "").trim();
       if (data.photoURL) setPreviewURL(data.photoURL);
@@ -233,20 +235,16 @@ export default function DesktopProfileEditPage() {
     }
   };
 
-  const handleRemovePhoto = async () => {
-    try {
-      setCroppedImage(null);
-      setPreviewURL(null);
-      setFormData((p) => ({ ...p, photoURL: "" }));
-      if (user) {
-        const refSt = ref(storage, `profile_pictures/${user.uid}/profile.jpg`);
-        await deleteObject(refSt).catch(() => {});
-      }
-      setStatus("Photo removed. Please upload a new one before saving.");
-    } catch {
-      setStatus("Could not remove photo.");
-    }
-  };
+const handleRemovePhoto = async () => {
+  try {
+    setCroppedImage(null);
+    setPreviewURL(null);
+    setFormData((p) => ({ ...p, photoURL: "", photoThumbURL: "" }));
+    setStatus("Photo removed. Please upload a new one before saving.");
+  } catch {
+    setStatus("Could not remove photo.");
+  }
+};
 
   const getLatLngForPostcode = async (postcode: string): Promise<{ lat: number; lng: number }> => {
     const pcRef = doc(db, "postcodes", postcode.trim());
@@ -333,43 +331,61 @@ export default function DesktopProfileEditPage() {
         nextGeohash = geohashForLocation([lat, lng]);
       }
 
-      let photoURL = formData.photoURL;
-      if (croppedImage) {
-        const refSt = ref(storage, `profile_pictures/${user.uid}/profile.jpg`);
-        await uploadBytes(refSt, croppedImage);
-        photoURL = await getDownloadURL(refSt);
-      }
+let photoURL = formData.photoURL;
+let photoThumbURL = formData.photoThumbURL || formData.photoURL;
 
-      await setDoc(
-        doc(db, "players", user.uid),
-        {
-          name: formData.name,
-          postcode: newPostcode,
-          bio: formData.bio,
-          availability: formData.availability,
-          birthYear: formData.birthYear === "" ? null : formData.birthYear,
-          gender: formData.gender || null,
-          isMatchable: !!formData.isMatchable,
-          badges: Array.isArray(formData.badges) ? formData.badges : [],
+if (croppedImage) {
+  const refSt = ref(storage, `profile_pictures/${user.uid}/profile-${Date.now()}.jpg`);
+  await uploadBytes(refSt, croppedImage);
+  photoURL = await getDownloadURL(refSt);
+  photoThumbURL = photoURL;
+}
 
-          skillBand: formData.skillBand || null,
-          skillBandLabel: toSkillLabel(formData.skillBand),
-          skillRating: formData.rating === "" ? null : formData.rating,
-          utr: formData.rating === "" ? null : formData.rating,
-          skillLevel: coarseFromBand(formData.skillBand),
+const playerPayload = {
+  name: formData.name || "",
+  postcode: newPostcode,
+  bio: formData.bio || "",
+  availability: formData.availability || [],
+  birthYear: formData.birthYear === "" ? null : formData.birthYear,
+  gender: formData.gender || null,
+  isMatchable: !!formData.isMatchable,
+  badges: Array.isArray(formData.badges) ? formData.badges : [],
 
-          ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
+  skillBand: formData.skillBand || null,
+  skillBandLabel: toSkillLabel(formData.skillBand),
+  skillRating: formData.rating === "" ? null : formData.rating,
+  utr: formData.rating === "" ? null : formData.rating,
+  skillLevel: coarseFromBand(formData.skillBand),
 
-          photoURL,
-          nameLower: (formData.name || "").toLowerCase(),
-          email: user.email,
-          timestamp: serverTimestamp(),
-          profileComplete: true,
-        },
-        { merge: true }
-      );
+  ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
 
-      setFormData((p) => ({ ...p, postcode: newPostcode, photoURL }));
+  photoURL,
+  photoThumbURL,
+  nameLower: (formData.name || "").toLowerCase(),
+  email: user.email,
+  timestamp: serverTimestamp(),
+  profileComplete: true,
+};
+
+const userPayload = {
+  name: formData.name || "",
+  photoURL,
+  photoThumbURL,
+  updatedAt: serverTimestamp(),
+};
+
+await Promise.all([
+  setDoc(doc(db, "players", user.uid), playerPayload, { merge: true }),
+  setDoc(doc(db, "users", user.uid), userPayload, { merge: true }),
+]);
+
+      setFormData((p) => ({
+  ...p,
+  postcode: newPostcode,
+  photoURL,
+  photoThumbURL,
+}));
+setPreviewURL(photoURL);
       originalPostcodeRef.current = newPostcode;
 
       setStatus("✅ Saved!");
