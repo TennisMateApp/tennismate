@@ -66,43 +66,13 @@ const FOOTER = {
 
 function useAppBootLoader() {
   const [bootDone, setBootDone] = useState(false);
+
   useEffect(() => {
     const t = setTimeout(() => setBootDone(true), 800);
     return () => clearTimeout(t);
   }, []);
+
   return bootDone;
-}
-
-
-// ---- Add the useSystemTheme hook after imports ----
-function useSystemTheme() {
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return;
-    }
-
-    const matchMedia = window.matchMedia("(prefers-color-scheme: dark)");
-    const root = document.documentElement;
-
-    const updateTheme = (e?: MediaQueryListEvent) => {
-      const isDark = e?.matches ?? matchMedia.matches;
-      if (isDark) {
-        root.classList.add("dark");
-      } else {
-        root.classList.remove("dark");
-      }
-    };
-
-    updateTheme();
-
-    matchMedia.addEventListener?.("change", updateTheme);
-
-    return () => {
-      matchMedia.removeEventListener?.("change", updateTheme);
-    };
-  }, []);
 }
 
 function shouldPingLastActive(uid: string) {
@@ -112,7 +82,7 @@ function shouldPingLastActive(uid: string) {
   const last = Number(localStorage.getItem(key) || "0");
   const now = Date.now();
 
-  const THROTTLE_MS = 1000 * 60 * 30; // 30 mins (tweak: 15–60 mins)
+  const THROTTLE_MS = 1000 * 60 * 30;
   if (now - last < THROTTLE_MS) return false;
 
   localStorage.setItem(key, String(now));
@@ -120,7 +90,6 @@ function shouldPingLastActive(uid: string) {
 }
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
-  useSystemTheme();
 
 useEffect(() => {
   initMixpanel();
@@ -164,7 +133,12 @@ useEffect(() => {
 
 
   const bootDone = useAppBootLoader();
+useEffect(() => {
+  if (!bootDone) return;
+  if (!Capacitor.isNativePlatform()) return;
 
+  SplashScreen.hide().catch(() => {});
+}, [bootDone]);
   // iOS: do NOT overlay the status bar (so content starts below it)
 useEffect(() => {
   if (Capacitor.getPlatform && Capacitor.getPlatform() === "ios") {
