@@ -181,25 +181,14 @@ if (isDesktop) {
 }
 
 return (
-    <div className="fixed inset-0 overflow-hidden bg-black">
-    {/* Background */}
-    <div className="absolute inset-0 z-0">
-      <Image
-        src="/images/login-tennis-court.jpg"
-        alt=""
-        fill
-        priority
-        className="object-cover"
-      />
-      <div className="absolute inset-0 bg-black/55" />
-    </div>
+  <div className="fixed inset-0 overflow-hidden bg-white">
 
     {/* Content */}
     <div className="relative z-10 h-full w-full flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex justify-center mb-8">
-          <div className="h-28 w-28 rounded-full bg-white/20 ring-8 ring-white/30 backdrop-blur-md shadow-lg flex items-center justify-center">
+          <div className="h-28 w-28 rounded-full bg-gray-100 ring-8 ring-gray-200 backdrop-blur-md shadow-lg flex items-center justify-center">
             <div className="relative h-24 w-24 rounded-full overflow-hidden bg-white">
               <Image
                 src="/logo.png"
@@ -213,18 +202,18 @@ return (
         </div>
 
         {/* Headings */}
-        <h1 className="text-center text-2xl font-semibold text-white">
+        <h1 className="text-center text-2xl font-semibold text-gray-900">
           TennisMate
         </h1>
-        <h2 className="text-center text-2xl font-semibold text-white mt-4">
+        <h2 className="text-center text-2xl font-semibold text-gray-900 mt-4">
           Welcome Back
         </h2>
-        <p className="text-center text-sm text-gray-200 mt-2">
+        <p className="text-center text-sm text-gray-600 mt-2">
           Sign in to find your next match
         </p>
 
         {/* Card */}
-        <div className="mt-6 rounded-2xl bg-white/95 backdrop-blur-md border border-white/20 shadow-2xl p-5">
+        <div className="mt-6 rounded-2xl bg-white backdrop-blur-md border border-white/20 shadow-2xl p-5">
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email */}
             <div>
