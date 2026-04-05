@@ -396,16 +396,6 @@ const handleInviteToPlay = async () => {
       return;
     }
 
-    if (
-      statuses.some((status) =>
-        ["pending", "unread", "requested"].includes(status)
-      )
-    ) {
-      setMatchRequestStatus("pending");
-      setInviteSent(true);
-      return;
-    }
-
     // load my profile so this matches the Match page payload
     const myProfileSnap = await getDoc(doc(db, "players", currentUid));
     const myProfileData = myProfileSnap.exists() ? (myProfileSnap.data() as any) : null;
