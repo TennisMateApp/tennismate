@@ -280,7 +280,7 @@ const getActivityBadge = (ts: any) => {
   }
 
   return {
-    label: "Inactive",
+    label: "Offline",
     style: {
       background: "rgba(15,23,42,0.06)",
       border: "1px solid rgba(15,23,42,0.12)",
@@ -317,12 +317,15 @@ export default function MatchPage() {
   const matchPageTrackedRef = useRef(false);
   const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
   const isDesktop = useIsDesktop();
+  
 
 
 type GenderFilter = "" | "Male" | "Female" | "Non-binary" | "Other";
+type ActivityFilter = "" | "online" | "recent" | "offline";
 
 const [ageBand, setAgeBand] = useState<AgeBand>("");
 const [genderFilter, setGenderFilter] = useState<GenderFilter>("");
+const [activityFilter, setActivityFilter] = useState<ActivityFilter>("");
 
 const router = useRouter();
 const params = useSearchParams();
@@ -376,6 +379,7 @@ const filtersActive =
   matchMode !== "auto" ||
   ageBand !== "" ||
   genderFilter !== "" ||
+  activityFilter !== "" ||
   hideContacted !== true;
 
   useEffect(() => {
@@ -1083,6 +1087,12 @@ const filteredMatches = useMemo(() => {
     // Age filter
     if (ageBand !== "" && (m.age == null || !inAgeBand(m.age, ageBand))) return false;
 
+    // Activity filter
+    const level = getActivityLevel(m.lastActiveAt);
+    if (activityFilter === "online" && level !== "online") return false;
+    if (activityFilter === "recent" && level !== "recent") return false;
+    if (activityFilter === "offline" && level !== "inactive") return false;
+
     return true;
   });
 }, [
@@ -1094,6 +1104,7 @@ const filteredMatches = useMemo(() => {
   blockedMatchUserIds,
   ageBand,
   genderFilter,
+  activityFilter,
 ]);
 
 
@@ -1164,18 +1175,22 @@ const visibleMatches = useMemo(
 );
 useEffect(() => {
   setVisibleCount(PAGE_SIZE);
-}, [sortBy, hideContacted, sortedMatches.length]);
+}, [sortBy, hideContacted, matchMode, ageBand, genderFilter, activityFilter]);
 
 useEffect(() => {
-  const qSort   = params.get("sort");
-  const qHide   = params.get("hide");     // "1" | "0"
-  const qMode   = params.get("mode");     // "auto" | "skill" | "utr"
+  const qSort = params.get("sort");
+  const qHide = params.get("hide");
+  const qMode = params.get("mode");
+  const qActivity = params.get("activity");
 
   if (qSort) setSortBy(qSort);
   if (qHide === "0" || qHide === "1") setHideContacted(qHide === "1");
   if (qMode === "auto" || qMode === "skill" || qMode === "utr") setMatchMode(qMode);
+  if (qActivity === "online" || qActivity === "recent" || qActivity === "offline") {
+    setActivityFilter(qActivity);
+  }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []); // run once on mount
+}, []);
 
 const TM = {
   forest: "#0B3D2E",
@@ -1260,35 +1275,34 @@ if (isDesktop) {
           <TMDesktopSidebar player={myProfile} />
           <div className="flex-1 min-w-0">
             <DesktopMatchPage
-              loading={loading}
-              myProfileHidden={myProfileHidden}
-              sortedMatches={sortedMatches}
-              visibleMatches={visibleMatches}
-              visibleCount={visibleCount}
-              pageSize={PAGE_SIZE}
-              refreshing={refreshing}
-              filtersActive={filtersActive}
-              filtersOpen={filtersOpen}
-              setFiltersOpen={setFiltersOpen}
-              // filters
-              sortBy={sortBy}
-              setSortBy={setSortBy}
-              matchMode={matchMode}
-              setMatchMode={setMatchMode}
-              ageBand={ageBand}
-              setAgeBand={setAgeBand}
-              genderFilter={genderFilter}
-              setGenderFilter={setGenderFilter}
-              hideContacted={hideContacted}
-              setHideContacted={setHideContacted}
-              // actions
-              onLoadMore={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              onInvite={(match) => handleMatchRequest(match)}
-              onViewProfile={(id) => setProfileOpenId(id)}
-
-              profileOpenId={profileOpenId}
+  loading={loading}
+  myProfileHidden={myProfileHidden}
+  sortedMatches={sortedMatches}
+  visibleMatches={visibleMatches}
+  visibleCount={visibleCount}
+  pageSize={PAGE_SIZE}
+  refreshing={refreshing}
+  filtersActive={filtersActive}
+  filtersOpen={filtersOpen}
+  setFiltersOpen={setFiltersOpen}
+  sortBy={sortBy}
+  setSortBy={setSortBy}
+  matchMode={matchMode}
+  setMatchMode={setMatchMode}
+  ageBand={ageBand}
+  setAgeBand={setAgeBand}
+  genderFilter={genderFilter}
+  setGenderFilter={setGenderFilter}
+  activityFilter={activityFilter}
+  setActivityFilter={setActivityFilter}
+  hideContacted={hideContacted}
+  setHideContacted={setHideContacted}
+  onLoadMore={() => setVisibleCount((c) => c + PAGE_SIZE)}
+  onInvite={(match) => handleMatchRequest(match)}
+  onViewProfile={(id) => setProfileOpenId(id)}
+  profileOpenId={profileOpenId}
   setProfileOpenId={setProfileOpenId}
-            />
+/>
           </div>
         </div>
       </div>
@@ -1484,6 +1498,27 @@ return (
             </div>
           </div>
 
+          <div className="grid grid-cols-1 gap-3">
+  <div className="min-w-0">
+    <label className="block text-xs font-medium text-white/80 mb-1">Activity</label>
+    <select
+      value={activityFilter}
+      onChange={(e) => {
+        const val = e.target.value as ActivityFilter;
+        setActivityFilter(val);
+        setQuery("activity", val);
+      }}
+      className="w-full text-sm rounded-lg px-2 py-2 text-white appearance-none"
+      style={selectStyle}
+    >
+      <option value="" style={optionStyle}>Any</option>
+      <option value="online" style={optionStyle}>Online now</option>
+      <option value="recent" style={optionStyle}>Active recently</option>
+      <option value="offline" style={optionStyle}>Offline</option>
+    </select>
+  </div>
+</div>
+
           {/* Row 4: Toggle + Done */}
           <div className="flex items-center justify-between gap-3">
             <label className="flex items-center gap-2 text-sm text-white/90">
@@ -1599,6 +1634,18 @@ return (
 <p>No matches found yet. Try adjusting your availability or skill level.</p>
 ) : (
   <>
+
+{activityFilter && (
+  <div
+    className="text-sm font-semibold mb-3 px-2"
+    style={{ color: "rgba(11,61,46,0.70)" }}
+  >
+    Showing {activityFilter === "online" ? "players online now" :
+             activityFilter === "recent" ? "players active recently" :
+             "offline players"}
+  </div>
+)}
+
     <ul className="space-y-3">
 {visibleMatches.map((match, index) => {
   const avatarSrc = match.photoThumbURL || match.photoURL || null;

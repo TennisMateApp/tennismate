@@ -12,6 +12,7 @@ import {
   getCountFromServer,
   addDoc,
   serverTimestamp,
+  updateDoc,
 } from "firebase/firestore";
 import Image from "next/image";
 import { onAuthStateChanged } from "firebase/auth";
@@ -108,9 +109,11 @@ export default function PlayerProfileView({
     completed: 0,
     wins: 0,
   });
-  const [showFullBio, setShowFullBio] = useState(false);
-  const [hasPendingOrAccepted, setHasPendingOrAccepted] = useState(false);
-  const [sendingInvite, setSendingInvite] = useState(false);
+const [showFullBio, setShowFullBio] = useState(false);
+const [matchRequestStatus, setMatchRequestStatus] = useState<"none" | "pending" | "accepted">("none");
+const [pendingRequestDirection, setPendingRequestDirection] = useState<"sent" | "received" | null>(null);
+const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+const [sendingInvite, setSendingInvite] = useState(false);
 const [inviteError, setInviteError] = useState<string | null>(null);
 const [inviteSent, setInviteSent] = useState(false);
 const [currentUid, setCurrentUid] = useState<string | null>(null);
@@ -165,34 +168,70 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
           return;
         }
 
-                // ✅ Hide "Invite to Play" if there's already a pending OR accepted request between me and this player
+                // ✅ Determine whether this player is pending or already accepted
         try {
-          // If I'm viewing myself, don't show invite
           if (currentUid === playerUserId) {
-            setHasPendingOrAccepted(true);
+            setMatchRequestStatus("accepted");
+            setPendingRequestDirection(null);
+            setPendingRequestId(null);
           } else {
-            const activeStatuses = ["pending", "accepted", "confirmed", "completed", "unread", "requested"];
-
             const q1 = query(
               collection(db, "match_requests"),
               where("fromUserId", "==", currentUid),
-              where("toUserId", "==", playerUserId),
-              where("status", "in", activeStatuses)
+              where("toUserId", "==", playerUserId)
             );
 
             const q2 = query(
               collection(db, "match_requests"),
               where("fromUserId", "==", playerUserId),
-              where("toUserId", "==", currentUid),
-              where("status", "in", activeStatuses)
+              where("toUserId", "==", currentUid)
             );
 
             const [s1, s2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-            setHasPendingOrAccepted(!s1.empty || !s2.empty);
+
+            const sentDocs = s1.docs.map((docSnap) => ({
+              id: docSnap.id,
+              direction: "sent" as const,
+              ...(docSnap.data() as any),
+            }));
+
+            const receivedDocs = s2.docs.map((docSnap) => ({
+              id: docSnap.id,
+              direction: "received" as const,
+              ...(docSnap.data() as any),
+            }));
+
+            const allDocs = [...sentDocs, ...receivedDocs];
+
+            const acceptedDoc = allDocs.find((req) =>
+              ["accepted", "confirmed", "completed"].includes(req.status)
+            );
+
+            if (acceptedDoc) {
+              setMatchRequestStatus("accepted");
+              setPendingRequestDirection(null);
+              setPendingRequestId(acceptedDoc.id);
+            } else {
+              const pendingDoc = allDocs.find((req) =>
+                ["pending", "unread", "requested"].includes(req.status)
+              );
+
+              if (pendingDoc) {
+                setMatchRequestStatus("pending");
+                setPendingRequestDirection(pendingDoc.direction);
+                setPendingRequestId(pendingDoc.id);
+              } else {
+                setMatchRequestStatus("none");
+                setPendingRequestDirection(null);
+                setPendingRequestId(null);
+              }
+            }
           }
         } catch (e) {
           console.warn("Match existence check failed:", e);
-          setHasPendingOrAccepted(false);
+          setMatchRequestStatus("none");
+          setPendingRequestDirection(null);
+          setPendingRequestId(null);
         }
 
 
@@ -302,20 +341,16 @@ const handleInviteToPlay = async () => {
     setInviteError(null);
 
     // same defensive check style as Match page
-    const activeStatuses = ["pending", "accepted", "confirmed", "completed", "unread", "requested"];
-
     const q1 = query(
       collection(db, "match_requests"),
       where("fromUserId", "==", currentUid),
-      where("toUserId", "==", toUid),
-      where("status", "in", activeStatuses)
+      where("toUserId", "==", toUid)
     );
 
     const q2 = query(
       collection(db, "match_requests"),
       where("fromUserId", "==", toUid),
-      where("toUserId", "==", currentUid),
-      where("status", "in", activeStatuses)
+      where("toUserId", "==", currentUid)
     );
 
     const [existingSent, existingReceived] = await Promise.all([
@@ -323,8 +358,50 @@ const handleInviteToPlay = async () => {
       getDocs(q2),
     ]);
 
-    if (!existingSent.empty || !existingReceived.empty) {
-      setHasPendingOrAccepted(true);
+    const sentDocs = existingSent.docs.map((docSnap) => ({
+      id: docSnap.id,
+      direction: "sent" as const,
+      ...(docSnap.data() as any),
+    }));
+
+    const receivedDocs = existingReceived.docs.map((docSnap) => ({
+      id: docSnap.id,
+      direction: "received" as const,
+      ...(docSnap.data() as any),
+    }));
+
+    const allDocs = [...sentDocs, ...receivedDocs];
+
+    const acceptedDoc = allDocs.find((req) =>
+      ["accepted", "confirmed", "completed"].includes(req.status)
+    );
+
+    if (acceptedDoc) {
+      setMatchRequestStatus("accepted");
+      setPendingRequestDirection(null);
+      setPendingRequestId(acceptedDoc.id);
+      setInviteSent(true);
+      return;
+    }
+
+    const pendingDoc = allDocs.find((req) =>
+      ["pending", "unread", "requested"].includes(req.status)
+    );
+
+    if (pendingDoc) {
+      setMatchRequestStatus("pending");
+      setPendingRequestDirection(pendingDoc.direction);
+      setPendingRequestId(pendingDoc.id);
+      setInviteSent(true);
+      return;
+    }
+
+    if (
+      statuses.some((status) =>
+        ["pending", "unread", "requested"].includes(status)
+      )
+    ) {
+      setMatchRequestStatus("pending");
       setInviteSent(true);
       return;
     }
@@ -365,11 +442,38 @@ const handleInviteToPlay = async () => {
       to: toUid,
     });
 
-    setInviteSent(true);
-    setHasPendingOrAccepted(true);
+setInviteSent(true);
+setMatchRequestStatus("pending");
+setPendingRequestDirection("sent");
+setPendingRequestId(ref.id);
   } catch (err: any) {
     console.error("Failed to send match request from profile view:", err);
     setInviteError(err?.message ?? "Could not send request.");
+  } finally {
+    setSendingInvite(false);
+  }
+};
+
+const handleAcceptMatchRequest = async () => {
+  if (!pendingRequestId || !currentUid) return;
+  if (sendingInvite) return;
+
+  try {
+    setSendingInvite(true);
+    setInviteError(null);
+
+    await updateDoc(doc(db, "match_requests", pendingRequestId), {
+      status: "accepted",
+      acceptedAt: serverTimestamp(),
+      respondedBy: currentUid,
+    });
+
+    setMatchRequestStatus("accepted");
+    setPendingRequestDirection(null);
+    setInviteSent(false);
+  } catch (err: any) {
+    console.error("Failed to accept match request from profile view:", err);
+    setInviteError(err?.message ?? "Could not accept request.");
   } finally {
     setSendingInvite(false);
   }
@@ -400,9 +504,16 @@ const handleInviteToPlay = async () => {
       ? player.utr
       : null;
 
- const recipientUid = resolveRecipientUid();
+const recipientUid = resolveRecipientUid();
 const showInviteCTA = !!player && !!currentUid && !!recipientUid && currentUid !== recipientUid;
-const isPendingState = hasPendingOrAccepted || inviteSent;
+const currentCTAState =
+  matchRequestStatus === "accepted"
+    ? "accepted"
+    : matchRequestStatus === "pending" || inviteSent
+    ? "pending"
+    : "none";
+const canAcceptPendingRequest =
+  currentCTAState === "pending" && pendingRequestDirection === "received";
 const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
 
  return (
@@ -640,40 +751,60 @@ const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
   >
 <button
   type="button"
-  onClick={handleInviteToPlay}
-  disabled={sendingInvite || isPendingState}
+  onClick={canAcceptPendingRequest ? handleAcceptMatchRequest : handleInviteToPlay}
+  disabled={
+    sendingInvite ||
+    (currentCTAState === "accepted") ||
+    (currentCTAState === "pending" && !canAcceptPendingRequest)
+  }
   className="w-full h-16 rounded-full flex items-center justify-center gap-4 font-extrabold tracking-wide transition active:scale-[0.98] disabled:cursor-not-allowed"
   style={{
-    background: isPendingState ? "rgba(255,255,255,0.08)" : TM.neon,
-    color: isPendingState ? TM.ink : TM.forest,
-    boxShadow: isPendingState
-      ? "none"
-      : "0 14px 36px rgba(57,255,20,0.45)",
-    border: isPendingState ? "1px solid rgba(255,255,255,0.14)" : "none",
+    background:
+      currentCTAState === "none" || canAcceptPendingRequest
+        ? TM.neon
+        : "rgba(255,255,255,0.08)",
+    color:
+      currentCTAState === "none" || canAcceptPendingRequest
+        ? TM.forest
+        : TM.ink,
+    boxShadow:
+      currentCTAState === "none" || canAcceptPendingRequest
+        ? "0 14px 36px rgba(57,255,20,0.45)"
+        : "none",
+    border:
+      currentCTAState === "none" || canAcceptPendingRequest
+        ? "none"
+        : "1px solid rgba(255,255,255,0.14)",
     opacity: sendingInvite ? 0.7 : 1,
   }}
 >
-      {!isPendingState && (
-        <span
-          aria-hidden
-          style={{
-            width: 0,
-            height: 0,
-            borderTop: "9px solid transparent",
-            borderBottom: "9px solid transparent",
-            borderLeft: "16px solid #000000",
-          }}
-        />
-      )}
+  {(currentCTAState === "none" || canAcceptPendingRequest) && !sendingInvite && (
+    <span
+      aria-hidden
+      style={{
+        width: 0,
+        height: 0,
+        borderTop: "9px solid transparent",
+        borderBottom: "9px solid transparent",
+        borderLeft: "16px solid #000000",
+      }}
+    />
+  )}
 
-     <span className="text-base">
-  {sendingInvite
-    ? "Sending…"
-    : isPendingState
-    ? "✓ Request Pending"
-    : "Invite to Play"}
-</span>
-    </button>
+  <span className="text-base">
+    {sendingInvite
+      ? canAcceptPendingRequest
+        ? "Accepting…"
+        : "Sending…"
+      : currentCTAState === "accepted"
+      ? "✓ Match Accepted"
+      : canAcceptPendingRequest
+      ? "Accept Match Request"
+      : currentCTAState === "pending"
+      ? "✓ Request Pending"
+      : "Invite to Play"}
+  </span>
+</button>
 
     {inviteError && (
       <p className="mt-3 text-sm text-center text-red-300">{inviteError}</p>

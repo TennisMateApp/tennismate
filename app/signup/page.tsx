@@ -16,6 +16,7 @@ import { Mail, Lock, User, MapPin, Camera } from "lucide-react";
 
 import { clampUTR, SKILL_OPTIONS, skillFromUTR, type SkillBand } from "../../lib/skills";
 import { geohashForLocation } from "geofire-common";
+import { trackEvent } from "@/lib/mixpanel";
 
 const DEFAULT_AVATAR = "/images/default-avatar.jpg";
 const RATING_LABEL = "TennisMate Rating (TMR)";
@@ -388,7 +389,7 @@ const handleSubmit = async (e: React.FormEvent) => {
         updatedAt: serverTimestamp(),
       };
 
-      if (!playerSnap.exists()) {
+           if (!playerSnap.exists()) {
         await setDoc(playerRef, {
           ...playerData,
           createdAt: userCreatedAt || serverTimestamp(),
@@ -397,16 +398,37 @@ const handleSubmit = async (e: React.FormEvent) => {
         await setDoc(playerRef, playerData, { merge: true });
       }
 
+      trackEvent("signup_completed", {
+        userId: user.uid,
+        email,
+        postcode: formData.postcode,
+        skillBand: skillBandValue,
+        hasRating: ratingOrNull !== null,
+        availabilityCount: formData.availability.length,
+        regionSupported: true,
+      });
+
       setStatus("");
       router.replace("/verify-email");
       return;
-    } else {
+        } else {
       await setDoc(doc(db, "waitlist_users", user.uid), {
         name: formData.name,
         email,
         postcode: formData.postcode,
         timestamp: serverTimestamp(),
         source: "signupForm",
+      });
+
+      trackEvent("signup_completed", {
+        userId: user.uid,
+        email,
+        postcode: formData.postcode,
+        skillBand: formData.skillBand || null,
+        hasRating: formData.rating !== "",
+        availabilityCount: formData.availability.length,
+        regionSupported: false,
+        waitlisted: true,
       });
 
       setShowWaitlistModal(true);

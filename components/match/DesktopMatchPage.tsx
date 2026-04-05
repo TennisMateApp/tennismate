@@ -51,7 +51,7 @@ const getActivityBadge = (lastActiveAt: any) => {
 
   if (level === "recent") {
     return {
-      label: "ACTIVE RECENTLY",
+      label: "Active recently",
       style: {
         background: "rgba(255,200,0,0.15)",
         border: "1px solid rgba(255,200,0,0.6)",
@@ -61,7 +61,7 @@ const getActivityBadge = (lastActiveAt: any) => {
   }
 
   return {
-    label: "INACTIVE",
+    label: "Offline",
     style: {
       background: "rgba(15,23,42,0.06)",
       border: "1px solid rgba(15,23,42,0.12)",
@@ -72,6 +72,7 @@ const getActivityBadge = (lastActiveAt: any) => {
 
 type AgeBand = "" | "18-24" | "25-34" | "35-44" | "45-54" | "55+";
 type GenderFilter = "" | "Male" | "Female" | "Non-binary" | "Other";
+type ActivityFilter = "" | "online" | "recent" | "offline";
 
 export default function DesktopMatchPage(props: {
   loading: boolean;
@@ -97,6 +98,9 @@ export default function DesktopMatchPage(props: {
 
   genderFilter: GenderFilter;
   setGenderFilter: (v: GenderFilter) => void;
+
+  activityFilter: ActivityFilter;
+setActivityFilter: (v: ActivityFilter) => void;
 
   hideContacted: boolean;
   setHideContacted: (v: boolean) => void;
@@ -127,6 +131,8 @@ export default function DesktopMatchPage(props: {
     setAgeBand,
     genderFilter,
     setGenderFilter,
+     activityFilter,
+    setActivityFilter,
     hideContacted,
     setHideContacted,
 
@@ -157,8 +163,8 @@ const deriveRecipientId = (p: any): string | null => {
 const handleInvite = useCallback(
   (p: any) => {
     const recipient = deriveRecipientId(p);
-    if (!recipient) return; // optionally show a user-friendly toast later
-    onInvite(recipient);
+    if (!recipient) return;
+    onInvite(p);
   },
   [onInvite]
 );
@@ -272,12 +278,21 @@ const handleInvite = useCallback(
             {/* GRID */}
             <main className="mt-6">
               {visibleMatches.length === 0 ? (
-                <div className="rounded-2xl border bg-white p-6 shadow-sm text-sm text-gray-700">
-                  No matches found yet. Try adjusting your filters.
-                </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4">
+  <div className="rounded-2xl border bg-white p-6 shadow-sm text-sm text-gray-700">
+    No matches found yet. Try adjusting your filters.
+  </div>
+) : (
+  <>
+    {activityFilter === "recent" && (
+      <div
+        className="text-sm font-semibold mb-4 px-1"
+        style={{ color: "rgba(11,61,46,0.70)" }}
+      >
+        Showing players who have been active recently
+      </div>
+    )}
+
+    <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4">
 {visibleMatches.map((p) => {
   const activityBadge = getActivityBadge(p.lastActiveAt);
 
@@ -465,6 +480,20 @@ const handleInvite = useCallback(
                   <option value="Other">Other</option>
                 </select>
               </div>
+
+              <div>
+  <div className="text-xs font-semibold text-gray-700 mb-2">Activity</div>
+  <select
+    value={activityFilter}
+    onChange={(e) => setActivityFilter(e.target.value as ActivityFilter)}
+    className="w-full rounded-xl border bg-white px-3 py-2 text-sm"
+  >
+    <option value="">Any</option>
+    <option value="online">Online now</option>
+    <option value="recent">Active recently</option>
+    <option value="offline">Offline</option>
+  </select>
+</div>
 
               <label className="flex items-center gap-2 text-sm text-gray-800">
                 <input

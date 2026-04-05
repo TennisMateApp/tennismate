@@ -6,6 +6,7 @@ import debounce from "lodash.debounce";
 import { ArrowLeft, CalendarPlus, Info, Send } from "lucide-react";
 import { suggestCourt } from "@/lib/suggestCourt";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
+import PlayerProfileView from "@/components/players/PlayerProfileView";
 
 import { db, auth } from "@/lib/firebaseConfig";
 import {
@@ -486,7 +487,24 @@ const headerTopOffset = Math.max(vvTopInset, 20);
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
 const [isOtherOnline, setIsOtherOnline] = useState(false);
 
+const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
 const [inviteOverlayId, setInviteOverlayId] = useState<string | null>(null);
+
+const profileTargetId = useMemo(() => {
+  if (isEventChat) return null;
+  return otherUserId || participants.find((p) => p !== user?.uid) || null;
+}, [isEventChat, otherUserId, participants, user?.uid]);
+
+useEffect(() => {
+  if (!profileOpenId) return;
+
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") setProfileOpenId(null);
+  };
+
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+}, [profileOpenId]);
 
 useEffect(() => {
   if (!inviteOverlayId) return;
@@ -1344,82 +1362,84 @@ useEffect(() => {
       <ArrowLeft className="w-5 h-5 text-gray-800" />
     </button>
 
-    {/* Avatar w/ neon ring + online dot */}
-    {(() => {
-      const others = participants.filter((p) => p !== user?.uid);
-      const first = others[0];
-      const photo = first ? profiles[first]?.photoURL : null;
-
-      return (
-        <div className="relative">
-          <div
-  className="h-11 w-11 rounded-full p-[2px]"
-  style={{ background: isOtherOnline ? TM.neon : "transparent" }}
->
-
-            <div
-  className="h-full w-full rounded-full bg-white grid place-items-center overflow-hidden"
-  style={{
-    border: isOtherOnline ? "none" : "2px solid rgba(15,23,42,0.10)",
+    <button
+  type="button"
+  onClick={() => {
+    if (profileTargetId) setProfileOpenId(profileTargetId);
   }}
+  disabled={!profileTargetId}
+  className="flex flex-1 min-w-0 items-center gap-3 text-left disabled:cursor-default"
+  aria-label="Open player profile"
 >
+  {(() => {
+    const others = participants.filter((p) => p !== user?.uid);
+    const first = others[0];
+    const photo = first ? profiles[first]?.photoURL : null;
 
-              {photo ? (
-                <img src={photo} alt="avatar" className="h-full w-full object-cover" />
-              ) : (
-                <div className="h-full w-full bg-gray-200" />
-              )}
-            </div>
-          </div>
-
-          {/* Online dot */}
-          {isOtherOnline && (
-  <div
-    className="absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full border-2 border-white"
-    style={{ background: "#22c55e" }}
-  />
-)}
-
-        </div>
-      );
-    })()}
-
-    {/* Name + level pill */}
-    <div className="flex-1 min-w-0">
-      <div className="truncate text-[18px] font-extrabold text-gray-900 leading-tight">
-        {isEventChat
-          ? (eventTitle || "Event Chat")
-          : (() => {
-              const names = participants
-                .filter((p) => p !== user?.uid)
-                .map((uid) => profiles[uid]?.name || "Player");
-              return names[0] || "Chat";
-            })()}
-      </div>
-
-      {/* Level pill (use skill if you have it later; placeholder for now) */}
-      {!isEventChat && (
-        <div className="mt-1">
-          <span
-            className="inline-flex items-center rounded-full px-3 py-1 text-[12px] font-extrabold"
-            style={{ background: "rgba(57,255,20,0.18)", color: TM.ink }}
+    return (
+      <div className="relative shrink-0">
+        <div
+          className="h-11 w-11 rounded-full p-[2px]"
+          style={{ background: isOtherOnline ? TM.neon : "transparent" }}
+        >
+          <div
+            className="h-full w-full rounded-full bg-white grid place-items-center overflow-hidden"
+            style={{
+              border: isOtherOnline ? "none" : "2px solid rgba(15,23,42,0.10)",
+            }}
           >
-            LEVEL 4.0
-          </span>
+            {photo ? (
+              <img src={photo} alt="avatar" className="h-full w-full object-cover" />
+            ) : (
+              <div className="h-full w-full bg-gray-200" />
+            )}
+          </div>
         </div>
-      )}
 
-      {/* Typing indicator optional (keep yours) */}
-      {typingUsers.length > 0 && (
-        <div className="text-[11px] text-gray-500 mt-1">
-          {typingUsers.length === 1
-            ? `${profiles[typingUsers[0]]?.name || "Someone"} is typing…`
-            : `${profiles[typingUsers[0]]?.name || "Someone"} and ${
-                typingUsers.length - 1
-              } other${typingUsers.length > 2 ? "s" : ""} are typing…`}
-        </div>
-      )}
+        {isOtherOnline && (
+          <div
+            className="absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full border-2 border-white"
+            style={{ background: "#22c55e" }}
+          />
+        )}
+      </div>
+    );
+  })()}
+
+  <div className="flex-1 min-w-0">
+    <div className="truncate text-[18px] font-extrabold text-gray-900 leading-tight">
+      {isEventChat
+        ? (eventTitle || "Event Chat")
+        : (() => {
+            const names = participants
+              .filter((p) => p !== user?.uid)
+              .map((uid) => profiles[uid]?.name || "Player");
+            return names[0] || "Chat";
+          })()}
     </div>
+
+    {!isEventChat && (
+      <div className="mt-1">
+        <span
+          className="inline-flex items-center rounded-full px-3 py-1 text-[12px] font-extrabold"
+          style={{ background: "rgba(57,255,20,0.18)", color: TM.ink }}
+        >
+          View profile
+        </span>
+      </div>
+    )}
+
+    {typingUsers.length > 0 && (
+      <div className="text-[11px] text-gray-500 mt-1">
+        {typingUsers.length === 1
+          ? `${profiles[typingUsers[0]]?.name || "Someone"} is typing…`
+          : `${profiles[typingUsers[0]]?.name || "Someone"} and ${
+              typingUsers.length - 1
+            } other${typingUsers.length > 2 ? "s" : ""} are typing…`}
+      </div>
+    )}
+  </div>
+</button>
 
     {/* Right actions: Calendar+ and Info (instead of Phone icon) */}
     <div className="flex items-center gap-2">
@@ -1460,17 +1480,18 @@ onClick={async () => {
   </span>
 </button>
 
-      <button
-        type="button"
-        className="h-11 w-11 rounded-full grid place-items-center hover:bg-black/5"
-        aria-label="Info"
-        title="Info"
-        onClick={() => {
-          // TODO: open a right-side drawer / profile modal
-        }}
-      >
-        <Info className="w-5 h-5 text-gray-800" />
-      </button>
+<button
+  type="button"
+  className="h-11 w-11 rounded-full grid place-items-center hover:bg-black/5 disabled:opacity-40"
+  aria-label="View profile"
+  title="View profile"
+  disabled={!profileTargetId}
+  onClick={() => {
+    if (profileTargetId) setProfileOpenId(profileTargetId);
+  }}
+>
+  <Info className="w-5 h-5 text-gray-800" />
+</button>
     </div>
   </div>
 </div>
@@ -2025,6 +2046,27 @@ style={{
         </div>
       </div>
     )}
+
+    {profileOpenId && (
+  <div className="fixed inset-0 z-[1000]">
+    <div
+      className="absolute inset-0 bg-black/40"
+      onMouseDown={() => setProfileOpenId(null)}
+    />
+
+    <div className="absolute inset-0 flex items-center justify-center p-4">
+      <div
+        className="w-[560px] max-w-[95vw] h-[85vh] rounded-2xl overflow-hidden shadow-2xl bg-white border border-slate-200"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <PlayerProfileView
+          playerId={profileOpenId}
+          onClose={() => setProfileOpenId(null)}
+        />
+      </div>
+    </div>
+  </div>
+)}
 
     </div>
 
