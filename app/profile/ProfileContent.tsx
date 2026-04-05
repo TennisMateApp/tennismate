@@ -1244,10 +1244,10 @@ return (
 
             {/* pill-style toggle */}
             <div
-              className="mt-2 grid grid-cols-2 rounded-2xl border p-1"
+              className="mt-2 grid grid-cols-3 rounded-2xl border p-1"
               style={{ borderColor: "rgba(11,61,46,0.18)" }}
             >
-              {["Male", "Female"].map((g) => {
+              {["Male", "Female", "Other"].map((g) => {
                 const active = formData.gender === g;
                 
                 return (
