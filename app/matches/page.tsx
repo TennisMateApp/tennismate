@@ -110,6 +110,7 @@ type Match = {
   suggestedCourtBookingUrl?: string;
   suggestedCourtId?: string;
   createdAt?: any;
+  acceptedAt?: any;
   started?: boolean;
   startedAt?: any;
 };
@@ -737,26 +738,27 @@ useEffect(() => {
 
   const state: Record<string, Match> = {};
 
-  const toMatch = (d: DocumentData, id: string): Match => ({
-    id,
-    playerId: d.fromUserId,
-    opponentId: d.toUserId,
-    court: d.court,
-    time: d.time,
-    status: d.status,
-    message: d.message,
-    fromName: d.fromName,
-    toName: d.toName,
-    suggestedCourtName: d.suggestedCourtName,
-    suggestedCourtLat: d.suggestedCourtLat,
-    suggestedCourtLng: d.suggestedCourtLng,
-    suggestedCourtAddress: d.suggestedCourtAddress,
-    suggestedCourtBookingUrl: d.suggestedCourtBookingUrl,
-    suggestedCourtId: d.suggestedCourtId,
-    createdAt: d.createdAt ?? d.timestamp,
-    started: d.started,
-    startedAt: d.startedAt,
-  });
+const toMatch = (d: DocumentData, id: string): Match => ({
+  id,
+  playerId: d.fromUserId,
+  opponentId: d.toUserId,
+  court: d.court,
+  time: d.time,
+  status: d.status,
+  message: d.message,
+  fromName: d.fromName,
+  toName: d.toName,
+  suggestedCourtName: d.suggestedCourtName,
+  suggestedCourtLat: d.suggestedCourtLat,
+  suggestedCourtLng: d.suggestedCourtLng,
+  suggestedCourtAddress: d.suggestedCourtAddress,
+  suggestedCourtBookingUrl: d.suggestedCourtBookingUrl,
+  suggestedCourtId: d.suggestedCourtId,
+  createdAt: d.createdAt ?? d.timestamp,
+  acceptedAt: d.acceptedAt ?? null,
+  started: d.started,
+  startedAt: d.startedAt,
+});
 
   const proc = (snap: QuerySnapshot<DocumentData>) => {
     let changed = false;
@@ -859,13 +861,23 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
     const snap = await getDoc(matchRef);
     if (!snap.exists()) throw new Error("Match no longer exists");
 
-    const { fromUserId, toUserId } = snap.data();
+    const data = snap.data();
+const { fromUserId, toUserId } = data;
+
+const created =
+  data.createdAt?.toDate?.() ??
+  data.timestamp?.toDate?.() ??
+  null;
+
+const responseHours =
+  created ? (Date.now() - created.getTime()) / (1000 * 60 * 60) : null;
     if (currentUserId !== toUserId) throw new Error("Not the recipient");
 
-    await updateDoc(matchRef, {
-      status: "accepted",
-      players: [fromUserId, toUserId],
-    });
+   await updateDoc(matchRef, {
+  status: "accepted",
+  players: [fromUserId, toUserId],
+  acceptedAt: serverTimestamp(),
+});
 
     track("match_request_accepted", {
       match_id: matchId,
@@ -873,11 +885,12 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
       to_user_id: toUserId,
     });
 
-    trackEvent("match_request_accepted", {
-      matchId,
-      fromUserId,
-      toUserId,
-    });
+  trackEvent("match_request_accepted", {
+  matchId,
+  fromUserId,
+  toUserId,
+  responseHours,
+});
 
     await Promise.all([
       setDoc(

@@ -202,15 +202,42 @@ export async function initNativePush() {
     });
 
     // 4) Tap handler
-    PushNotifications.addListener(
-      "pushNotificationActionPerformed",
-      (a: any) => {
-        const route = (a.notification?.data as any)?.route as
-          | string
-          | undefined;
-        if (route) window.location.href = route;
+PushNotifications.addListener(
+  "pushNotificationActionPerformed",
+  (a: any) => {
+    const data = (a.notification?.data || {}) as any;
+    const route =
+      typeof data.route === "string" && data.route
+        ? data.route
+        : null;
+
+    const url =
+      typeof data.url === "string" && data.url
+        ? data.url
+        : null;
+
+    if (route) {
+      console.log("[Push] notification tap -> route", route);
+      window.location.href = route;
+      return;
+    }
+
+    if (url) {
+      try {
+        const parsed = new URL(url);
+        const destination = `${parsed.pathname}${parsed.search}`;
+        console.log("[Push] notification tap -> url", destination);
+        window.location.href = destination;
+        return;
+      } catch (e) {
+        console.warn("[Push] failed to parse notification url", url, e);
       }
-    );
+    }
+
+    console.log("[Push] notification tap -> fallback /home");
+    window.location.href = "/home";
+  }
+);
   }
 
   try {

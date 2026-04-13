@@ -17,9 +17,9 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage(function (payload) {
   console.log("🌙 Background message received:", payload);
 
-  // ✅ Only use `payload.data`, NOT `payload.notification`
   const title = payload.data?.title || "🎾 TennisMate";
   const body = payload.data?.body || "You have a new notification!";
+  const route = payload.data?.route || null;
   const url = payload.data?.url || "https://tennismate.vercel.app/messages";
   const fallbackIcon = "/logo.png";
 
@@ -27,22 +27,47 @@ messaging.onBackgroundMessage(function (payload) {
     body,
     icon: fallbackIcon,
     badge: fallbackIcon,
-    data: { url },
+    data: {
+      route,
+      url,
+    },
   };
+
+  return self.registration.showNotification(title, notificationOptions);
+});
 
 self.addEventListener("notificationclick", function (event) {
   event.notification.close();
 
-  const destination = event.notification.data?.url || "https://tennismate.vercel.app";
+  const route = event.notification?.data?.route || null;
+  const url =
+    event.notification?.data?.url ||
+    "https://tennismate.vercel.app/messages";
+
+  const destination = route
+    ? `https://tennismate.vercel.app${route}`
+    : url;
 
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      // 🔁 Always open a new tab if destination not matched
       for (const client of clientList) {
-        if (client.url.includes(destination) && "focus" in client) {
-          return client.focus();
+        try {
+          const clientUrl = new URL(client.url);
+          const destUrl = new URL(destination);
+
+          const sameOrigin = clientUrl.origin === destUrl.origin;
+
+          if (sameOrigin && "focus" in client) {
+            if ("navigate" in client) {
+              return client.navigate(destination).then(() => client.focus());
+            }
+            return client.focus();
+          }
+        } catch (e) {
+          console.warn("notificationclick URL handling failed", e);
         }
       }
+
       if (clients.openWindow) {
         return clients.openWindow(destination);
       }

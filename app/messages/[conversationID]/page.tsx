@@ -490,6 +490,8 @@ const [isOtherOnline, setIsOtherOnline] = useState(false);
 const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
 const [inviteOverlayId, setInviteOverlayId] = useState<string | null>(null);
 
+const [showMatchPrompt, setShowMatchPrompt] = useState(false);
+
 const profileTargetId = useMemo(() => {
   if (isEventChat) return null;
   return otherUserId || participants.find((p) => p !== user?.uid) || null;
@@ -505,6 +507,236 @@ useEffect(() => {
   window.addEventListener("keydown", onKey);
   return () => window.removeEventListener("keydown", onKey);
 }, [profileOpenId]);
+
+const MIN_TOTAL_MESSAGES_FOR_MATCH_INTENT = 6;
+const MIN_MESSAGES_PER_USER_FOR_MATCH_INTENT = 2;
+const MATCH_PROMPT_COOLDOWN_MS = 72 * 60 * 60 * 1000; // 72 hours
+const MATCH_CHECK_IN_LAUNCH_AT_MS = new Date("2026-04-14T00:00:00+10:00").getTime();
+const MIN_HOURS_SINCE_LAST_MESSAGE = 24;
+const MAX_HOURS_SINCE_LAST_MESSAGE = 72;
+const MAX_MATCH_PROMPT_SENDS = 1;
+
+const shouldCreateMatchIntent = (
+  msgs: any[],
+  currentUid: string,
+  otherUid: string | null
+) => {
+  if (!otherUid) return false;
+  if (msgs.length < MIN_TOTAL_MESSAGES_FOR_MATCH_INTENT) return false;
+
+  let mine = 0;
+  let theirs = 0;
+
+  for (const m of msgs) {
+    // ignore system / invite messages
+    if (m?.type === "system" || m?.type === "invite") continue;
+    if (!m?.senderId) continue;
+
+    if (m.senderId === currentUid) mine++;
+    if (m.senderId === otherUid) theirs++;
+  }
+
+  return (
+    mine >= MIN_MESSAGES_PER_USER_FOR_MATCH_INTENT &&
+    theirs >= MIN_MESSAGES_PER_USER_FOR_MATCH_INTENT
+  );
+};
+
+const hasTwoWayConversation = (
+  msgs: any[],
+  currentUid: string,
+  otherUid: string | null
+) => {
+  if (!otherUid) return false;
+
+  let mine = 0;
+  let theirs = 0;
+
+  for (const m of msgs) {
+    if (m?.type === "system" || m?.type === "invite") continue;
+    if (!m?.senderId) continue;
+
+    if (m.senderId === currentUid) mine++;
+    if (m.senderId === otherUid) theirs++;
+  }
+
+  return mine >= 1 && theirs >= 1;
+};
+
+const getLastRealMessageMs = (msgs: any[]) => {
+  const realMsgs = msgs
+    .filter((m) => m?.type !== "system" && m?.type !== "invite" && m?.timestamp?.toDate)
+    .sort((a, b) => a.timestamp.toDate().getTime() - b.timestamp.toDate().getTime());
+
+  const last = realMsgs[realMsgs.length - 1];
+  return last?.timestamp?.toDate ? last.timestamp.toDate().getTime() : null;
+};
+
+const hasMatchHistory = async () => {
+  const snap = await getDocs(
+    query(
+      collection(db, "match_history"),
+      where("conversationId", "==", String(conversationID)),
+      limit(1)
+    )
+  );
+
+  return !snap.empty;
+};
+
+
+const hasUpcomingAcceptedInvite = async () => {
+  const snap = await getDocs(
+    query(
+      collection(db, "match_invites"),
+      where("conversationId", "==", String(conversationID)),
+      where("inviteStatus", "==", "accepted")
+    )
+  );
+
+  if (snap.empty) return false;
+
+  const now = Date.now();
+
+  return snap.docs.some((d) => {
+    const data = d.data() as any;
+    const startISO = data?.invite?.startISO || data?.inviteStart || null;
+    if (!startISO) return false;
+
+    const startMs = new Date(startISO).getTime();
+    if (!Number.isFinite(startMs)) return false;
+
+    return startMs > now;
+  });
+};
+
+const hasAnyAcceptedInvite = async () => {
+  const snap = await getDocs(
+    query(
+      collection(db, "match_invites"),
+      where("conversationId", "==", String(conversationID)),
+      where("inviteStatus", "==", "accepted"),
+      limit(1)
+    )
+  );
+
+  return !snap.empty;
+};
+
+const createMatchCheckInNotification = async (
+  recipientId: string,
+  otherPlayerName: string,
+  conversationId: string
+) => {
+  const route = `/home?overlay=didPlayPrompt&conversationId=${conversationId}`;
+
+  await addDoc(collection(db, "notifications"), {
+    recipientId,
+    type: "match_check_in",
+    read: false,
+    conversationId,
+
+    title: "Did you play your match?",
+    body: `Did you and ${otherPlayerName} end up having a game?`,
+    message: `Did you and ${otherPlayerName} end up having a game?`,
+
+    route,
+    url: `https://tennismate.vercel.app${route}`,
+
+    timestamp: serverTimestamp(),
+    pushDisabled: false,
+    source: "chat:match_check_in",
+  });
+};
+
+const maybeUpsertMatchIntent = async (msgs: any[]) => {
+  if (!user || isEventChat) return;
+  if (!otherUserId) return;
+
+  const convoRef = doc(db, "conversations", String(conversationID));
+  const convoSnap = await getDoc(convoRef);
+  const convoData = convoSnap.data() || {};
+
+  const createdAtMs = convoData.createdAt?.toMillis?.() ?? null;
+  if (!createdAtMs || createdAtMs < MATCH_CHECK_IN_LAUNCH_AT_MS) return;
+
+  if (convoData.matchCheckInResolved === true) return;
+  if (convoData.matchCheckInSuppressed === true) return;
+  if ((convoData.matchPromptSendCount || 0) >= MAX_MATCH_PROMPT_SENDS) return;
+
+  // stop if a real match already exists
+  if (convoData.activeMatchId) return;
+
+  // both users must have actually chatted
+  if (!hasTwoWayConversation(msgs, user.uid, otherUserId)) return;
+
+  // only continue if this chat clearly looks like match planning
+  const shouldSetIntent = shouldCreateMatchIntent(msgs, user.uid, otherUserId);
+  if (!shouldSetIntent) return;
+
+  const lastRealMessageMs = getLastRealMessageMs(msgs);
+  if (!lastRealMessageMs) return;
+
+  const hoursSinceLastMessage = (Date.now() - lastRealMessageMs) / (1000 * 60 * 60);
+
+  if (hoursSinceLastMessage < MIN_HOURS_SINCE_LAST_MESSAGE) return;
+  if (hoursSinceLastMessage > MAX_HOURS_SINCE_LAST_MESSAGE) return;
+
+const [acceptedInviteExists, matchHistoryExists] = await Promise.all([
+  hasAnyAcceptedInvite(),
+  hasMatchHistory(),
+]);
+
+if (acceptedInviteExists) return;
+if (matchHistoryExists) return;
+
+const now = Date.now();
+const lastPromptShownMs =
+  convoData.matchPromptLastShownAt?.toMillis?.() ?? null;
+
+if (
+  lastPromptShownMs &&
+  now - lastPromptShownMs < MATCH_PROMPT_COOLDOWN_MS
+) {
+  return;
+}
+
+const [currentPlayerSnap, otherPlayerSnap] = await Promise.all([
+  getDoc(doc(db, "players", user.uid)),
+  getDoc(doc(db, "players", otherUserId)),
+]);
+
+const currentPlayer = currentPlayerSnap.exists()
+  ? (currentPlayerSnap.data() as any)
+  : {};
+const otherPlayer = otherPlayerSnap.exists()
+  ? (otherPlayerSnap.data() as any)
+  : {};
+
+const currentPlayerName = currentPlayer?.name || "your opponent";
+const otherPlayerName = otherPlayer?.name || "your opponent";
+
+await Promise.all([
+  createMatchCheckInNotification(
+    user.uid,
+    otherPlayerName,
+    String(conversationID)
+  ),
+  createMatchCheckInNotification(
+    otherUserId,
+    currentPlayerName,
+    String(conversationID)
+  ),
+]);
+
+await updateDoc(convoRef, {
+  matchIntentAt: convoData.matchIntentAt || serverTimestamp(),
+  matchPromptLastShownAt: serverTimestamp(),
+  matchPromptSendCount: (convoData.matchPromptSendCount || 0) + 1,
+  [`matchPromptDismissedAt.${user.uid}`]: null,
+  updatedAt: serverTimestamp(),
+});
+};
 
 useEffect(() => {
   if (!inviteOverlayId) return;
@@ -562,6 +794,21 @@ const scrollToBottom = (smooth = false) => {
 
   // ===== HELPERS =====
 
+  const dismissMatchPrompt = async () => {
+  if (!user) return;
+
+  try {
+    await updateDoc(doc(db, "conversations", String(conversationID)), {
+      [`matchPromptDismissedAt.${user.uid}`]: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    setShowMatchPrompt(false);
+  } catch (e) {
+    console.error("Failed to dismiss match prompt:", e);
+  }
+};
+
     const openInviteModal = () => {
     const now = new Date();
     const yyyy = now.getFullYear();
@@ -577,6 +824,8 @@ const scrollToBottom = (smooth = false) => {
 setInviteDuration(60);
 setInviteLocation("");
 setInviteNote("");
+
+
 
 // reset override search every time modal opens
 setCourtQuery("");
@@ -806,17 +1055,25 @@ heartbeatTimer = setInterval(async () => {
       const otherUserId = looksLikeOneToOne ? (parts.find((id) => id !== u.uid) ?? null) : null;
 setOtherUserId(otherUserId);
 
-      if (!convoSnap.exists() && looksLikeOneToOne && otherUserId) {
-        await setDoc(convoRef, {
-          participants: [u.uid, otherUserId],
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          typing: {},
-          lastRead: { [u.uid]: serverTimestamp() },
-        });
-      } else if (convoSnap.exists()) {
-        await updateDoc(convoRef, { [`lastRead.${u.uid}`]: serverTimestamp() });
-      }
+if (!convoSnap.exists() && looksLikeOneToOne && otherUserId) {
+  await setDoc(convoRef, {
+    participants: [u.uid, otherUserId],
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    typing: {},
+    lastRead: { [u.uid]: serverTimestamp() },
+
+    // match prompt tracking
+    matchIntentAt: null,
+    matchPromptLastShownAt: null,
+    matchPromptSendCount: 0,
+    matchCheckInResolved: false,
+    matchCheckInSuppressed: false,
+    activeMatchId: null,
+  });
+} else if (convoSnap.exists()) {
+  await updateDoc(convoRef, { [`lastRead.${u.uid}`]: serverTimestamp() });
+}
 
       // ✅ IMPORTANT: also mark unread message notifications as read (desktop pill)
 await clearMessageNotifsForConversation(u.uid, String(conversationID));
@@ -830,25 +1087,40 @@ await clearMessageNotifsForConversation(u.uid, String(conversationID));
       if (meSnap.exists()) setUserAvatar(meSnap.data().photoURL || null);
 
       // conversation snapshot (context/participants/typing/lastRead)
-      unsubscribeTyping = onSnapshot(convoRef, (snap) => {
-        const data = snap.data() || {};
+unsubscribeTyping = onSnapshot(convoRef, (snap) => {
+  const data = snap.data() || {};
 
-        const ctx = data.context || {};
-        const isEvent = ctx.type === "event";
-        setIsEventChat(!!isEvent);
-        setEventTitle(isEvent ? (ctx.title || "Event Chat") : null);
+  const ctx = data.context || {};
+  const isEvent = ctx.type === "event";
+  setIsEventChat(!!isEvent);
+  setEventTitle(isEvent ? (ctx.title || "Event Chat") : null);
 
-        const ps: string[] = Array.isArray(data.participants) ? data.participants : [];
-        setParticipants(ps);
+  const ps: string[] = Array.isArray(data.participants) ? data.participants : [];
+  setParticipants(ps);
 
-        const typingMap = data.typing || {};
-        const me = auth.currentUser?.uid;
-        const othersTyping = ps.filter((id: string) => id !== me && typingMap[id] === true);
-        setTypingUsers(othersTyping);
+  const typingMap = data.typing || {};
+  const me = auth.currentUser?.uid;
+  const othersTyping = ps.filter((id: string) => id !== me && typingMap[id] === true);
+  setTypingUsers(othersTyping);
 
-        const lr = data.lastRead?.[me || ""];
-        setLastReadAt(lr?.toMillis ? lr.toMillis() : null);
-      });
+  const lr = data.lastRead?.[me || ""];
+  setLastReadAt(lr?.toMillis ? lr.toMillis() : null);
+
+const hasMatchIntent = !!data.matchIntentAt;
+const hasActiveMatch = !!data.activeMatchId;
+const dismissedAt = me ? data.matchPromptDismissedAt?.[me] : null;
+const isResolved = data.matchCheckInResolved === true;
+const isSuppressed = data.matchCheckInSuppressed === true;
+
+setShowMatchPrompt(
+  !isEventChat &&
+  hasMatchIntent &&
+  !hasActiveMatch &&
+  !dismissedAt &&
+  !isResolved &&
+  !isSuppressed
+);
+});
     });
 
     return () => {
@@ -1001,6 +1273,9 @@ const unsub = onSnapshot(q, async (snap) => {
 
   if (!user) return;
 
+   await maybeUpsertMatchIntent(msgs);
+
+
   // Per-message read flags for 1:1 only
   if (!isEventChat) {
     const batch = writeBatch(db);
@@ -1028,7 +1303,7 @@ const unsub = onSnapshot(q, async (snap) => {
 
 return () => unsub();
 
-  }, [conversationID, user, isEventChat]);
+ }, [conversationID, user, isEventChat, otherUserId]);
 
   // ===== SEND =====
   const sendMessage = async () => {
@@ -1496,6 +1771,70 @@ onClick={async () => {
   </div>
 </div>
 
+{showMatchPrompt && !isEventChat && (
+  <div className="relative z-20 bg-white px-3 pt-2 pb-1">
+    <div className="relative ml-auto w-[260px] max-w-[calc(100%-16px)]">
+      <div
+        className="absolute -top-2 right-14 h-4 w-4 rotate-45"
+        style={{
+          background: "white",
+          borderLeft: "1px solid rgba(15,23,42,0.10)",
+          borderTop: "1px solid rgba(15,23,42,0.10)",
+        }}
+      />
+
+      <div
+  className="relative rounded-2xl border bg-white px-3 py-3 shadow-lg overflow-hidden"
+  style={{
+    borderColor: "rgba(57,255,20,0.28)",
+    boxShadow: "0 10px 28px rgba(57,255,20,0.16), 0 6px 18px rgba(15,23,42,0.08)",
+  }}
+>
+  <div
+    className="absolute left-0 top-0 h-full w-1.5"
+    style={{ background: TM.neon }}
+  />
+        <div className="flex items-start justify-between gap-3">
+  <div className="min-w-0 pl-1">
+    <div className="flex items-center gap-2">
+      <div
+        className="h-6 w-6 rounded-full grid place-items-center text-[12px] font-black"
+        style={{
+          background: "rgba(57,255,20,0.18)",
+          color: TM.ink,
+        }}
+      >
+        🎾
+      </div>
+
+      <div className="text-[14px] font-black" style={{ color: TM.ink }}>
+        Track your match
+      </div>
+    </div>
+
+    <div
+      className="mt-1 text-[12px] leading-snug"
+      style={{ color: "rgba(17,24,39,0.78)" }}
+    >
+      Create a Match Invite to track your Match!
+    </div>
+  </div>
+
+          <button
+            type="button"
+            onClick={dismissMatchPrompt}
+            className="shrink-0 rounded-full px-2 py-1 text-[12px] font-bold hover:bg-black/5"
+            style={{ color: "rgba(17,24,39,0.55)" }}
+            aria-label="Dismiss match prompt"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
 {/* Messages */}
 <div
   ref={listRef}
@@ -1592,16 +1931,16 @@ style={{
 
               >
 {msg.type === "invite" ? (
- <InviteCard
-  msg={msg}
-  isOther={isOther}
-  isMe={msg.senderId === user?.uid}
-  onRespond={(status) => respondToInvite(msg.id, status)}
-  onConfirmBooked={() => confirmInviteBooking(msg.id)}
-  currentUid={user?.uid || null}
-  nameByUid={nameByUid}
-  onOpenInvite={(id) => setInviteOverlayId(id)}
-/>
+  <InviteCard
+    msg={msg}
+    isOther={isOther}
+    isMe={msg.senderId === user?.uid}
+    onRespond={(status) => respondToInvite(msg.id, status)}
+    onConfirmBooked={() => confirmInviteBooking(msg.id)}
+    currentUid={user?.uid || null}
+    nameByUid={nameByUid}
+    onOpenInvite={(id) => setInviteOverlayId(id)}
+  />
 ) : msg.type === "system" && msg.systemType === "invite_cancelled" ? (
   <SystemInviteCancelled msg={msg} router={router} />
 ) : (

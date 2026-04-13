@@ -253,8 +253,35 @@ const activityPoints = (ts: any): number => {
   return -1;
 };
 
+const getActivityAgoLabel = (ts: any): string => {
+  if (!ts) return "Offline";
+
+  const d: Date =
+    typeof ts?.toDate === "function"
+      ? ts.toDate()
+      : ts instanceof Date
+      ? ts
+      : new Date(ts);
+
+  const diffMs = Date.now() - d.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "Offline";
+
+  const mins = Math.floor(diffMs / 60000);
+  const hrs = Math.floor(mins / 60);
+  const days = Math.floor(hrs / 24);
+
+  if (mins <= 5) return "ONLINE NOW";
+  if (mins < 60) return `Active ${mins} mins ago`;
+  if (hrs < 24) return `Active ${hrs} hours ago`;
+
+  // 👇 THIS is where your code goes
+  if (days === 1) return "Active yesterday";
+  return `Active ${days} days ago`;
+};
+
 const getActivityBadge = (ts: any) => {
   const level = getActivityLevel(ts);
+  const agoLabel = getActivityAgoLabel(ts);
 
   if (level === "online") {
     return {
@@ -270,7 +297,7 @@ const getActivityBadge = (ts: any) => {
 
   if (level === "recent") {
     return {
-      label: "Active recently",
+      label: agoLabel,
       style: {
         background: "rgba(255,200,0,0.15)",
         border: "1px solid rgba(255,200,0,0.6)",
@@ -280,7 +307,7 @@ const getActivityBadge = (ts: any) => {
   }
 
   return {
-    label: "Offline",
+    label: agoLabel,
     style: {
       background: "rgba(15,23,42,0.06)",
       border: "1px solid rgba(15,23,42,0.12)",
@@ -1001,6 +1028,12 @@ const ref = await addDoc(collection(db, "match_requests"), {
   fromUserId: user.uid,
   toUserId: toUid,
   status: "pending",
+
+  // lifecycle timestamps
+  createdAt: serverTimestamp(),
+  acceptedAt: null,
+
+  // temporary backwards compatibility for older code
   timestamp: serverTimestamp(),
 
   // nice-to-have fields (safe if your rules allow)

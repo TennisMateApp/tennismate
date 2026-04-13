@@ -34,8 +34,31 @@ const getActivityLevel = (lastActiveAt: any): ActivityLevel => {
   return "inactive";
 };
 
+const getActivityAgoLabel = (lastActiveAt: any): string => {
+  if (!lastActiveAt) return "Offline";
+
+  const lastActive =
+    typeof lastActiveAt?.toDate === "function"
+      ? lastActiveAt.toDate()
+      : new Date(lastActiveAt);
+
+  const diffMs = Date.now() - lastActive.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "Offline";
+
+  const mins = Math.floor(diffMs / (1000 * 60));
+  const hrs = Math.floor(mins / 60);
+  const days = Math.floor(hrs / 24);
+
+  if (mins <= 5) return "ONLINE NOW";
+  if (mins < 60) return `Active ${mins} mins ago`;
+  if (hrs < 24) return `Active ${hrs} hours ago`;
+  if (days === 1) return "Active yesterday";
+  return `Active ${days} days ago`;
+};
+
 const getActivityBadge = (lastActiveAt: any) => {
   const level = getActivityLevel(lastActiveAt);
+  const agoLabel = getActivityAgoLabel(lastActiveAt);
 
   if (level === "online") {
     return {
@@ -51,7 +74,7 @@ const getActivityBadge = (lastActiveAt: any) => {
 
   if (level === "recent") {
     return {
-      label: "Active recently",
+      label: agoLabel,
       style: {
         background: "rgba(255,200,0,0.15)",
         border: "1px solid rgba(255,200,0,0.6)",
@@ -61,7 +84,7 @@ const getActivityBadge = (lastActiveAt: any) => {
   }
 
   return {
-    label: "Offline",
+    label: agoLabel,
     style: {
       background: "rgba(15,23,42,0.06)",
       border: "1px solid rgba(15,23,42,0.12)",

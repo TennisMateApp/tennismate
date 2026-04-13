@@ -1,6 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import MatchCheckInOverlay from "../../components/matches/MatchCheckInOverlay";
 import {
   Swords,
   CalendarDays,
@@ -544,9 +545,50 @@ function getOpponentName(m: any, myUid: string) {
   return null;
 }
 
+function TempDidPlayOverlay({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 px-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+        <div className="text-xl font-extrabold text-black">Test overlay</div>
+        <div className="mt-2 text-sm text-black/60">
+          If you can see this, the home page overlay rendering is fine.
+        </div>
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-4 rounded-2xl px-4 py-3 text-sm font-extrabold"
+          style={{ background: "#39FF14", color: "#0B3D2E" }}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 
 export default function TennisMateHomeReferenceStyle() {
+
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+const [showDidPlayOverlay, setShowDidPlayOverlay] = useState(false);
+const [didPlayConversationId, setDidPlayConversationId] = useState<string | null>(null);
+
 const isDesktop = useIsDesktop(1024);
 const isApp = Capacitor.isNativePlatform();
 const showDesktopWeb = !isApp && isDesktop;
@@ -646,6 +688,16 @@ useEffect(() => {
   });
   return () => unsub();
 }, []);
+
+useEffect(() => {
+  const overlay = searchParams.get("overlay");
+  const conversationId = searchParams.get("conversationId");
+
+  if (overlay === "didPlayPrompt" && conversationId) {
+    setDidPlayConversationId(conversationId);
+    setShowDidPlayOverlay(true);
+  }
+}, [searchParams]);
 
 useEffect(() => {
   if (!uid) return;
@@ -985,6 +1037,18 @@ function openConversationWithPlayer(otherUid: string) {
 
   const conversationId = [uid, otherUid].sort().join("_");
   router.push(`/messages/${conversationId}`);
+}
+
+function closeDidPlayOverlay() {
+  setShowDidPlayOverlay(false);
+  setDidPlayConversationId(null);
+
+  const params = new URLSearchParams(searchParams.toString());
+  params.delete("overlay");
+  params.delete("conversationId");
+
+  const next = params.toString() ? `/?${params.toString()}` : "/";
+  router.replace(next);
 }
 
 const nextEvent = myCalendarEvents?.[0] ?? null;
@@ -1549,9 +1613,17 @@ style={{
           onClose={() => setOpenInviteId(null)}
         />
       </div>
+
     </div>
   </div>
 )}
+
+<MatchCheckInOverlay
+  open={showDidPlayOverlay}
+  conversationId={didPlayConversationId}
+  currentUserId={uid}
+  onClose={closeDidPlayOverlay}
+/>
     </div>
   );
 }
