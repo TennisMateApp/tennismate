@@ -227,6 +227,11 @@ export default function NotificationBell() {
   const title = (n.title || "").toLowerCase();
   const body = (n.body || n.message || "").toLowerCase();
 
+  // 🎾 Match check-in notification
+if (t === "match_check_in" && n.conversationId) {
+  return `/home?overlay=didPlayPrompt&conversationId=${encodeURIComponent(n.conversationId)}`;
+}
+
   // ✅ HARD OVERRIDE (ALWAYS first):
   // Any match invite should go to /messages no matter what route/url says.
   const looksLikeInvite =

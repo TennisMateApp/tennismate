@@ -168,7 +168,7 @@ const ACTIVE_RADIUS_KM = 10;
 const ACTIVE_LOOKBACK_DAYS = 7;
 const ACTIVE_LOOKBACK_HOURS = ACTIVE_LOOKBACK_DAYS * 24;
 const MAX_BOUND_READS = 60;   // max docs per geohash bound query (read safety)
-const MAX_ACTIVE_AVATARS = 15;
+const MAX_ACTIVE_AVATARS = 10;
 
 // -----------------------
 // Nearby Active cache

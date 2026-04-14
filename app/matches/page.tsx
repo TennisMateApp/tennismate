@@ -21,7 +21,7 @@ import {
   limit,  
   increment,            
 } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged } from "firebase/auth";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -115,6 +115,26 @@ type Match = {
   startedAt?: any;
 };
 
+type HistoryMatch = {
+  id: string;
+  matchRequestId?: string | null;
+  fromUserId?: string | null;
+  toUserId?: string | null;
+  fromName?: string | null;
+  toName?: string | null;
+  fromPhotoURL?: string | null;
+  toPhotoURL?: string | null;
+  winnerId?: string | null;
+  score?: string | null;
+  status?: string | null;
+  completed?: boolean;
+  completedAt?: any;
+  updatedAt?: any;
+  playedDate?: string | null;
+  matchType?: string | null;
+  location?: string | null;
+};
+
 type PCMap = Record<string, { lat: number; lng: number }>;
 
 type LatLng = { lat: number; lng: number };
@@ -150,6 +170,40 @@ type PlayerLite = {
   skillBandLabel?: string | null;
   skillLevel?: string | null;          // legacy fallback
   availability?: string[] | null;
+};
+
+const isAcceptedStatus = (status?: string | null) =>
+  status === "accepted" || status === "confirmed";
+
+const isCompletedStatus = (status?: string | null) => status === "completed";
+
+const isPendingStatus = (status?: string | null) =>
+  !isAcceptedStatus(status) && !isCompletedStatus(status);
+
+const toDateOrNull = (value: any): Date | null => {
+  if (!value) return null;
+  if (typeof value?.toDate === "function") return value.toDate();
+  if (value instanceof Date) return value;
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+};
+
+const formatHistoryDate = (completedAt?: any, playedDate?: string | null) => {
+  const date = toDateOrNull(completedAt) ?? toDateOrNull(playedDate);
+  if (!date) return "Date TBC";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+};
+
+const formatMatchType = (value?: string | null) => {
+  if (!value) return "Match";
+  return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
 
@@ -342,16 +396,21 @@ useEffect(() => {
 
 const searchParams = useSearchParams();
 
-const initialTab = searchParams.get("tab") === "accepted" ? "accepted" : "pending";
+const initialTab = ((): "pending" | "accepted" | "history" => {
+  const value = searchParams.get("tab");
+  if (value === "accepted" || value === "history") return value;
+  return "pending";
+})();
 const initialDir = ((): "all" | "received" | "sent" => {
   const v = searchParams.get("dir");
   return v === "received" || v === "sent" || v === "all" ? v : "all";
 })();
 
-const [tab, setTab] = useState<"pending" | "accepted">(initialTab);
+const [tab, setTab] = useState<"pending" | "accepted" | "history">(initialTab);
 const [direction, setDirection] = useState<"all" | "received" | "sent">(initialDir);
 
 const [matches, setMatches] = useState<Match[]>([]);
+const [historyMatches, setHistoryMatches] = useState<HistoryMatch[]>([]);
 const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
 const [queryText, setQueryText] = useState(searchParams.get("q") || "");
@@ -359,9 +418,12 @@ const [myPlayer, setMyPlayer] = useState<PlayerLite | null>(null);
   const [postcodeCoords, setPostcodeCoords] = useState<PCMap>({});
   const [oppCache, setOppCache] = useState<Record<string, PlayerLite | null>>({});
   const [loading, setLoading] = useState(true);
+const [historyLoading, setHistoryLoading] = useState(true);
 const [acceptingId, setAcceptingId] = useState<string | null>(null);
 const [decliningId, setDecliningId] = useState<string | null>(null);
 const [startingId, setStartingId] = useState<string | null>(null);
+const [rematchingId, setRematchingId] = useState<string | null>(null);
+const [requestedRematches, setRequestedRematches] = useState<Record<string, boolean>>({});
 const [chatPrompt, setChatPrompt] = useState<{
   matchId: string;
   otherUserId: string;
@@ -541,7 +603,7 @@ useEffect(() => {
 const targets = matches
   .filter((m) => {
     // ✅ Only hydrate for accepted matches
-    if (m.status !== "accepted") return false;
+    if (!isAcceptedStatus(m.status)) return false;
 
     const missing =
       m.suggestedCourtLat == null ||
@@ -643,7 +705,7 @@ useEffect(() => {
 
   // ✅ Only suggest courts for accepted matches (and only if missing)
   const candidates = matches
-    .filter((m) => m.status === "accepted" && !m.suggestedCourtName)
+    .filter((m) => isAcceptedStatus(m.status) && !m.suggestedCourtName)
     .slice(0, 3);
 
   candidates.forEach((m) => computeSuggestionSilently(m));
@@ -673,7 +735,7 @@ useEffect(() => {
   const params = new URLSearchParams(window.location.search);
 
   // set if not default; otherwise remove for clean URLs
-  if (tab === "accepted") params.set("tab", "accepted");
+  if (tab === "accepted" || tab === "history") params.set("tab", tab);
   else params.delete("tab");
 
   if (direction !== "all") params.set("dir", direction);
@@ -787,24 +849,121 @@ const toMatch = (d: DocumentData, id: string): Match => ({
     setLoading(false);
   };
 
-  const unsubFrom = onSnapshot(fromQ, proc);
-  const unsubTo = onSnapshot(toQ, proc);
+  const unsubFrom = onSnapshot(
+    fromQ,
+    proc,
+    (err) => {
+      console.error("[MatchesPage] onSnapshot(fromQ) failed", {
+        code: (err as any)?.code,
+        message: (err as any)?.message,
+        uid: auth.currentUser?.uid,
+        emailVerified: auth.currentUser?.emailVerified,
+        projectId: (db as any)?.app?.options?.projectId,
+      });
+      setLoading(false);
+    }
+  );
+  const unsubTo = onSnapshot(
+    toQ,
+    proc,
+    (err) => {
+      console.error("[MatchesPage] onSnapshot(toQ) failed", {
+        code: (err as any)?.code,
+        message: (err as any)?.message,
+        uid: auth.currentUser?.uid,
+        emailVerified: auth.currentUser?.emailVerified,
+        projectId: (db as any)?.app?.options?.projectId,
+      });
+      setLoading(false);
+    }
+  );
   return () => {
     unsubFrom();
     unsubTo();
   };
 }, [currentUserId]);
 
+useEffect(() => {
+  if (!currentUserId) return;
+
+  setHistoryLoading(true);
+
+  const historyQ = query(
+    collection(db, "match_history"),
+    where("players", "array-contains", currentUserId)
+  );
+
+  const unsubHistory = onSnapshot(
+    historyQ,
+    (snap) => {
+      const next = snap.docs
+        .map((docSnap) => {
+          const d = docSnap.data() as DocumentData;
+          return {
+            id: docSnap.id,
+            matchRequestId:
+              typeof d.matchRequestId === "string" && d.matchRequestId.trim()
+                ? d.matchRequestId
+                : null,
+            fromUserId: d.fromUserId ?? null,
+            toUserId: d.toUserId ?? null,
+            fromName: d.fromName ?? null,
+            toName: d.toName ?? null,
+            fromPhotoURL: d.fromPhotoURL ?? null,
+            toPhotoURL: d.toPhotoURL ?? null,
+            winnerId: d.winnerId ?? null,
+            score: d.score ?? null,
+            status: d.status ?? null,
+            completed: d.completed === true || d.status === "completed",
+            completedAt: d.completedAt ?? null,
+            updatedAt: d.updatedAt ?? null,
+            playedDate: d.playedDate ?? null,
+            matchType: d.matchType ?? null,
+            location: d.location ?? null,
+          } as HistoryMatch;
+        })
+        .filter((m) => m.completed)
+        .sort((a, b) => {
+          const aTime =
+            toDateOrNull(a.completedAt)?.getTime() ??
+            toDateOrNull(a.playedDate)?.getTime() ??
+            toDateOrNull(a.updatedAt)?.getTime() ??
+            0;
+          const bTime =
+            toDateOrNull(b.completedAt)?.getTime() ??
+            toDateOrNull(b.playedDate)?.getTime() ??
+            toDateOrNull(b.updatedAt)?.getTime() ??
+            0;
+          return bTime - aTime;
+        });
+
+      setHistoryMatches(next);
+      setHistoryLoading(false);
+    },
+    (error) => {
+      console.error("Failed to load match history", error);
+      setHistoryMatches([]);
+      setHistoryLoading(false);
+    }
+  );
+
+  return () => unsubHistory();
+}, [currentUserId]);
+
 // Warm opponent cache so avatars/names are available
 useEffect(() => {
-  if (!currentUserId || matches.length === 0) return;
+  if (!currentUserId) return;
 
-  // Get each visible opponent id (the "other" person per card)
   const opponentIds = Array.from(
-    new Set(
-      matches.map(m => (m.playerId === currentUserId ? m.opponentId : m.playerId))
-    )
+    new Set([
+      ...matches.map((m) => (m.playerId === currentUserId ? m.opponentId : m.playerId)),
+      ...historyMatches
+        .map((m) => (m.fromUserId === currentUserId ? m.toUserId : m.fromUserId))
+        .filter((id): id is string => !!id),
+    ])
   );
+
+  if (opponentIds.length === 0) return;
 
   opponentIds.forEach(async (uid) => {
     // If we already looked this up (even if null), skip
@@ -842,7 +1001,7 @@ setOppCache((prev) => ({
       setOppCache((prev) => ({ ...prev, [uid]: null }));
     }
   });
-}, [matches, currentUserId]); // ← do NOT include oppCache here to avoid loops
+}, [matches, historyMatches, currentUserId]); // ← do NOT include oppCache here to avoid loops
 
 
 // Accept a match and award badge + prompt to chat
@@ -1058,6 +1217,55 @@ const handleCompleteGame = useCallback((match: Match) => {
   router.push(`/matches/${match.id}/complete/details`);
 }, [router]);
 
+const handleRequestRematch = useCallback(async (history: HistoryMatch) => {
+  if (!currentUserId) return;
+
+  const opponentId =
+    history.fromUserId === currentUserId ? history.toUserId : history.fromUserId;
+  if (!opponentId) return;
+
+  const myName =
+    history.fromUserId === currentUserId
+      ? history.fromName || myPlayer?.name || "Player"
+      : history.toName || myPlayer?.name || "Player";
+  const opponentName =
+    history.fromUserId === currentUserId
+      ? history.toName || "Opponent"
+      : history.fromName || "Opponent";
+
+  try {
+    setRematchingId(history.id);
+
+    const newMatchRef = await addDoc(collection(db, "match_requests"), {
+      fromUserId: currentUserId,
+      toUserId: opponentId,
+      fromName: myName,
+      toName: opponentName,
+      status: "pending",
+      score: "",
+      winnerId: "",
+      completed: false,
+      createdAt: serverTimestamp(),
+    });
+
+    await addDoc(collection(db, "notifications"), {
+      recipientId: opponentId,
+      message: `${myName} wants a rematch!`,
+      matchId: newMatchRef.id,
+      timestamp: serverTimestamp(),
+      read: false,
+      type: "rematch_request",
+    });
+
+    setRequestedRematches((prev) => ({ ...prev, [history.id]: true }));
+  } catch (error) {
+    console.error("Failed to request rematch", error);
+    alert("Could not request a rematch right now. Please try again.");
+  } finally {
+    setRematchingId(null);
+  }
+}, [currentUserId, myPlayer?.name]);
+
 const deleteMatch = useCallback(async (id: string) => {
   if (!confirm("Are you sure you want to delete this request?")) return;
   await deleteDoc(doc(db, "match_requests", id));
@@ -1111,6 +1319,105 @@ const unmatchMatch = useCallback(
 
   // Chat logic omitted for brevity
 
+const renderHistoryMatch = useCallback((history: HistoryMatch) => {
+  if (!currentUserId) return null;
+
+  const otherId =
+    history.fromUserId === currentUserId ? history.toUserId : history.fromUserId;
+  if (!otherId) return null;
+
+  const other = oppCache[otherId];
+  const otherName =
+    other?.name ||
+    (history.fromUserId === currentUserId ? history.toName : history.fromName) ||
+    "Opponent";
+  const avatarSrc =
+    other?.photoThumbURL ||
+    other?.photoURL ||
+    (history.fromUserId === currentUserId ? history.toPhotoURL : history.fromPhotoURL) ||
+    "";
+  const initials = (otherName || "?").trim().charAt(0).toUpperCase();
+  const won = !!history.winnerId && history.winnerId === currentUserId;
+  const resultLabel = history.winnerId ? (won ? "Win" : "Loss") : "Played";
+  const resultTone = history.winnerId ? (won ? "success" : "neutral") : "brand";
+  const summaryLine = `${formatHistoryDate(history.completedAt, history.playedDate)} • ${formatMatchType(history.matchType)}`;
+  const detailsHref = history.matchRequestId ? `/matches/${history.matchRequestId}/summary` : null;
+  const rematchRequested = !!requestedRematches[history.id];
+
+  return (
+    <li key={history.id} className="rounded-3xl bg-white shadow-sm ring-1 ring-black/5 p-5">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0">
+          <div className="relative h-12 w-12 overflow-hidden rounded-full bg-gray-100">
+            {avatarSrc ? (
+              <Image
+                src={avatarSrc}
+                alt={otherName}
+                fill
+                sizes="48px"
+                className="object-cover"
+              />
+            ) : (
+              <div className="grid h-full w-full place-items-center text-sm text-gray-600">
+                {initials}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-[15px] font-extrabold text-gray-900">
+                {otherName}
+              </div>
+              <div className="mt-1 text-[12px] text-gray-500">{summaryLine}</div>
+              {history.location ? (
+                <div className="mt-1 truncate text-[12px] text-gray-400">{history.location}</div>
+              ) : null}
+            </div>
+
+            <div className="shrink-0 text-right">
+              <Chip tone={resultTone}>{resultLabel}</Chip>
+              <div className="mt-2 text-sm font-extrabold text-gray-900">
+                {history.score?.trim() || "No score"}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-3 text-sm">
+            {detailsHref ? (
+              <button
+                type="button"
+                onClick={() => router.push(detailsHref)}
+                className="inline-flex items-center gap-1.5 font-semibold text-gray-500 hover:text-gray-700"
+              >
+                Match Details
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            ) : (
+              <span className="font-semibold text-gray-400">Past match</span>
+            )}
+
+            <button
+              type="button"
+              onClick={() => handleRequestRematch(history)}
+              disabled={rematchRequested || rematchingId === history.id}
+              className="font-extrabold text-[#7CFF4F] disabled:text-gray-300"
+            >
+              {rematchRequested
+                ? "Requested"
+                : rematchingId === history.id
+                ? "Sending..."
+                : "Rematch"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}, [currentUserId, handleRequestRematch, oppCache, rematchingId, requestedRematches, router]);
+
 const renderMatch = useCallback((match: Match) => {
   const isMine = match.playerId === currentUserId;
   const other  = isMine ? match.opponentId : match.playerId;
@@ -1142,7 +1449,7 @@ const avatarSrc =
 const initials = (otherName || "?").trim().charAt(0).toUpperCase();
 
 
-  const inProgress = match.status === "accepted" && !!match.started;
+  const inProgress = isAcceptedStatus(match.status) && !!match.started;
 
   const created =
     match.createdAt?.toDate
@@ -1270,15 +1577,15 @@ return (
     e.stopPropagation();
 
     // ✅ if accepted → unmatch, else → delete (cancel/decline request)
-    if (match.status === "accepted") {
+    if (isAcceptedStatus(match.status)) {
       unmatchMatch(match, otherName, other);
     } else {
       deleteMatch(match.id);
     }
   }}
   className="shrink-0 h-10 w-10 rounded-full grid place-items-center bg-gray-100 hover:bg-gray-200 text-gray-700"
-  aria-label={match.status === "accepted" ? "Unmatch" : "Delete request"}
-  title={match.status === "accepted" ? "Unmatch" : "Delete request"}
+  aria-label={isAcceptedStatus(match.status) ? "Unmatch" : "Delete request"}
+  title={isAcceptedStatus(match.status) ? "Unmatch" : "Delete request"}
 >
   <Trash2 className="h-5 w-5" />
 </button>
@@ -1289,7 +1596,7 @@ return (
 <div className="mt-3">
   {/* Row 1: Chat OR Accept/Decline OR Pending */}
   <div className="flex items-center gap-2">
-{match.status === "accepted" ? (
+{isAcceptedStatus(match.status) ? (
   <div className="w-full flex gap-2">
     {/* Chat */}
     <button
@@ -1384,18 +1691,19 @@ return (
 
 
 const pendingCount = useMemo(
-  () => matches.filter((m) => m.status !== "accepted").length,
+  () => matches.filter((m) => isPendingStatus(m.status)).length,
   [matches]
 );
 const acceptedCount = useMemo(
-  () => matches.filter((m) => m.status === "accepted").length,
+  () => matches.filter((m) => isAcceptedStatus(m.status)).length,
   [matches]
 );
+const historyCount = useMemo(() => historyMatches.length, [historyMatches]);
 
 const incomingPendingCount = useMemo(
   () =>
     matches.filter(
-      (m) => m.status !== "accepted" && m.opponentId === currentUserId
+      (m) => isPendingStatus(m.status) && m.opponentId === currentUserId
     ).length,
   [matches, currentUserId]
 );
@@ -1403,16 +1711,10 @@ const incomingPendingCount = useMemo(
 const outgoingPendingCount = useMemo(
   () =>
     matches.filter(
-      (m) => m.status !== "accepted" && m.playerId === currentUserId
+      (m) => isPendingStatus(m.status) && m.playerId === currentUserId
     ).length,
   [matches, currentUserId]
 );
-
-useEffect(() => {
-  if (tab === "pending" && direction === "all" && incomingPendingCount > 0) {
-    setDirection("received");
-  }
-}, [tab, direction, incomingPendingCount]);
 
 const distanceFor = useCallback(
   (m: Match): number | null => {
@@ -1455,8 +1757,8 @@ const distanceFor = useCallback(
 const visibleMatches = useMemo(() => {
   const base =
     tab === "accepted"
-      ? matches.filter((m) => m.status === "accepted")
-      : matches.filter((m) => m.status !== "accepted");
+      ? matches.filter((m) => isAcceptedStatus(m.status))
+      : matches.filter((m) => isPendingStatus(m.status));
 
 const byDirection = base.filter((m) => {
   if (tab === "pending") {
@@ -1503,6 +1805,35 @@ const byDirection = base.filter((m) => {
   return enriched.map((e) => e.m);
 }, [matches, tab, direction, currentUserId, queryText, unreadOnly, sortBy, distanceFor]);
 
+const visibleHistoryMatches = useMemo(() => {
+  const q = queryText.trim().toLowerCase();
+
+  const searched = !q
+    ? historyMatches
+    : historyMatches.filter((m) => {
+        const a = (m.fromName || "").toLowerCase();
+        const b = (m.toName || "").toLowerCase();
+        return a.includes(q) || b.includes(q);
+      });
+
+  const enriched = searched.map((m) => {
+    const createdMs =
+      toDateOrNull(m.completedAt)?.getTime() ??
+      toDateOrNull(m.playedDate)?.getTime() ??
+      toDateOrNull(m.updatedAt)?.getTime() ??
+      0;
+    return { m, createdMs };
+  });
+
+  enriched.sort((A, B) =>
+    sortBy === "oldest" ? A.createdMs - B.createdMs : B.createdMs - A.createdMs
+  );
+
+  return enriched.map((e) => e.m);
+}, [historyMatches, queryText, sortBy]);
+
+const isTabLoading = tab === "history" ? historyLoading : loading;
+
 if (isDesktop) {
   return <DesktopMatches />;
 }
@@ -1532,11 +1863,11 @@ return (
         </div>
 {/* Segmented control */}
 <div className="mt-3 rounded-full bg-white/80 p-1 ring-1 ring-black/5">
-  <div className="grid grid-cols-2 gap-1">
+  <div className="grid grid-cols-3 gap-1">
     <button
       type="button"
       onClick={() => setTab("accepted")}
-      className="h-9 rounded-full text-sm font-extrabold transition"
+      className="h-9 rounded-full text-xs font-extrabold transition"
       style={
         tab === "accepted"
           ? { background: "#39FF14", color: "#0B3D2E" }
@@ -1549,7 +1880,7 @@ return (
     <button
       type="button"
       onClick={() => setTab("pending")}
-      className="h-9 rounded-full text-sm font-extrabold transition"
+      className="h-9 rounded-full text-xs font-extrabold transition"
       style={
         tab === "pending"
           ? { background: "#39FF14", color: "#0B3D2E" }
@@ -1558,15 +1889,71 @@ return (
     >
       Pending ({pendingCount})
     </button>
+
+    <button
+      type="button"
+      onClick={() => setTab("history")}
+      className="h-9 rounded-full text-xs font-extrabold transition"
+      style={
+        tab === "history"
+          ? { background: "#39FF14", color: "#0B3D2E" }
+          : { background: "transparent", color: "rgba(15,23,42,0.55)" }
+      }
+    >
+      History ({historyCount})
+    </button>
   </div>
 </div>
+
+{tab === "pending" && (
+  <div className="mt-3 flex items-center gap-2 overflow-x-auto px-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <button
+      type="button"
+      onClick={() => setDirection("all")}
+      className="shrink-0 rounded-full px-3 py-2 text-[12px] font-extrabold transition"
+      style={
+        direction === "all"
+          ? { background: "#0B3D2E", color: "white" }
+          : { background: "white", color: "rgba(15,23,42,0.7)" }
+      }
+    >
+      All ({pendingCount})
+    </button>
+
+    <button
+      type="button"
+      onClick={() => setDirection("received")}
+      className="shrink-0 rounded-full px-3 py-2 text-[12px] font-extrabold transition"
+      style={
+        direction === "received"
+          ? { background: "#0B3D2E", color: "white" }
+          : { background: "white", color: "rgba(15,23,42,0.7)" }
+      }
+    >
+      Received ({incomingPendingCount})
+    </button>
+
+    <button
+      type="button"
+      onClick={() => setDirection("sent")}
+      className="shrink-0 rounded-full px-3 py-2 text-[12px] font-extrabold transition"
+      style={
+        direction === "sent"
+          ? { background: "#0B3D2E", color: "white" }
+          : { background: "white", color: "rgba(15,23,42,0.7)" }
+      }
+    >
+      Sent ({outgoingPendingCount})
+    </button>
+  </div>
+)}
 
       </div>
     </div>
 
     {/* List */}
     <div className="mx-auto w-full max-w-xl px-3 sm:px-4 pt-4">
-      {loading ? (
+      {isTabLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <div
@@ -1575,6 +1962,21 @@ return (
             />
           ))}
         </div>
+      ) : tab === "history" ? (
+        visibleHistoryMatches.length === 0 ? (
+          <div className="rounded-3xl bg-white ring-1 ring-black/5 p-6 text-center text-sm text-gray-600">
+            No past matches yet.
+          </div>
+        ) : (
+          <>
+            <div className="mb-3 px-1 text-[11px] font-bold uppercase tracking-[0.18em] text-gray-500">
+              Past Matches
+            </div>
+            <ul className="space-y-3">
+              {visibleHistoryMatches.map((m) => renderHistoryMatch(m))}
+            </ul>
+          </>
+        )
       ) : visibleMatches.length === 0 ? (
         <div className="rounded-3xl bg-white ring-1 ring-black/5 p-6 text-center text-sm text-gray-600">
           {tab === "accepted" ? "No confirmed matches yet." : "No pending requests yet."}
