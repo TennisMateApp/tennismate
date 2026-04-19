@@ -28,6 +28,11 @@ import { BADGE_CATALOG } from "@/lib/badges";
 import { httpsCallable } from "firebase/functions";
 import { getFunctionsClient } from "@/lib/getFunctionsClient";
 import { ref, deleteObject } from "firebase/storage";
+import {
+  PROFILE_FULL_PATH,
+  PROFILE_THUMB_PATH,
+  cleanupLegacyProfilePhotos,
+} from "@/lib/profilePhoto";
 
 const TM = {
   forest: "#0B3D2E",
@@ -415,7 +420,9 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
     setDeletingAccount(true);
 
     // best-effort storage cleanup (same as ProfileContent)
-    await deleteObject(ref(storage, `profile_pictures/${uid}/profile.jpg`)).catch(() => {});
+    await deleteObject(ref(storage, PROFILE_FULL_PATH(uid))).catch(() => {});
+    await deleteObject(ref(storage, PROFILE_THUMB_PATH(uid))).catch(() => {});
+    await cleanupLegacyProfilePhotos(storage, uid);
 
     // ✅ IMPORTANT: use the existing callable
     const fn = httpsCallable(getFunctionsClient(), "deleteMyAccount");

@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseConfig";
 import { getFunctionsClient } from "@/lib/getFunctionsClient";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, updateProfile } from "firebase/auth";
 import {
   collection,
   doc,
@@ -27,6 +27,12 @@ import { httpsCallable } from "firebase/functions";
 import { geohashForLocation } from "geofire-common";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import { useIsDesktop } from "@/lib/useIsDesktop";
+import {
+  PROFILE_FULL_PATH,
+  PROFILE_THUMB_PATH,
+  cleanupLegacyProfilePhotos,
+  resolveProfilePhoto,
+} from "@/lib/profilePhoto";
 
 
 const TM = {
@@ -213,8 +219,8 @@ setFormData({
   availability: data.availability || [],
   isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
   bio: data.bio || "",
-  photoURL: data.photoURL || "",
-  photoThumbURL: data.photoThumbURL || "",
+  photoURL: typeof data.photoURL === "string" ? data.photoURL : "",
+  photoThumbURL: resolveProfilePhoto(data) || "",
   badges: normalizeBadges(data.badges),
   birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
   gender: typeof data.gender === "string" ? data.gender : "",
@@ -223,7 +229,8 @@ setFormData({
 
 originalPostcodeRef.current = String(data.postcode || "").trim();
 
-    if (data.photoURL) setPreviewURL(data.photoURL);
+    const currentPhoto = resolveProfilePhoto(data);
+    if (currentPhoto) setPreviewURL(currentPhoto);
 
     // ✅ Matches = accepted OR confirmed match requests (sent or received)
    const requestStatusesToCount = ["accepted", "confirmed", "completed"];
@@ -422,8 +429,9 @@ const handleRemovePhoto = async () => {
     setFormData((p) => ({ ...p, photoURL: "", photoThumbURL: "" }));
 
     if (user) {
-      const refSt = ref(storage, `profile_pictures/${user.uid}/profile.jpg`);
-      await deleteObject(refSt).catch(() => {});
+      await deleteObject(ref(storage, PROFILE_FULL_PATH(user.uid))).catch(() => {});
+      await deleteObject(ref(storage, PROFILE_THUMB_PATH(user.uid))).catch(() => {});
+      await cleanupLegacyProfilePhotos(storage, user.uid);
     }
 
     setStatus("Photo removed. Please upload a new profile photo before saving.");
@@ -610,12 +618,15 @@ let photoURL = formData.photoURL;
 let photoThumbURL = formData.photoThumbURL || formData.photoURL;
 
 if (croppedImage) {
-  const refSt = ref(storage, `profile_pictures/${user.uid}/profile-${Date.now()}.jpg`);
-  await uploadBytes(refSt, croppedImage);
-  photoURL = await getDownloadURL(refSt);
+  const fullRef = ref(storage, PROFILE_FULL_PATH(user.uid));
+  const thumbRef = ref(storage, PROFILE_THUMB_PATH(user.uid));
+  await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
+  await uploadBytes(thumbRef, croppedImage, { contentType: "image/jpeg" });
+  photoURL = await getDownloadURL(fullRef);
 
   // For now use the same image for both until you generate real thumbnails
-  photoThumbURL = photoURL;
+  photoThumbURL = await getDownloadURL(thumbRef);
+  await cleanupLegacyProfilePhotos(storage, user.uid);
 }
 
 const badges = Array.isArray(formData.badges) ? formData.badges : [];
@@ -647,13 +658,31 @@ const userPayload = {
   name: formData.name || "",
   photoURL,
   photoThumbURL,
+  avatar: photoThumbURL || photoURL || null,
   updatedAt: serverTimestamp(),
 };
 
 await Promise.all([
-  setDoc(doc(db, "players", user.uid), playerPayload, { merge: true }),
+  setDoc(
+    doc(db, "players", user.uid),
+    {
+      ...playerPayload,
+      avatar: photoThumbURL || photoURL || null,
+      photoUpdatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  ),
   setDoc(doc(db, "users", user.uid), userPayload, { merge: true }),
 ]);
+
+if (auth.currentUser) {
+  await updateProfile(auth.currentUser, {
+    photoURL: photoThumbURL || photoURL || null,
+    displayName: formData.name || auth.currentUser.displayName || null,
+  }).catch((error) => {
+    console.warn("[Profile] auth profile sync skipped", error);
+  });
+}
 
 setFormData((p) => ({
   ...p,
@@ -708,9 +737,12 @@ const handleDeleteProfile = async () => {
 
     // best-effort storage cleanup
     await deleteObject(
-      ref(storage, `profile_pictures/${uid}/profile.jpg`)
+      ref(storage, PROFILE_FULL_PATH(uid))
     ).catch((e) =>
       console.warn("[Profile] storage delete skipped", e)
+    );
+    await deleteObject(ref(storage, PROFILE_THUMB_PATH(uid))).catch((e) =>
+      console.warn("[Profile] thumb storage delete skipped", e)
     );
 
     const functions = getFunctionsClient();

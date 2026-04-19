@@ -3,26 +3,30 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { db, auth } from "@/lib/firebaseConfig";
 import { type SkillBand, SKILL_OPTIONS, skillFromUTR } from "../../lib/skills";
+import { resolveProfilePhoto } from "@/lib/profilePhoto";
 import {
   collection,
   getDocs,
   doc,
   getDoc,
   addDoc,
+  setDoc,
   serverTimestamp,
   query,
   where,
   updateDoc,
+  deleteDoc,
   Timestamp,
   orderBy,
   startAt,
   endAt,
   limit,
+  onSnapshot,
 } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged, applyActionCode } from "firebase/auth";
 import Link from "next/link";
-import { CheckCircle2, SlidersHorizontal, CalendarDays, MapPin, ArrowLeft } from "lucide-react";
+import { CheckCircle2, SlidersHorizontal, CalendarDays, MapPin, ArrowLeft, X } from "lucide-react";
 import Image from "next/image";
 import { track } from "@/lib/track";
 import { geohashQueryBounds } from "geofire-common";
@@ -77,6 +81,41 @@ type ScoredPlayer = Player & {
   score: number;
   distance: number;
   skillBand: SkillBand | "";
+};
+
+type AvailabilityFormState = {
+  date: string;
+  timeSlot: "morning" | "afternoon" | "evening";
+  postcode: string;
+  radiusKm: string;
+  matchType: "singles" | "casual_hit";
+  note: string;
+};
+
+type AvailabilityRecord = {
+  id: string;
+  userId: string;
+  instanceId: string;
+  status: string;
+  date: string;
+  timeSlot: string;
+  postcode: string;
+  radiusKm: number;
+  matchType: string;
+  note: string;
+  name: string;
+  photoURL: string | null;
+  photoThumbURL: string | null;
+  skillBand: SkillBand | "";
+  skillBandLabel: string | null;
+  skillLevel: string | null;
+  skillRating: number | null;
+  utr: number | null;
+  lat: number | null;
+  lng: number | null;
+  createdAt: any;
+  updatedAt: any;
+  expiresAt: any;
 };
 
 
@@ -326,6 +365,125 @@ const formatAvailability = (slots: string[] | undefined | null) => {
   return `${shown}${more}`;
 };
 
+const formatAvailabilityDateLabel = (value?: string) => {
+  if (!value) return "Date not set";
+  const parsed = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-AU", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  }).format(parsed);
+};
+
+const formatAvailabilityTimeLabel = (value?: string) => {
+  if (value === "morning") return "Morning";
+  if (value === "afternoon") return "Afternoon";
+  return "Evening";
+};
+
+const formatAvailabilityMatchType = (value?: string) => {
+  if (value === "casual_hit") return "Casual Hit";
+  return "Singles";
+};
+
+const toDateSafe = (value: any): Date | null => {
+  if (!value) return null;
+  if (typeof value?.toDate === "function") {
+    const d = value.toDate();
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const endOfAvailabilityDay = (dateValue: string) => {
+  const d = new Date(`${dateValue}T23:59:59`);
+  return Number.isNaN(d.getTime()) ? Timestamp.fromMillis(Date.now()) : Timestamp.fromDate(d);
+};
+
+const isAvailabilityExpired = (availability: { date?: string; expiresAt?: any } | null | undefined) => {
+  if (!availability) return true;
+
+  const expiresAt = toDateSafe(availability.expiresAt);
+  if (expiresAt) return expiresAt.getTime() < Date.now();
+
+  if (availability.date) {
+    const fallback = new Date(`${availability.date}T23:59:59`);
+    if (!Number.isNaN(fallback.getTime())) return fallback.getTime() < Date.now();
+  }
+
+  return false;
+};
+
+const normalizeAvailabilityRecord = (id: string, data: any): AvailabilityRecord | null => {
+  if (!data || typeof data !== "object") return null;
+
+  const userId =
+    typeof data.userId === "string" && data.userId.trim()
+      ? data.userId.trim()
+      : typeof data.uid === "string" && data.uid.trim()
+      ? data.uid.trim()
+      : id;
+
+  const date = typeof data.date === "string" ? data.date : "";
+  if (!date) return null;
+
+  return {
+    id,
+    userId,
+    instanceId:
+      typeof data.instanceId === "string" && data.instanceId.trim()
+        ? data.instanceId.trim()
+        : id,
+    status: typeof data.status === "string" ? data.status : "open",
+    date,
+    timeSlot: typeof data.timeSlot === "string" ? data.timeSlot : "evening",
+    postcode: typeof data.postcode === "string" ? data.postcode : "",
+    radiusKm:
+      typeof data.radiusKm === "number"
+        ? data.radiusKm
+        : Number.parseInt(String(data.radiusKm ?? "10"), 10) || 10,
+    matchType: typeof data.matchType === "string" ? data.matchType : "singles",
+    note: typeof data.note === "string" ? data.note : "",
+    name:
+      typeof data.name === "string" && data.name.trim()
+        ? data.name.trim()
+        : "Player",
+    photoURL:
+      typeof data.photoURL === "string" && data.photoURL.trim()
+        ? data.photoURL.trim()
+        : null,
+    photoThumbURL:
+      typeof data.photoThumbURL === "string" && data.photoThumbURL.trim()
+        ? data.photoThumbURL.trim()
+        : null,
+    skillBand:
+      (typeof data.skillBand === "string" ? data.skillBand : "") as SkillBand | "",
+    skillBandLabel:
+      typeof data.skillBandLabel === "string" && data.skillBandLabel.trim()
+        ? data.skillBandLabel.trim()
+        : null,
+    skillLevel:
+      typeof data.skillLevel === "string" && data.skillLevel.trim()
+        ? data.skillLevel.trim()
+        : null,
+    skillRating:
+      typeof data.skillRating === "number" && Number.isFinite(data.skillRating)
+        ? data.skillRating
+        : null,
+    utr:
+      typeof data.utr === "number" && Number.isFinite(data.utr)
+        ? data.utr
+        : null,
+    lat: typeof data.lat === "number" ? data.lat : null,
+    lng: typeof data.lng === "number" ? data.lng : null,
+    createdAt: data.createdAt ?? null,
+    updatedAt: data.updatedAt ?? null,
+    expiresAt: data.expiresAt ?? null,
+  };
+};
+
 
 export default function MatchPage() {
   const [user, setUser] = useState<any>(null);
@@ -344,6 +502,24 @@ export default function MatchPage() {
   const matchPageTrackedRef = useRef(false);
   const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
   const isDesktop = useIsDesktop();
+  const [matchSurface, setMatchSurface] = useState<"players" | "availability">("players");
+  const [availabilityRequestOpen, setAvailabilityRequestOpen] = useState(false);
+  const [availabilityDraftSaved, setAvailabilityDraftSaved] = useState(false);
+  const [availabilitySaveError, setAvailabilitySaveError] = useState<string | null>(null);
+  const [availabilitySaving, setAvailabilitySaving] = useState(false);
+  const [availabilityActionsOpen, setAvailabilityActionsOpen] = useState(false);
+  const [availabilityCancelling, setAvailabilityCancelling] = useState(false);
+  const [pendingAvailabilityInterestKeys, setPendingAvailabilityInterestKeys] = useState<Set<string>>(new Set());
+  const [availabilityRequest, setAvailabilityRequest] = useState<AvailabilityFormState>({
+    date: "",
+    timeSlot: "evening",
+    postcode: "",
+    radiusKm: "10",
+    matchType: "singles",
+    note: "",
+  });
+  const [activeAvailabilityRecord, setActiveAvailabilityRecord] = useState<AvailabilityRecord | null>(null);
+  const [browseAvailabilityRecords, setBrowseAvailabilityRecords] = useState<AvailabilityRecord[]>([]);
   
 
 
@@ -459,6 +635,287 @@ useEffect(() => {
     document.body.style.touchAction = prevTouch;
   };
 }, [profileOpenId]);
+
+useEffect(() => {
+  if (!myProfile?.postcode) return;
+  setAvailabilityRequest((prev) =>
+    prev.postcode ? prev : { ...prev, postcode: myProfile.postcode }
+  );
+}, [myProfile?.postcode]);
+
+useEffect(() => {
+  if (!availabilityDraftSaved) return;
+  const t = window.setTimeout(() => setAvailabilityDraftSaved(false), 3500);
+  return () => window.clearTimeout(t);
+}, [availabilityDraftSaved]);
+
+useEffect(() => {
+  if (!activeAvailabilityRecord) return;
+
+  setAvailabilityRequest({
+    date: activeAvailabilityRecord.date,
+    timeSlot:
+      activeAvailabilityRecord.timeSlot === "morning" ||
+      activeAvailabilityRecord.timeSlot === "afternoon"
+        ? activeAvailabilityRecord.timeSlot
+        : "evening",
+    postcode: activeAvailabilityRecord.postcode || myProfile?.postcode || "",
+    radiusKm: String(activeAvailabilityRecord.radiusKm || 10),
+    matchType: activeAvailabilityRecord.matchType === "casual_hit" ? "casual_hit" : "singles",
+    note: activeAvailabilityRecord.note || "",
+  });
+}, [activeAvailabilityRecord, myProfile?.postcode]);
+
+useEffect(() => {
+  if (activeAvailabilityRecord) return;
+  setAvailabilityActionsOpen(false);
+}, [activeAvailabilityRecord]);
+
+useEffect(() => {
+  if (!user?.uid) {
+    setActiveAvailabilityRecord(null);
+    setBrowseAvailabilityRecords([]);
+    setPendingAvailabilityInterestKeys(new Set());
+    return;
+  }
+
+  const activeRef = doc(db, "availabilities", user.uid);
+  const browseQ = query(
+    collection(db, "availabilities"),
+    where("status", "==", "open"),
+    limit(30)
+  );
+
+  const unsubActive = onSnapshot(
+    activeRef,
+    (snap) => {
+      if (!snap.exists()) {
+        setActiveAvailabilityRecord(null);
+        return;
+      }
+
+      const normalized = normalizeAvailabilityRecord(snap.id, snap.data());
+      if (!normalized || normalized.status !== "open" || isAvailabilityExpired(normalized)) {
+        setActiveAvailabilityRecord(null);
+        return;
+      }
+
+      setActiveAvailabilityRecord(normalized);
+    },
+    (error) => {
+      console.error("[MatchPage] failed to subscribe to active availability", error);
+    }
+  );
+
+  const unsubBrowse = onSnapshot(
+    browseQ,
+    (snap) => {
+      const next = snap.docs
+        .map((d) => normalizeAvailabilityRecord(d.id, d.data()))
+        .filter((item): item is AvailabilityRecord => !!item)
+        .filter((item) => item.userId !== user.uid)
+        .filter((item) => !isAvailabilityExpired(item))
+        .sort((a, b) => {
+          const aTime =
+            toDateSafe(a.updatedAt)?.getTime() ??
+            toDateSafe(a.createdAt)?.getTime() ??
+            0;
+          const bTime =
+            toDateSafe(b.updatedAt)?.getTime() ??
+            toDateSafe(b.createdAt)?.getTime() ??
+            0;
+          return bTime - aTime;
+        });
+
+      setBrowseAvailabilityRecords(next);
+    },
+    (error) => {
+      console.error("[MatchPage] failed to subscribe to browse availabilities", error);
+      setAvailabilitySaveError("We couldn't load open availabilities just now.");
+    }
+  );
+
+  return () => {
+    unsubActive();
+    unsubBrowse();
+  };
+}, [user?.uid]);
+
+useEffect(() => {
+  if (!user?.uid) {
+    setPendingAvailabilityInterestKeys(new Set());
+    return;
+  }
+
+  const sentAvailabilityQ = query(
+    collection(db, "match_requests"),
+    where("fromUserId", "==", user.uid),
+    where("status", "==", "pending")
+  );
+
+  const unsub = onSnapshot(
+    sentAvailabilityQ,
+    (snap) => {
+      const next = new Set<string>();
+
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as any;
+        if (data?.requestContext !== "availability_interest") return;
+
+        const toUserId =
+          typeof data.toUserId === "string" && data.toUserId.trim()
+            ? data.toUserId.trim()
+            : null;
+        const instanceId =
+          typeof data.availabilityInstanceId === "string" && data.availabilityInstanceId.trim()
+            ? data.availabilityInstanceId.trim()
+            : null;
+
+        if (toUserId && instanceId) next.add(`${toUserId}:${instanceId}`);
+      });
+
+      setPendingAvailabilityInterestKeys(next);
+    },
+    (error) => {
+      console.error("[MatchPage] failed to subscribe to sent availability interests", error);
+    }
+  );
+
+  return () => unsub();
+}, [user?.uid]);
+
+const handleAvailabilitySubmit = useCallback(
+  async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!user?.uid || !myProfile) {
+      setAvailabilitySaveError("Please finish loading your profile before posting availability.");
+      return;
+    }
+
+    setAvailabilitySaving(true);
+    setAvailabilitySaveError(null);
+
+    try {
+      const cleanPostcode = availabilityRequest.postcode.replace(/\D/g, "").slice(0, 4);
+      const photo = resolveProfilePhoto(myProfile);
+      const availabilityRef = doc(db, "availabilities", user.uid);
+      const instanceId =
+        activeAvailabilityRecord?.instanceId ||
+        globalThis.crypto?.randomUUID?.() ||
+        `${user.uid}_${Date.now()}`;
+
+      await setDoc(
+        availabilityRef,
+        {
+          instanceId,
+          userId: user.uid,
+          status: "open",
+          date: availabilityRequest.date,
+          timeSlot: availabilityRequest.timeSlot,
+          postcode: cleanPostcode || myProfile.postcode || "",
+          radiusKm: Number.parseInt(availabilityRequest.radiusKm, 10) || 10,
+          matchType: availabilityRequest.matchType,
+          note: availabilityRequest.note.trim(),
+          name: myProfile.name || user.displayName || "Player",
+          photoURL: photo,
+          photoThumbURL:
+            typeof myProfile.photoThumbURL === "string" && myProfile.photoThumbURL.trim()
+              ? myProfile.photoThumbURL.trim()
+              : photo,
+          skillBand: myProfile.skillBand || "",
+          skillBandLabel: myProfile.skillBandLabel || null,
+          skillLevel: myProfile.skillLevel || null,
+          skillRating:
+            typeof myProfile.skillRating === "number" && Number.isFinite(myProfile.skillRating)
+              ? myProfile.skillRating
+              : null,
+          utr:
+            typeof myProfile.utr === "number" && Number.isFinite(myProfile.utr)
+              ? myProfile.utr
+              : null,
+          lat: typeof myProfile.lat === "number" ? myProfile.lat : null,
+          lng: typeof myProfile.lng === "number" ? myProfile.lng : null,
+          createdAt: activeAvailabilityRecord?.createdAt ?? serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          expiresAt: endOfAvailabilityDay(availabilityRequest.date),
+        },
+        { merge: true }
+      );
+
+      setAvailabilityRequestOpen(false);
+      setAvailabilityDraftSaved(true);
+      setMatchSurface("availability");
+    } catch (error) {
+      console.error("[MatchPage] failed to save availability", error);
+      setAvailabilitySaveError("We couldn't save that availability just now. Please try again.");
+    } finally {
+      setAvailabilitySaving(false);
+    }
+  },
+  [activeAvailabilityRecord?.createdAt, availabilityRequest, myProfile, user]
+);
+
+const handleEditAvailability = useCallback(() => {
+  setAvailabilityActionsOpen(false);
+  setAvailabilitySaveError(null);
+  setAvailabilityRequestOpen(true);
+}, []);
+
+const handleCancelAvailability = useCallback(async () => {
+  if (!user?.uid || !activeAvailabilityRecord?.instanceId) return;
+
+  setAvailabilityCancelling(true);
+  setAvailabilitySaveError(null);
+
+  try {
+    const pendingAvailabilityQ = query(
+      collection(db, "match_requests"),
+      where("toUserId", "==", user.uid),
+      where("status", "==", "pending")
+    );
+
+    const pendingAvailabilitySnap = await getDocs(pendingAvailabilityQ);
+    const relatedRequests = pendingAvailabilitySnap.docs.filter((docSnap) => {
+      const data = docSnap.data() as any;
+      return (
+        data?.requestContext === "availability_interest" &&
+        data?.availabilityInstanceId === activeAvailabilityRecord.instanceId
+      );
+    });
+
+    await Promise.all(
+      relatedRequests.map(async (docSnap) => {
+        const requestId = docSnap.id;
+        await deleteDoc(doc(db, "match_requests", requestId));
+
+        const notificationQ = query(
+          collection(db, "notifications"),
+          where("matchId", "==", requestId)
+        );
+        const notificationSnap = await getDocs(notificationQ);
+        await Promise.all(notificationSnap.docs.map((notificationDoc) => deleteDoc(notificationDoc.ref)));
+      })
+    );
+
+    await setDoc(
+      doc(db, "availabilities", user.uid),
+      {
+        status: "cancelled",
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    setAvailabilityActionsOpen(false);
+    setAvailabilityDraftSaved(false);
+  } catch (error) {
+    console.error("[MatchPage] failed to cancel availability", error);
+    setAvailabilitySaveError("We couldn't cancel that availability just now. Please try again.");
+  } finally {
+    setAvailabilityCancelling(false);
+  }
+}, [activeAvailabilityRecord?.instanceId, user?.uid]);
 
 
 
@@ -1023,11 +1480,25 @@ const handleMatchRequest = async (target: Player | string) => {
       match_dataId: matchPlayer?.dataId,
     });
 
+    const isAvailabilityInterest =
+      typeof target !== "string" &&
+      typeof (target as any)?.dateLabel === "string" &&
+      typeof (target as any)?.timeLabel === "string";
+
+    const availabilityLabel = isAvailabilityInterest
+      ? `${(target as any).dateLabel} | ${(target as any).timeLabel}`
+      : null;
+    const availabilityInstanceId =
+      isAvailabilityInterest && typeof (target as any)?.availabilityInstanceId === "string"
+        ? (target as any).availabilityInstanceId
+        : null;
+
     // ✅ Create match request doc
 const ref = await addDoc(collection(db, "match_requests"), {
   fromUserId: user.uid,
   toUserId: toUid,
   status: "pending",
+  bellNotified: true,
 
   // lifecycle timestamps
   createdAt: serverTimestamp(),
@@ -1046,6 +1517,27 @@ const ref = await addDoc(collection(db, "match_requests"), {
   toPostcode: matchPlayer?.postcode ?? null,
   toPhotoURL:
     matchPlayer?.photoThumbURL || matchPlayer?.photoURL || matchPlayer?.avatar || null,
+  requestContext: isAvailabilityInterest ? "availability_interest" : "player_match",
+  availabilityInstanceId,
+});
+
+await addDoc(collection(db, "notifications"), {
+  recipientId: toUid,
+  fromUserId: user.uid,
+  type: "match_request",
+  matchId: ref.id,
+  title: isAvailabilityInterest ? "New availability interest" : "New match request",
+  body: isAvailabilityInterest
+    ? `${myProfile?.name ?? "A player"} is interested in your ${availabilityLabel} availability.`
+    : `${myProfile?.name ?? "A player"} has challenged you to a match.`,
+  message: isAvailabilityInterest
+    ? `${myProfile?.name ?? "A player"} is interested in your ${availabilityLabel} availability.`
+    : `${myProfile?.name ?? "A player"} has challenged you to a match.`,
+  route: "/matches",
+  url: "https://tennismate.vercel.app/matches",
+  timestamp: serverTimestamp(),
+  read: false,
+  source: isAvailabilityInterest ? "client:availability_interest" : "client:match_request",
 });
 
 trackEvent("match_request_sent", {
@@ -1206,6 +1698,61 @@ const visibleMatches = useMemo(
   () => sortedMatches.slice(0, visibleCount),
   [sortedMatches, visibleCount]
 );
+
+const activeAvailability = useMemo(() => {
+  if (!activeAvailabilityRecord) return null;
+
+  return {
+    dateLabel: formatAvailabilityDateLabel(activeAvailabilityRecord.date),
+    timeLabel: formatAvailabilityTimeLabel(activeAvailabilityRecord.timeSlot),
+    postcode: activeAvailabilityRecord.postcode || myProfile?.postcode || "Postcode TBC",
+    radiusLabel: `Within ${activeAvailabilityRecord.radiusKm}km`,
+    matchTypeLabel: formatAvailabilityMatchType(activeAvailabilityRecord.matchType),
+    note: activeAvailabilityRecord.note.trim(),
+  };
+}, [activeAvailabilityRecord, myProfile?.postcode]);
+
+const browseAvailabilityCards = useMemo(() => {
+  return browseAvailabilityRecords.map((availability) => {
+    const numeric =
+      typeof (availability.skillRating ?? availability.utr) === "number"
+        ? (availability.skillRating ?? availability.utr)!.toFixed(1)
+        : null;
+
+    const skillLabel = numeric
+      ? `Level ${numeric}`
+      : `Level ${labelForBand(
+          availability.skillBand ||
+            skillFromUTR((availability.skillRating ?? availability.utr) ?? null) ||
+            legacyToBand(availability.skillLevel ?? undefined),
+          availability.skillBandLabel
+        )}`;
+
+    const distanceKm =
+      typeof myProfile?.lat === "number" &&
+      typeof myProfile?.lng === "number" &&
+      typeof availability.lat === "number" &&
+      typeof availability.lng === "number"
+        ? getDistanceFromLatLonInKm(myProfile.lat, myProfile.lng, availability.lat, availability.lng)
+        : null;
+
+    return {
+      id: availability.id,
+      userId: availability.userId,
+      availabilityInstanceId: availability.instanceId,
+      name: availability.name || "Player",
+      photoURL: availability.photoThumbURL || availability.photoURL || null,
+      postcode: availability.postcode || null,
+      skillLabel,
+      distanceLabel: distanceKm != null ? `${distanceKm} km away` : "Distance unknown",
+      dateLabel: formatAvailabilityDateLabel(availability.date),
+      timeLabel: formatAvailabilityTimeLabel(availability.timeSlot),
+      matchTypeLabel: formatAvailabilityMatchType(availability.matchType),
+      note: availability.note,
+    };
+  });
+}, [browseAvailabilityRecords, myProfile?.lat, myProfile?.lng]);
+
 useEffect(() => {
   setVisibleCount(PAGE_SIZE);
 }, [sortBy, hideContacted, matchMode, ageBand, genderFilter, activityFilter]);
@@ -1215,12 +1762,16 @@ useEffect(() => {
   const qHide = params.get("hide");
   const qMode = params.get("mode");
   const qActivity = params.get("activity");
+  const qSurface = params.get("surface");
 
   if (qSort) setSortBy(qSort);
   if (qHide === "0" || qHide === "1") setHideContacted(qHide === "1");
   if (qMode === "auto" || qMode === "skill" || qMode === "utr") setMatchMode(qMode);
   if (qActivity === "online" || qActivity === "recent" || qActivity === "offline") {
     setActivityFilter(qActivity);
+  }
+  if (qSurface === "availability" || qSurface === "players") {
+    setMatchSurface(qSurface);
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
@@ -1304,6 +1855,32 @@ if (isDesktop) {
   return (
     <div className="min-h-screen bg-[#f6f7f8]">
       <div className="w-full px-4 lg:px-8 2xl:px-12 py-6">
+        {availabilityDraftSaved && (
+          <div
+            className="mb-4 rounded-2xl px-4 py-3 text-sm font-semibold"
+            style={{
+              background: "rgba(57,255,20,0.12)",
+              color: TM.forest,
+              border: "1px solid rgba(57,255,20,0.28)",
+            }}
+          >
+            Availability posted. You can now browse other open requests below.
+          </div>
+        )}
+
+        {availabilitySaveError && (
+          <div
+            className="mb-4 rounded-2xl px-4 py-3 text-sm font-semibold"
+            style={{
+              background: "rgba(239,68,68,0.08)",
+              color: "#991B1B",
+              border: "1px solid rgba(239,68,68,0.20)",
+            }}
+          >
+            {availabilitySaveError}
+          </div>
+        )}
+
         <div className="flex items-start gap-6">
           <TMDesktopSidebar player={myProfile} />
           <div className="flex-1 min-w-0">
@@ -1333,12 +1910,206 @@ if (isDesktop) {
   onLoadMore={() => setVisibleCount((c) => c + PAGE_SIZE)}
   onInvite={(match) => handleMatchRequest(match)}
   onViewProfile={(id) => setProfileOpenId(id)}
+  onOpenAvailabilityRequest={() => setAvailabilityRequestOpen(true)}
+  onOpenAvailabilityActions={() => setAvailabilityActionsOpen(true)}
+  matchSurface={matchSurface}
+  setMatchSurface={setMatchSurface}
+  activeAvailability={activeAvailability}
+  browseAvailabilityCards={browseAvailabilityCards}
+  sentRequestUserIds={sentRequests}
+  sendingRequestUserIds={sendingIds}
+  pendingAvailabilityInterestKeys={pendingAvailabilityInterestKeys}
   profileOpenId={profileOpenId}
   setProfileOpenId={setProfileOpenId}
 />
           </div>
         </div>
       </div>
+
+      {availabilityRequestOpen && (
+        <div className="fixed inset-0 z-[10000]">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onMouseDown={() => setAvailabilityRequestOpen(false)}
+          />
+
+          <div className="absolute inset-0 overflow-y-auto p-4 sm:p-6">
+            <div className="flex min-h-full items-center justify-center">
+            <div
+              className="w-full max-w-lg overflow-hidden rounded-[28px] bg-white shadow-2xl ring-1 ring-black/5"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-black/5 px-4 py-4 sm:px-5 sm:py-5">
+                <div>
+                  <div
+                    className="text-[11px] font-extrabold uppercase tracking-[0.16em]"
+                    style={{ color: "rgba(11,61,46,0.58)" }}
+                  >
+                    Find Me a Match
+                  </div>
+                  <div className="mt-1 text-xl font-black tracking-tight" style={{ color: TM.forest }}>
+                    When do you want to play?
+                  </div>
+                  <div className="mt-1 text-sm" style={{ color: "rgba(11,61,46,0.70)" }}>
+                    Post your availability and we&apos;ll show it in the live open requests feed.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setAvailabilityRequestOpen(false)}
+                  className="grid h-10 w-10 place-items-center rounded-full bg-black/5 text-gray-600 hover:bg-black/10"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAvailabilitySubmit} className="px-4 py-4 sm:px-5 sm:py-5">
+                <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                    Day
+                  </label>
+                  <input
+                    type="date"
+                    min={new Date().toISOString().split("T")[0]}
+                    value={availabilityRequest.date}
+                    onChange={(e) =>
+                      setAvailabilityRequest((prev) => ({ ...prev, date: e.target.value }))
+                    }
+                    className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none"
+                    style={{ borderColor: "rgba(11,61,46,0.16)" }}
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                      Time
+                    </label>
+                    <select
+                      value={availabilityRequest.timeSlot}
+                      onChange={(e) =>
+                        setAvailabilityRequest((prev) => ({
+                          ...prev,
+                          timeSlot: e.target.value as AvailabilityFormState["timeSlot"],
+                        }))
+                      }
+                      className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none bg-white"
+                      style={{ borderColor: "rgba(11,61,46,0.16)" }}
+                    >
+                      <option value="morning">Morning</option>
+                      <option value="afternoon">Afternoon</option>
+                      <option value="evening">Evening</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                      Match Type
+                    </label>
+                    <select
+                      value={availabilityRequest.matchType}
+                      onChange={(e) =>
+                        setAvailabilityRequest((prev) => ({
+                          ...prev,
+                          matchType: e.target.value as AvailabilityFormState["matchType"],
+                        }))
+                      }
+                      className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none bg-white"
+                      style={{ borderColor: "rgba(11,61,46,0.16)" }}
+                    >
+                      <option value="singles">Singles</option>
+                      <option value="casual_hit">Casual Hit</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                      Postcode
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={availabilityRequest.postcode}
+                      onChange={(e) =>
+                        setAvailabilityRequest((prev) => ({ ...prev, postcode: e.target.value }))
+                      }
+                      className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none"
+                      style={{ borderColor: "rgba(11,61,46,0.16)" }}
+                      placeholder="3000"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                      Radius
+                    </label>
+                    <select
+                      value={availabilityRequest.radiusKm}
+                      onChange={(e) =>
+                        setAvailabilityRequest((prev) => ({ ...prev, radiusKm: e.target.value }))
+                      }
+                      className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none bg-white"
+                      style={{ borderColor: "rgba(11,61,46,0.16)" }}
+                    >
+                      <option value="5">Within 5km</option>
+                      <option value="10">Within 10km</option>
+                      <option value="20">Within 20km</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                    Note
+                  </label>
+            <textarea
+              rows={2}
+              value={availabilityRequest.note}
+              onChange={(e) =>
+                setAvailabilityRequest((prev) => ({ ...prev, note: e.target.value }))
+              }
+              className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none"
+              style={{ borderColor: "rgba(11,61,46,0.16)" }}
+              placeholder="Happy to travel, casual hit, after work..."
+            />
+          </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setAvailabilityRequestOpen(false)}
+                    className="rounded-full bg-gray-100 px-4 py-2.5 text-sm font-extrabold text-gray-700 hover:bg-gray-200"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={availabilitySaving}
+                    className="rounded-full px-4 py-2.5 text-sm font-extrabold"
+                    style={{
+                      background: TM.neon,
+                      color: TM.forest,
+                      opacity: availabilitySaving ? 0.7 : 1,
+                    }}
+                  >
+                    {availabilitySaving ? "Saving..." : "Save Availability"}
+                  </button>
+                </div>
+                </div>
+              </form>
+            </div>
+          </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1417,6 +2188,98 @@ return (
       )}
     </button>
   </div>
+</div>
+
+{availabilityDraftSaved && (
+  <div
+    className="mb-4 rounded-2xl px-4 py-3 text-sm font-semibold"
+    style={{
+      background: "rgba(57,255,20,0.12)",
+      color: TM.forest,
+      border: "1px solid rgba(57,255,20,0.28)",
+    }}
+  >
+    Availability posted. You can now browse other open requests below.
+  </div>
+)}
+
+{availabilitySaveError && (
+  <div
+    className="mb-4 rounded-2xl px-4 py-3 text-sm font-semibold"
+    style={{
+      background: "rgba(239,68,68,0.08)",
+      color: "#991B1B",
+      border: "1px solid rgba(239,68,68,0.20)",
+    }}
+  >
+    {availabilitySaveError}
+  </div>
+)}
+
+<div
+  className="mb-4 rounded-3xl p-4"
+  style={{
+    background: "#F7FAF8",
+    border: "1px solid rgba(11,61,46,0.10)",
+    boxShadow: "0 12px 30px rgba(15,23,42,0.06)",
+  }}
+>
+  <div className="flex items-start justify-between gap-4">
+    <div className="min-w-0">
+      <div
+        className="text-[11px] font-extrabold uppercase tracking-[0.16em]"
+        style={{ color: "rgba(11,61,46,0.58)" }}
+      >
+        New
+      </div>
+      <div className="mt-1 text-[18px] font-black tracking-tight" style={{ color: TM.forest }}>
+        Need a game this week?
+      </div>
+      <div className="mt-1 text-[13px] font-medium" style={{ color: "rgba(11,61,46,0.70)" }}>
+        Post your availability and we&apos;ll use it for future instant matching.
+      </div>
+    </div>
+
+    <button
+      type="button"
+      onClick={() => setAvailabilityRequestOpen(true)}
+      className="shrink-0 rounded-full px-4 py-3 text-[14px] font-extrabold"
+      style={{
+        background: TM.forest,
+        color: "white",
+        boxShadow: "0 10px 24px rgba(11,61,46,0.18)",
+      }}
+    >
+      Post Availability
+    </button>
+  </div>
+</div>
+
+<div className="mb-4 inline-flex rounded-full bg-[#F3F5F7] p-1 ring-1 ring-black/5">
+  <button
+    type="button"
+    onClick={() => setMatchSurface("players")}
+    className="rounded-full px-4 py-2 text-sm font-extrabold transition"
+    style={
+      matchSurface === "players"
+        ? { background: TM.neon, color: TM.forest }
+        : { background: "transparent", color: "rgba(11,61,46,0.62)" }
+    }
+  >
+    Players
+  </button>
+  <button
+    type="button"
+    onClick={() => setMatchSurface("availability")}
+    className="rounded-full px-4 py-2 text-sm font-extrabold transition"
+    style={
+      matchSurface === "availability"
+        ? { background: TM.neon, color: TM.forest }
+        : { background: "transparent", color: "rgba(11,61,46,0.62)" }
+    }
+  >
+    Availabilities
+  </button>
 </div>
 
 
@@ -1660,10 +2523,422 @@ return (
   </div>
 )}
 
+{availabilityRequestOpen && (
+  <div className="fixed inset-0 z-[10000]">
+    <div
+      className="absolute inset-0 bg-black/50"
+      onMouseDown={() => setAvailabilityRequestOpen(false)}
+    />
 
+    <div className="absolute inset-0 overflow-y-auto p-3 sm:p-6">
+      <div className="flex min-h-full items-center justify-center">
+      <div
+        className="w-full max-w-lg overflow-hidden rounded-[28px] bg-white shadow-2xl ring-1 ring-black/5"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-black/5 px-4 py-4 sm:px-5 sm:py-5">
+          <div>
+            <div
+              className="text-[11px] font-extrabold uppercase tracking-[0.16em]"
+              style={{ color: "rgba(11,61,46,0.58)" }}
+            >
+              Find Me a Match
+            </div>
+            <div className="mt-1 text-xl font-black tracking-tight" style={{ color: TM.forest }}>
+              When do you want to play?
+            </div>
+            <div className="mt-1 text-sm" style={{ color: "rgba(11,61,46,0.70)" }}>
+              Post your availability and we&apos;ll show it in the live open requests feed.
+            </div>
+          </div>
 
+          <button
+            type="button"
+            onClick={() => setAvailabilityRequestOpen(false)}
+            className="grid h-10 w-10 place-items-center rounded-full bg-black/5 text-gray-600 hover:bg-black/10"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
 
- {sortedMatches.length === 0 ? (
+        <form onSubmit={handleAvailabilitySubmit} className="px-4 py-4 sm:px-5 sm:py-5">
+          <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+              Day
+            </label>
+            <input
+              type="date"
+              min={new Date().toISOString().split("T")[0]}
+              value={availabilityRequest.date}
+              onChange={(e) =>
+                setAvailabilityRequest((prev) => ({ ...prev, date: e.target.value }))
+              }
+              className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none"
+              style={{ borderColor: "rgba(11,61,46,0.16)" }}
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                Time
+              </label>
+              <select
+                value={availabilityRequest.timeSlot}
+                onChange={(e) =>
+                  setAvailabilityRequest((prev) => ({
+                    ...prev,
+                    timeSlot: e.target.value as AvailabilityFormState["timeSlot"],
+                  }))
+                }
+                className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none bg-white"
+                style={{ borderColor: "rgba(11,61,46,0.16)" }}
+              >
+                <option value="morning">Morning</option>
+                <option value="afternoon">Afternoon</option>
+                <option value="evening">Evening</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                Match Type
+              </label>
+              <select
+                value={availabilityRequest.matchType}
+                onChange={(e) =>
+                  setAvailabilityRequest((prev) => ({
+                    ...prev,
+                    matchType: e.target.value as AvailabilityFormState["matchType"],
+                  }))
+                }
+                className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none bg-white"
+                style={{ borderColor: "rgba(11,61,46,0.16)" }}
+              >
+                <option value="singles">Singles</option>
+                <option value="casual_hit">Casual Hit</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                Postcode
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                value={availabilityRequest.postcode}
+                onChange={(e) =>
+                  setAvailabilityRequest((prev) => ({ ...prev, postcode: e.target.value }))
+                }
+                className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none"
+                style={{ borderColor: "rgba(11,61,46,0.16)" }}
+                placeholder="3000"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+                Radius
+              </label>
+              <select
+                value={availabilityRequest.radiusKm}
+                onChange={(e) =>
+                  setAvailabilityRequest((prev) => ({ ...prev, radiusKm: e.target.value }))
+                }
+                className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none bg-white"
+                style={{ borderColor: "rgba(11,61,46,0.16)" }}
+              >
+                <option value="5">Within 5km</option>
+                <option value="10">Within 10km</option>
+                <option value="20">Within 20km</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-extrabold" style={{ color: TM.forest }}>
+              Note
+            </label>
+            <textarea
+              rows={2}
+              value={availabilityRequest.note}
+              onChange={(e) =>
+                setAvailabilityRequest((prev) => ({ ...prev, note: e.target.value }))
+              }
+              className="mt-1.5 w-full rounded-2xl border px-4 py-2.5 text-[16px] outline-none"
+              style={{ borderColor: "rgba(11,61,46,0.16)" }}
+              placeholder="Happy to travel, casual hit, after work..."
+            />
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setAvailabilityRequestOpen(false)}
+              className="flex-1 rounded-full bg-gray-100 px-4 py-2.5 text-sm font-extrabold text-gray-700 hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={availabilitySaving}
+              className="flex-1 rounded-full px-4 py-2.5 text-sm font-extrabold"
+              style={{
+                background: TM.neon,
+                color: TM.forest,
+                opacity: availabilitySaving ? 0.7 : 1,
+              }}
+            >
+              {availabilitySaving ? "Saving..." : "Save Availability"}
+            </button>
+          </div>
+          </div>
+        </form>
+      </div>
+    </div>
+    </div>
+  </div>
+)}
+
+{availabilityActionsOpen && activeAvailability && (
+  <div className="fixed inset-0 z-[10001]">
+    <div
+      className="absolute inset-0 bg-black/50"
+      onMouseDown={() => !availabilityCancelling && setAvailabilityActionsOpen(false)}
+    />
+
+    <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center sm:p-6">
+      <div
+        className="w-full max-w-sm rounded-[28px] bg-white p-5 shadow-2xl ring-1 ring-black/5"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="text-[11px] font-extrabold uppercase tracking-[0.16em]" style={{ color: "rgba(11,61,46,0.58)" }}>
+          My Availability
+        </div>
+        <div className="mt-2 text-xl font-black tracking-tight" style={{ color: TM.forest }}>
+          {activeAvailability.dateLabel}
+        </div>
+        <div className="mt-1 text-sm font-semibold" style={{ color: "rgba(11,61,46,0.70)" }}>
+          {activeAvailability.timeLabel} | {activeAvailability.matchTypeLabel}
+        </div>
+
+        <div className="mt-5 space-y-3">
+          <button
+            type="button"
+            onClick={handleEditAvailability}
+            className="w-full rounded-full px-4 py-3 text-sm font-extrabold"
+            style={{ background: TM.forest, color: "#FFFFFF" }}
+          >
+            Edit Availability
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCancelAvailability}
+            disabled={availabilityCancelling}
+            className="w-full rounded-full border px-4 py-3 text-sm font-extrabold"
+            style={{
+              borderColor: "rgba(239,68,68,0.24)",
+              color: "#B42318",
+              background: "rgba(239,68,68,0.06)",
+              opacity: availabilityCancelling ? 0.7 : 1,
+            }}
+          >
+            {availabilityCancelling ? "Cancelling..." : "Cancel Availability"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAvailabilityActionsOpen(false)}
+            disabled={availabilityCancelling}
+            className="w-full rounded-full bg-gray-100 px-4 py-3 text-sm font-extrabold text-gray-700"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
+ {matchSurface === "availability" ? (
+  <div className="space-y-4">
+    {activeAvailability ? (
+      <button
+        type="button"
+        onClick={() => setAvailabilityActionsOpen(true)}
+        className="w-full rounded-3xl p-5 text-left shadow-sm"
+        style={{
+          background: "#FFFFFF",
+          border: "1px solid rgba(15,23,42,0.10)",
+          boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
+        }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.16em]" style={{ color: "rgba(11,61,46,0.55)" }}>
+              My Availability
+            </div>
+            <div className="mt-2 text-[18px] font-black tracking-tight" style={{ color: TM.forest }}>
+              {activeAvailability.dateLabel}
+            </div>
+            <div className="mt-1 text-[13px] font-semibold" style={{ color: "rgba(11,61,46,0.70)" }}>
+              {activeAvailability.timeLabel} | {activeAvailability.matchTypeLabel}
+            </div>
+          </div>
+
+          <span
+            className="rounded-full px-3 py-1 text-[11px] font-extrabold"
+            style={{ background: "rgba(57,255,20,0.14)", color: TM.forest }}
+          >
+            Looking
+          </span>
+        </div>
+
+        <div className="mt-4 space-y-2 text-[13px] font-medium" style={{ color: "rgba(15,23,42,0.68)" }}>
+          <div>{activeAvailability.postcode} | {activeAvailability.radiusLabel}</div>
+          <div>{activeAvailability.note || "No note added yet."}</div>
+        </div>
+        <div className="mt-4 text-left text-[11px] font-extrabold uppercase tracking-[0.16em]" style={{ color: "rgba(11,61,46,0.50)" }}>
+          Tap to edit or cancel
+        </div>
+      </button>
+    ) : (
+      <div
+        className="rounded-3xl p-5 shadow-sm"
+        style={{
+          background: "#FFFFFF",
+          border: "1px solid rgba(15,23,42,0.10)",
+          boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
+        }}
+      >
+        <div className="text-[18px] font-black tracking-tight" style={{ color: TM.forest }}>
+          No live availability yet
+        </div>
+        <div className="mt-2 text-[14px]" style={{ color: "rgba(15,23,42,0.65)" }}>
+          Post when you want to play, then browse other open requests here.
+        </div>
+        <button
+          type="button"
+          onClick={() => setAvailabilityRequestOpen(true)}
+          className="mt-4 rounded-full px-4 py-3 text-[14px] font-extrabold"
+          style={{
+            background: TM.forest,
+            color: "#FFFFFF",
+            boxShadow: "0 10px 24px rgba(11,61,46,0.18)",
+          }}
+        >
+          Post Availability
+        </button>
+      </div>
+    )}
+
+    <div className="px-1 text-[11px] font-extrabold uppercase tracking-[0.16em]" style={{ color: "rgba(11,61,46,0.55)" }}>
+      Browse Open Requests
+    </div>
+    <div className="px-1 text-[13px]" style={{ color: "rgba(15,23,42,0.60)" }}>
+      Explore players who are already looking to play and raise your hand when someone fits.
+    </div>
+
+    {browseAvailabilityCards.length === 0 ? (
+      <div className="rounded-3xl bg-white ring-1 ring-black/5 p-6 text-sm text-gray-600">
+        No open availability requests are live right now.
+      </div>
+    ) : (
+      <ul className="space-y-3">
+                        {browseAvailabilityCards.map((card) => (
+                          <li
+                            key={card.id}
+                            className="rounded-3xl p-5 shadow-sm"
+                            style={{
+                              background: "#FFFFFF",
+                              border: "1px solid rgba(15,23,42,0.10)",
+                              boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
+                            }}
+                          >
+                            {(() => {
+                              const recipientUid = card.userId;
+                              const interestKey = `${recipientUid}:${card.availabilityInstanceId}`;
+                              const alreadySent = pendingAvailabilityInterestKeys.has(interestKey);
+                              const sending = sendingIds.has(recipientUid);
+
+                              return (
+                                <>
+            <div className="flex items-start gap-3">
+              <div
+                className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full"
+                style={{ background: "rgba(15,23,42,0.06)", border: "1px solid rgba(15,23,42,0.10)" }}
+              >
+                {card.photoURL ? (
+                  <Image src={card.photoURL} alt={card.name} fill sizes="56px" className="object-cover" />
+                ) : (
+                  <div className="grid h-full w-full place-items-center text-sm font-extrabold text-gray-500">
+                    {(card.name || "?").charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="text-[16px] font-extrabold text-[#0B3D2E]">{card.name}</div>
+                <div className="mt-1 text-[12px] font-semibold text-black/60">
+                  {card.dateLabel} | {card.timeLabel}
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span
+                    className="rounded-full px-2.5 py-1 text-[11px] font-extrabold"
+                    style={{ background: "rgba(57,255,20,0.14)", color: TM.forest }}
+                  >
+                    {card.matchTypeLabel}
+                  </span>
+                  <span
+                    className="rounded-full px-2.5 py-1 text-[11px] font-extrabold"
+                    style={{ background: "#EEF0F2", color: "#0F172A" }}
+                  >
+                    {card.skillLabel}
+                  </span>
+                </div>
+
+                <div className="mt-3 text-[13px] font-medium text-black/65">
+                  {card.distanceLabel}{card.postcode ? ` | ${card.postcode}` : ""}
+                </div>
+                <div className="mt-1 text-[13px] text-black/60">
+                  {card.note || "Open to a casual hit."}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleMatchRequest(card as any)}
+              disabled={alreadySent || sending}
+              className="mt-4 w-full rounded-full py-3.5 text-[14px] font-extrabold"
+              style={{
+                background: alreadySent ? "rgba(11,61,46,0.10)" : TM.neon,
+                color: alreadySent ? "rgba(11,61,46,0.60)" : TM.forest,
+                boxShadow: "0 10px 30px rgba(57,255,20,0.18)",
+                opacity: sending ? 0.75 : 1,
+              }}
+            >
+              {sending ? "Sending..." : alreadySent ? "Request Sent" : "I'm Interested"}
+            </button>
+                                </>
+                              );
+                            })()}
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+) : sortedMatches.length === 0 ? (
 <p>No matches found yet. Try adjusting your availability or skill level.</p>
 ) : (
   <>

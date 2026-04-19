@@ -1022,6 +1022,9 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
 
     const data = snap.data();
 const { fromUserId, toUserId } = data;
+const requestContext = typeof data.requestContext === "string" ? data.requestContext : null;
+const availabilityInstanceId =
+  typeof data.availabilityInstanceId === "string" ? data.availabilityInstanceId : null;
 
 const created =
   data.createdAt?.toDate?.() ??
@@ -1037,6 +1040,52 @@ const responseHours =
   players: [fromUserId, toUserId],
   acceptedAt: serverTimestamp(),
 });
+
+if (requestContext === "availability_interest" && availabilityInstanceId) {
+  const availabilityRef = doc(db, "availabilities", toUserId);
+  const availabilitySnap = await getDoc(availabilityRef);
+
+  if (availabilitySnap.exists()) {
+    const availabilityData = availabilitySnap.data() as any;
+    if (
+      availabilityData?.status === "open" &&
+      availabilityData?.instanceId === availabilityInstanceId
+    ) {
+      await updateDoc(availabilityRef, {
+        status: "matched",
+        matchedAt: serverTimestamp(),
+        matchedRequestId: matchId,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+
+  const relatedPendingQ = query(
+    collection(db, "match_requests"),
+    where("toUserId", "==", toUserId),
+    where("status", "==", "pending")
+  );
+  const relatedPendingSnap = await getDocs(relatedPendingQ);
+
+  const staleRequests = relatedPendingSnap.docs.filter((docSnap) => {
+    if (docSnap.id === matchId) return false;
+    const related = docSnap.data() as any;
+    return (
+      related?.requestContext === "availability_interest" &&
+      related?.availabilityInstanceId === availabilityInstanceId
+    );
+  });
+
+  await Promise.all(
+    staleRequests.map(async (docSnap) => {
+      await deleteDoc(docSnap.ref);
+
+      const notifQ = query(collection(db, "notifications"), where("matchId", "==", docSnap.id));
+      const notifSnap = await getDocs(notifQ);
+      await Promise.all(notifSnap.docs.map((notifDoc) => deleteDoc(notifDoc.ref)));
+    })
+  );
+}
 
     track("match_request_accepted", {
       match_id: matchId,
@@ -1341,7 +1390,7 @@ const renderHistoryMatch = useCallback((history: HistoryMatch) => {
   const resultLabel = history.winnerId ? (won ? "Win" : "Loss") : "Played";
   const resultTone = history.winnerId ? (won ? "success" : "neutral") : "brand";
   const summaryLine = `${formatHistoryDate(history.completedAt, history.playedDate)} • ${formatMatchType(history.matchType)}`;
-  const detailsHref = history.matchRequestId ? `/matches/${history.matchRequestId}/summary` : null;
+  const detailsHref = `/matches/history/${history.id}`;
   const rematchRequested = !!requestedRematches[history.id];
 
   return (
@@ -1386,18 +1435,14 @@ const renderHistoryMatch = useCallback((history: HistoryMatch) => {
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3 text-sm">
-            {detailsHref ? (
-              <button
-                type="button"
-                onClick={() => router.push(detailsHref)}
-                className="inline-flex items-center gap-1.5 font-semibold text-gray-500 hover:text-gray-700"
-              >
-                Match Details
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            ) : (
-              <span className="font-semibold text-gray-400">Past match</span>
-            )}
+            <button
+              type="button"
+              onClick={() => router.push(detailsHref)}
+              className="inline-flex items-center gap-1.5 font-semibold text-gray-500 hover:text-gray-700"
+            >
+              Match Details
+              <ArrowRight className="h-4 w-4" />
+            </button>
 
             <button
               type="button"

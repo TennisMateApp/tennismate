@@ -614,6 +614,264 @@ function formatLocal(iso?: string | null): string {
   return isNaN(dt.getTime()) ? "" : dt.toLocaleString();
 }
 
+const AVAILABILITY_ALERT_RADIUS_KM = 10;
+const AVAILABILITY_ALERT_PUSH_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+const AVAILABILITY_ALERT_MAX_RECIPIENTS = 50;
+const ACTIVE_MATCH_RELATIONSHIP_STATUSES = [
+  "unread",
+  "requested",
+  "pending",
+  "accepted",
+  "confirmed",
+];
+
+function getAvailabilityProfileSlot(dateValue: unknown, timeSlotValue: unknown): string | null {
+  if (typeof dateValue !== "string" || !dateValue) return null;
+
+  const parsed = new Date(`${dateValue}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const isWeekend = parsed.getDay() === 0 || parsed.getDay() === 6;
+  const timeSlot = typeof timeSlotValue === "string" ? timeSlotValue : "evening";
+
+  if (timeSlot === "morning") {
+    return isWeekend ? "Weekends AM" : "Weekdays AM";
+  }
+
+  return isWeekend ? "Weekends PM" : "Weekdays PM";
+}
+
+function isWithinAvailabilityPushHours(now = new Date()): boolean {
+  try {
+    const hourText = new Intl.DateTimeFormat("en-AU", {
+      timeZone: "Australia/Melbourne",
+      hour: "2-digit",
+      hour12: false,
+    }).format(now);
+
+    const hour = Number.parseInt(hourText, 10);
+    return Number.isFinite(hour) && hour >= 9 && hour < 21;
+  } catch {
+    const hour = now.getHours();
+    return hour >= 9 && hour < 21;
+  }
+}
+
+function timestampToMillis(value: unknown): number | null {
+  if (!value) return null;
+
+  if (value instanceof admin.firestore.Timestamp) {
+    return value.toMillis();
+  }
+
+  const maybeDate =
+    value instanceof Date
+      ? value
+      : typeof (value as any)?.toDate === "function"
+      ? (value as any).toDate()
+      : null;
+
+  if (maybeDate && !Number.isNaN(maybeDate.getTime())) {
+    return maybeDate.getTime();
+  }
+
+  return null;
+}
+
+async function getActiveRelationshipUserIds(uid: string): Promise<Set<string>> {
+  const out = new Set<string>();
+
+  const [fromSnap, toSnap] = await Promise.all([
+    db
+      .collection("match_requests")
+      .where("fromUserId", "==", uid)
+      .where("status", "in", ACTIVE_MATCH_RELATIONSHIP_STATUSES)
+      .get(),
+    db
+      .collection("match_requests")
+      .where("toUserId", "==", uid)
+      .where("status", "in", ACTIVE_MATCH_RELATIONSHIP_STATUSES)
+      .get(),
+  ]);
+
+  fromSnap.forEach((docSnap) => {
+    const other = docSnap.get("toUserId");
+    if (typeof other === "string" && other.trim()) out.add(other.trim());
+  });
+
+  toSnap.forEach((docSnap) => {
+    const other = docSnap.get("fromUserId");
+    if (typeof other === "string" && other.trim()) out.add(other.trim());
+  });
+
+  return out;
+}
+
+type AvailabilityCandidate = {
+  uid: string;
+  data: FirebaseFirestore.DocumentData;
+  distanceKm: number;
+};
+
+async function findNearbyAvailabilityCandidates(
+  origin: { lat: number; lng: number },
+  slot: string
+): Promise<AvailabilityCandidate[]> {
+  const latDelta = AVAILABILITY_ALERT_RADIUS_KM / 111;
+  const lngDelta =
+    AVAILABILITY_ALERT_RADIUS_KM /
+    Math.max(1, 111 * Math.cos((origin.lat * Math.PI) / 180));
+
+  const snap = await db
+    .collection("players")
+    .where("lat", ">=", origin.lat - latDelta)
+    .where("lat", "<=", origin.lat + latDelta)
+    .limit(400)
+    .get();
+
+  const out: AvailabilityCandidate[] = [];
+
+  snap.forEach((docSnap) => {
+    const data = docSnap.data() || {};
+    const uid = docSnap.id;
+    const lat = typeof data.lat === "number" ? data.lat : null;
+    const lng = typeof data.lng === "number" ? data.lng : null;
+
+    if (lat == null || lng == null) return;
+    if (Math.abs(lng - origin.lng) > lngDelta) return;
+    if (data.isMatchable === false) return;
+
+    const availability = Array.isArray(data.availability)
+      ? data.availability.map((value: unknown) => String(value).trim())
+      : [];
+    if (!availability.includes(slot)) return;
+
+    const distanceKm = calculateDistance(origin, { lat, lng });
+    if (distanceKm > AVAILABILITY_ALERT_RADIUS_KM) return;
+
+    out.push({ uid, data, distanceKm });
+  });
+
+  out.sort((a, b) => a.distanceKm - b.distanceKm);
+  return out.slice(0, AVAILABILITY_ALERT_MAX_RECIPIENTS);
+}
+
+async function createAvailabilityAlertsForOpenAvailability(
+  availabilityId: string,
+  data: FirebaseFirestore.DocumentData | undefined
+): Promise<void> {
+  if (!data) return;
+  if (data.status !== "open") return;
+
+  const creatorId =
+    typeof data.userId === "string" && data.userId.trim()
+      ? data.userId.trim()
+      : availabilityId;
+  const instanceId =
+    typeof data.instanceId === "string" && data.instanceId.trim()
+      ? data.instanceId.trim()
+      : availabilityId;
+
+  const lat = typeof data.lat === "number" ? data.lat : null;
+  const lng = typeof data.lng === "number" ? data.lng : null;
+  if (lat == null || lng == null) {
+    console.log("[AvailabilityAlert] missing lat/lng; skipping", { availabilityId, creatorId });
+    return;
+  }
+
+  const slot = getAvailabilityProfileSlot(data.date, data.timeSlot);
+  if (!slot) {
+    console.log("[AvailabilityAlert] could not map availability slot; skipping", {
+      availabilityId,
+      creatorId,
+      date: data.date,
+      timeSlot: data.timeSlot,
+    });
+    return;
+  }
+
+  const creatorName =
+    typeof data.name === "string" && data.name.trim()
+      ? data.name.trim()
+      : await getPlayerName(creatorId);
+
+  const activeRelationshipUserIds = await getActiveRelationshipUserIds(creatorId);
+  activeRelationshipUserIds.add(creatorId);
+
+  const nearby = await findNearbyAvailabilityCandidates({ lat, lng }, slot);
+  const pushWindowOpen = isWithinAvailabilityPushHours();
+
+  let createdCount = 0;
+  let pushEnabledCount = 0;
+
+  for (const candidate of nearby) {
+    if (activeRelationshipUserIds.has(candidate.uid)) continue;
+
+    const notifId = `availabilityAlert_${instanceId}_${candidate.uid}`;
+    const notifRef = db.collection("notifications").doc(notifId);
+
+    const userRef = db.collection("users").doc(candidate.uid);
+    const userSnap = await userRef.get();
+    const lastPushMs = timestampToMillis(userSnap.get("lastAvailabilityPushAt"));
+    const pushCooldownActive =
+      typeof lastPushMs === "number" &&
+      Date.now() - lastPushMs < AVAILABILITY_ALERT_PUSH_COOLDOWN_MS;
+    const pushDisabled = !pushWindowOpen || pushCooldownActive;
+
+    try {
+      await notifRef.create({
+        recipientId: candidate.uid,
+        fromUserId: creatorId,
+        type: "availability_alert",
+        availabilityId,
+        availabilityInstanceId: instanceId,
+        groupKey: `availability_alert_${instanceId}`,
+        title: "New nearby availability",
+        body: `${creatorName} is looking for a ${String(data.timeSlot || "match")} game nearby.`,
+        message: `${creatorName} is looking for a ${String(data.timeSlot || "match")} game nearby.`,
+        route: "/match?surface=availability",
+        url: "https://tennismate.vercel.app/match?surface=availability",
+        slot,
+        distanceKm: Math.round(candidate.distanceKm * 10) / 10,
+        pushDisabled,
+        read: false,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        source: "cf:availability_alert",
+      });
+
+      createdCount += 1;
+
+      if (!pushDisabled) {
+        pushEnabledCount += 1;
+        await userRef.set(
+          { lastAvailabilityPushAt: admin.firestore.FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+      }
+    } catch (error: any) {
+      if (error?.code === 6 || String(error?.message || "").includes("Already exists")) {
+        continue;
+      }
+      console.error("[AvailabilityAlert] failed to create notification", {
+        availabilityId,
+        recipientId: candidate.uid,
+        error: String(error?.message || error),
+      });
+    }
+  }
+
+  console.log("[AvailabilityAlert] complete", {
+    availabilityId,
+    creatorId,
+    instanceId,
+    slot,
+    createdCount,
+    pushEnabledCount,
+    nearbyCandidates: nearby.length,
+    pushWindowOpen,
+  });
+}
+
 
 async function enqueueEmail(
   to: string,
@@ -1409,6 +1667,37 @@ export const testFirestore = onRequest({ region: "australia-southeast2" }, async
     res.status(500).send("Firestore access failed");
   }
 });
+
+export const notifyNearbyPlayersOnAvailabilityCreate = onDocumentCreated(
+  "availabilities/{availabilityId}",
+  async (event) => {
+    const availabilityId = event.params.availabilityId as string;
+    await createAvailabilityAlertsForOpenAvailability(
+      availabilityId,
+      event.data?.data() as FirebaseFirestore.DocumentData | undefined
+    );
+  }
+);
+
+export const notifyNearbyPlayersOnAvailabilityReopen = onDocumentUpdated(
+  "availabilities/{availabilityId}",
+  async (event) => {
+    const availabilityId = event.params.availabilityId as string;
+    const before = event.data?.before?.data() as FirebaseFirestore.DocumentData | undefined;
+    const after = event.data?.after?.data() as FirebaseFirestore.DocumentData | undefined;
+
+    if (!after) return;
+
+    const beforeStatus = typeof before?.status === "string" ? before.status : null;
+    const afterStatus = typeof after.status === "string" ? after.status : null;
+
+    if (afterStatus !== "open") return;
+    if (beforeStatus === "open") return;
+
+    await createAvailabilityAlertsForOpenAvailability(availabilityId, after);
+  }
+);
+
 export const processCompletedMatch = onDocumentCreated(
   "completed_matches/{matchId}",
   async (event) => {
@@ -2248,5 +2537,3 @@ try {
 
 
 export { sendEventRemindersV2 };
-
-

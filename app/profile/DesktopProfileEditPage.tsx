@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, updateProfile } from "firebase/auth";
 import {
   doc,
   getDoc,
@@ -12,6 +12,12 @@ import {
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { auth, db, storage } from "@/lib/firebaseConfig";
+import {
+  PROFILE_FULL_PATH,
+  PROFILE_THUMB_PATH,
+  cleanupLegacyProfilePhotos,
+  resolveProfilePhoto,
+} from "@/lib/profilePhoto";
 
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import type { SkillBand } from "@/lib/skills";
@@ -155,8 +161,8 @@ setFormData({
   rating: typeof ratingNumber === "number" ? ratingNumber : "",
   availability: normalizeAvailability(data.availability),
   bio: data.bio || "",
-  photoURL: data.photoURL || "",
-  photoThumbURL: data.photoThumbURL || "",
+  photoURL: typeof data.photoURL === "string" ? data.photoURL : "",
+  photoThumbURL: resolveProfilePhoto(data) || "",
   birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
   gender: typeof data.gender === "string" ? data.gender : "",
   isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
@@ -164,7 +170,8 @@ setFormData({
 });
 
       originalPostcodeRef.current = String(data.postcode || "").trim();
-      if (data.photoURL) setPreviewURL(data.photoURL);
+      const currentPhoto = resolveProfilePhoto(data);
+      if (currentPhoto) setPreviewURL(currentPhoto);
 
       setLoading(false);
     });
@@ -273,7 +280,9 @@ const handleRemovePhoto = async () => {
     setDeletingAccount(true);
 
     // Best-effort storage cleanup (same pattern as ProfileContent)
-    await deleteObject(ref(storage, `profile_pictures/${uid}/profile.jpg`)).catch(() => {});
+    await deleteObject(ref(storage, PROFILE_FULL_PATH(uid))).catch(() => {});
+    await deleteObject(ref(storage, PROFILE_THUMB_PATH(uid))).catch(() => {});
+    await cleanupLegacyProfilePhotos(storage, uid);
 
     // ✅ Use existing callable
     const fn = httpsCallable(getFunctionsClient(), "deleteMyAccount");
@@ -335,10 +344,13 @@ let photoURL = formData.photoURL;
 let photoThumbURL = formData.photoThumbURL || formData.photoURL;
 
 if (croppedImage) {
-  const refSt = ref(storage, `profile_pictures/${user.uid}/profile-${Date.now()}.jpg`);
-  await uploadBytes(refSt, croppedImage);
-  photoURL = await getDownloadURL(refSt);
-  photoThumbURL = photoURL;
+  const fullRef = ref(storage, PROFILE_FULL_PATH(user.uid));
+  const thumbRef = ref(storage, PROFILE_THUMB_PATH(user.uid));
+  await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
+  await uploadBytes(thumbRef, croppedImage, { contentType: "image/jpeg" });
+  photoURL = await getDownloadURL(fullRef);
+  photoThumbURL = await getDownloadURL(thumbRef);
+  await cleanupLegacyProfilePhotos(storage, user.uid);
 }
 
 const playerPayload = {
@@ -371,13 +383,31 @@ const userPayload = {
   name: formData.name || "",
   photoURL,
   photoThumbURL,
+  avatar: photoThumbURL || photoURL || null,
   updatedAt: serverTimestamp(),
 };
 
 await Promise.all([
-  setDoc(doc(db, "players", user.uid), playerPayload, { merge: true }),
+  setDoc(
+    doc(db, "players", user.uid),
+    {
+      ...playerPayload,
+      avatar: photoThumbURL || photoURL || null,
+      photoUpdatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  ),
   setDoc(doc(db, "users", user.uid), userPayload, { merge: true }),
 ]);
+
+if (auth.currentUser) {
+  await updateProfile(auth.currentUser, {
+    photoURL: photoThumbURL || photoURL || null,
+    displayName: formData.name || auth.currentUser.displayName || null,
+  }).catch((error) => {
+    console.warn("[DesktopProfileEdit] auth profile sync skipped", error);
+  });
+}
 
       setFormData((p) => ({
   ...p,

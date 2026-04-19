@@ -9,6 +9,7 @@ import { collection, query, where, onSnapshot, getDoc, doc } from "firebase/fire
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import NotificationBell from "@/components/notifications/NotificationBell";
+import { resolveProfilePhoto } from "@/lib/profilePhoto";
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<any>(null);
@@ -35,12 +36,12 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
         await u.reload();
         setUser(auth.currentUser);
 
-        if (u.photoURL) {
-          setPhotoURL(u.photoURL);
-        } else {
-          const playerDoc = await getDoc(doc(db, "players", u.uid));
-          setPhotoURL(playerDoc.exists() ? playerDoc.data().photoURL || null : null);
-        }
+        const playerDoc = await getDoc(doc(db, "players", u.uid));
+        setPhotoURL(
+          playerDoc.exists()
+            ? resolveProfilePhoto(playerDoc.data())
+            : u.photoURL || null
+        );
 
         // Footer badge: unread match_requests addressed to this user
         unsubMR = onSnapshot(

@@ -54,6 +54,26 @@ type Match = {
   startedAt?: any;
 };
 
+type HistoryMatch = {
+  id: string;
+  matchRequestId?: string | null;
+  fromUserId?: string | null;
+  toUserId?: string | null;
+  fromName?: string | null;
+  toName?: string | null;
+  fromPhotoURL?: string | null;
+  toPhotoURL?: string | null;
+  winnerId?: string | null;
+  score?: string | null;
+  status?: string | null;
+  completed?: boolean;
+  completedAt?: any;
+  updatedAt?: any;
+  playedDate?: string | null;
+  matchType?: string | null;
+  location?: string | null;
+};
+
 type PCMap = Record<string, { lat: number; lng: number }>;
 type LatLng = { lat: number; lng: number };
 
@@ -69,6 +89,65 @@ type PlayerLite = {
   skillBandLabel?: string | null;
   skillLevel?: string | null;
   availability?: string[] | null;
+};
+
+type ChipTone = "neutral" | "success" | "brand";
+
+const Chip = ({
+  tone = "neutral",
+  children,
+}: {
+  tone?: ChipTone;
+  children: React.ReactNode;
+}) => {
+  const toneCls =
+    tone === "success"
+      ? "bg-green-50 text-green-700 ring-green-200"
+      : tone === "brand"
+      ? "bg-blue-50 text-blue-700 ring-blue-200"
+      : "bg-gray-100 text-gray-700 ring-gray-200";
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-[3px] text-[11px] leading-[1] ring-1 ${toneCls}`}
+    >
+      {children}
+    </span>
+  );
+};
+
+const isAcceptedStatus = (status?: string | null) =>
+  status === "accepted" || status === "confirmed";
+
+const isCompletedStatus = (status?: string | null) => status === "completed";
+
+const isPendingStatus = (status?: string | null) =>
+  !isAcceptedStatus(status) && !isCompletedStatus(status);
+
+const toDateOrNull = (value: any): Date | null => {
+  if (!value) return null;
+  if (typeof value?.toDate === "function") return value.toDate();
+  if (value instanceof Date) return value;
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+};
+
+const formatHistoryDate = (completedAt?: any, playedDate?: string | null) => {
+  const date = toDateOrNull(completedAt) ?? toDateOrNull(playedDate);
+  if (!date) return "Date TBC";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+};
+
+const formatMatchType = (value?: string | null) => {
+  if (!value) return "Match";
+  return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
 function getDistanceFromLatLonInKm(
@@ -136,18 +215,21 @@ export default function DesktopMatches() {
   const searchParams = useSearchParams();
 
   // URL-driven defaults (same behavior as mobile)
-  const initialTab = searchParams.get("tab") === "accepted" ? "accepted" : "pending";
+  const initialTab = ((): "pending" | "accepted" | "history" => {
+    const value = searchParams.get("tab");
+    if (value === "accepted" || value === "history") return value;
+    return "pending";
+  })();
   const initialDir = ((): "all" | "received" | "sent" => {
     const v = searchParams.get("dir");
     return v === "received" || v === "sent" || v === "all" ? v : "all";
   })();
 
-const [tab, setTab] = useState<"pending" | "accepted">(
-  initialTab === "accepted" ? "accepted" : "pending"
-);
+const [tab, setTab] = useState<"pending" | "accepted" | "history">(initialTab);
   const [direction, setDirection] = useState<"all" | "received" | "sent">(initialDir);
 
   const [matches, setMatches] = useState<Match[]>([]);
+  const [historyMatches, setHistoryMatches] = useState<HistoryMatch[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const [queryText, setQueryText] = useState(searchParams.get("q") || "");
@@ -155,6 +237,9 @@ const [tab, setTab] = useState<"pending" | "accepted">(
   const [postcodeCoords, setPostcodeCoords] = useState<PCMap>({});
   const [oppCache, setOppCache] = useState<Record<string, PlayerLite | null>>({});
   const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [rematchingId, setRematchingId] = useState<string | null>(null);
+  const [requestedRematches, setRequestedRematches] = useState<Record<string, boolean>>({});
 
   const [chatPrompt, setChatPrompt] = useState<{
     matchId: string;
@@ -330,7 +415,7 @@ const [tab, setTab] = useState<"pending" | "accepted">(
   useEffect(() => {
     const targets = matches
       .filter((m) => {
-        if (m.status !== "accepted") return false;
+        if (!isAcceptedStatus(m.status)) return false;
 
         const missing =
           m.suggestedCourtLat == null ||
@@ -439,7 +524,7 @@ const [tab, setTab] = useState<"pending" | "accepted">(
     if (!currentUserId || !myPlayer?.postcode || matches.length === 0) return;
 
     const candidates = matches
-      .filter((m) => m.status === "accepted" && !m.suggestedCourtName)
+      .filter((m) => isAcceptedStatus(m.status) && !m.suggestedCourtName)
       .slice(0, 3);
 
     candidates.forEach((m) => computeSuggestionSilently(m));
@@ -465,7 +550,7 @@ const [tab, setTab] = useState<"pending" | "accepted">(
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
 
-    if (tab === "accepted") params.set("tab", "accepted");
+    if (tab === "accepted" || tab === "history") params.set("tab", tab);
     else params.delete("tab");
 
     if (direction !== "all") params.set("dir", direction);
@@ -518,6 +603,73 @@ setMyPlayer({
         setMyPlayer(null);
       }
     })();
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    setHistoryLoading(true);
+
+    const historyQ = query(
+      collection(db, "match_history"),
+      where("players", "array-contains", currentUserId)
+    );
+
+    const unsubHistory = onSnapshot(
+      historyQ,
+      (snap) => {
+        const next = snap.docs
+          .map((docSnap) => {
+            const d = docSnap.data() as DocumentData;
+            return {
+              id: docSnap.id,
+              matchRequestId:
+                typeof d.matchRequestId === "string" && d.matchRequestId.trim()
+                  ? d.matchRequestId
+                  : null,
+              fromUserId: d.fromUserId ?? null,
+              toUserId: d.toUserId ?? null,
+              fromName: d.fromName ?? null,
+              toName: d.toName ?? null,
+              fromPhotoURL: d.fromPhotoURL ?? null,
+              toPhotoURL: d.toPhotoURL ?? null,
+              winnerId: d.winnerId ?? null,
+              score: d.score ?? null,
+              status: d.status ?? null,
+              completed: d.completed === true || d.status === "completed",
+              completedAt: d.completedAt ?? null,
+              updatedAt: d.updatedAt ?? null,
+              playedDate: d.playedDate ?? null,
+              matchType: d.matchType ?? null,
+              location: d.location ?? null,
+            } as HistoryMatch;
+          })
+          .filter((m) => m.completed)
+          .sort((a, b) => {
+            const aTime =
+              toDateOrNull(a.completedAt)?.getTime() ??
+              toDateOrNull(a.playedDate)?.getTime() ??
+              toDateOrNull(a.updatedAt)?.getTime() ??
+              0;
+            const bTime =
+              toDateOrNull(b.completedAt)?.getTime() ??
+              toDateOrNull(b.playedDate)?.getTime() ??
+              toDateOrNull(b.updatedAt)?.getTime() ??
+              0;
+            return bTime - aTime;
+          });
+
+        setHistoryMatches(next);
+        setHistoryLoading(false);
+      },
+      (error) => {
+        console.error("Failed to load desktop match history", error);
+        setHistoryMatches([]);
+        setHistoryLoading(false);
+      }
+    );
+
+    return () => unsubHistory();
   }, [currentUserId]);
 
   /* -------------------------- Subscribe to my matches -------------------------- */
@@ -613,11 +765,18 @@ const unsubTo = onSnapshot(
 
   // Warm opponent cache
   useEffect(() => {
-    if (!currentUserId || matches.length === 0) return;
+    if (!currentUserId) return;
 
     const opponentIds = Array.from(
-      new Set(matches.map((m) => (m.playerId === currentUserId ? m.opponentId : m.playerId)))
+      new Set([
+        ...matches.map((m) => (m.playerId === currentUserId ? m.opponentId : m.playerId)),
+        ...historyMatches
+          .map((m) => (m.fromUserId === currentUserId ? m.toUserId : m.fromUserId))
+          .filter((id): id is string => !!id),
+      ])
     );
+
+    if (opponentIds.length === 0) return;
 
     opponentIds.forEach(async (uid) => {
       if (uid in oppCache) return;
@@ -651,7 +810,7 @@ const unsubTo = onSnapshot(
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matches, currentUserId]);
+  }, [matches, historyMatches, currentUserId]);
 
   /* -------------------------- Actions: accept / decline -------------------------- */
 
@@ -666,10 +825,60 @@ const unsubTo = onSnapshot(
       const snap = await getDoc(matchRef);
       if (!snap.exists()) throw new Error("Match no longer exists");
 
-      const { fromUserId, toUserId } = snap.data();
+      const data = snap.data() as any;
+      const { fromUserId, toUserId } = data;
+      const requestContext = typeof data.requestContext === "string" ? data.requestContext : null;
+      const availabilityInstanceId =
+        typeof data.availabilityInstanceId === "string" ? data.availabilityInstanceId : null;
       if (uid !== toUserId) throw new Error("Not the recipient");
 
       await updateDoc(matchRef, { status: "accepted", players: [fromUserId, toUserId] });
+
+      if (requestContext === "availability_interest" && availabilityInstanceId) {
+        const availabilityRef = doc(db, "availabilities", toUserId);
+        const availabilitySnap = await getDoc(availabilityRef);
+
+        if (availabilitySnap.exists()) {
+          const availabilityData = availabilitySnap.data() as any;
+          if (
+            availabilityData?.status === "open" &&
+            availabilityData?.instanceId === availabilityInstanceId
+          ) {
+            await updateDoc(availabilityRef, {
+              status: "matched",
+              matchedAt: serverTimestamp(),
+              matchedRequestId: matchId,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+
+        const relatedPendingQ = query(
+          collection(db, "match_requests"),
+          where("toUserId", "==", toUserId),
+          where("status", "==", "pending")
+        );
+        const relatedPendingSnap = await getDocs(relatedPendingQ);
+
+        const staleRequests = relatedPendingSnap.docs.filter((docSnap) => {
+          if (docSnap.id === matchId) return false;
+          const related = docSnap.data() as any;
+          return (
+            related?.requestContext === "availability_interest" &&
+            related?.availabilityInstanceId === availabilityInstanceId
+          );
+        });
+
+        await Promise.all(
+          staleRequests.map(async (docSnap) => {
+            await deleteDoc(docSnap.ref);
+
+            const notifQ = query(collection(db, "notifications"), where("matchId", "==", docSnap.id));
+            const notifSnap = await getDocs(notifQ);
+            await Promise.all(notifSnap.docs.map((notifDoc) => deleteDoc(notifDoc.ref)));
+          })
+        );
+      }
 
       track("match_request_accepted", {
         match_id: matchId,
@@ -754,6 +963,55 @@ const unsubTo = onSnapshot(
   [currentUserId]
 );
 
+  const handleRequestRematch = useCallback(async (history: HistoryMatch) => {
+    if (!currentUserId) return;
+
+    const opponentId =
+      history.fromUserId === currentUserId ? history.toUserId : history.fromUserId;
+    if (!opponentId) return;
+
+    const myName =
+      history.fromUserId === currentUserId
+        ? history.fromName || myPlayer?.name || "Player"
+        : history.toName || myPlayer?.name || "Player";
+    const opponentName =
+      history.fromUserId === currentUserId
+        ? history.toName || "Opponent"
+        : history.fromName || "Opponent";
+
+    try {
+      setRematchingId(history.id);
+
+      const newMatchRef = await addDoc(collection(db, "match_requests"), {
+        fromUserId: currentUserId,
+        toUserId: opponentId,
+        fromName: myName,
+        toName: opponentName,
+        status: "pending",
+        score: "",
+        winnerId: "",
+        completed: false,
+        createdAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, "notifications"), {
+        recipientId: opponentId,
+        message: `${myName} wants a rematch!`,
+        matchId: newMatchRef.id,
+        timestamp: serverTimestamp(),
+        read: false,
+        type: "rematch_request",
+      });
+
+      setRequestedRematches((prev) => ({ ...prev, [history.id]: true }));
+    } catch (error) {
+      console.error("Failed to request rematch", error);
+      alert("Could not request a rematch right now. Please try again.");
+    } finally {
+      setRematchingId(null);
+    }
+  }, [currentUserId, myPlayer?.name]);
+
 
   /* -------------------------- Sorting helpers -------------------------- */
 
@@ -787,8 +1045,9 @@ const unsubTo = onSnapshot(
     [myPlayer, postcodeCoords, oppCache, currentUserId]
   );
 
-  const accepted = useMemo(() => matches.filter((m) => m.status === "accepted"), [matches]);
-  const pending = useMemo(() => matches.filter((m) => m.status !== "accepted"), [matches]);
+  const accepted = useMemo(() => matches.filter((m) => isAcceptedStatus(m.status)), [matches]);
+  const pending = useMemo(() => matches.filter((m) => isPendingStatus(m.status)), [matches]);
+  const historyCount = useMemo(() => historyMatches.length, [historyMatches]);
 
 const visibleMatches = useMemo(() => {
   let base: Match[] = tab === "accepted" ? accepted : pending;
@@ -834,6 +1093,35 @@ const visibleMatches = useMemo(() => {
 
     return enriched.map((e) => e.m);
 }, [tab, accepted, pending, direction, currentUserId, unreadOnly, queryText, sortBy, distanceFor]);
+
+const visibleHistoryMatches = useMemo(() => {
+  const q = queryText.trim().toLowerCase();
+
+  const searched = !q
+    ? historyMatches
+    : historyMatches.filter((m) => {
+        const a = (m.fromName || "").toLowerCase();
+        const b = (m.toName || "").toLowerCase();
+        return a.includes(q) || b.includes(q);
+      });
+
+  const enriched = searched.map((m) => {
+    const createdMs =
+      toDateOrNull(m.completedAt)?.getTime() ??
+      toDateOrNull(m.playedDate)?.getTime() ??
+      toDateOrNull(m.updatedAt)?.getTime() ??
+      0;
+    return { m, createdMs };
+  });
+
+  enriched.sort((A, B) =>
+    sortBy === "oldest" ? A.createdMs - B.createdMs : B.createdMs - A.createdMs
+  );
+
+  return enriched.map((e) => e.m);
+}, [historyMatches, queryText, sortBy]);
+
+const isTabLoading = tab === "history" ? historyLoading : loading;
 
 
   /* -------------------------- Desktop UI derivations -------------------------- */
@@ -892,6 +1180,103 @@ const visibleMatches = useMemo(() => {
     [currentUserId, router]
   );
 
+  const renderHistoryMatch = useCallback((history: HistoryMatch) => {
+    if (!currentUserId) return null;
+
+    const otherId =
+      history.fromUserId === currentUserId ? history.toUserId : history.fromUserId;
+    if (!otherId) return null;
+
+    const other = oppCache[otherId];
+    const otherName =
+      other?.name ||
+      (history.fromUserId === currentUserId ? history.toName : history.fromName) ||
+      "Opponent";
+    const avatarSrc =
+      other?.photoThumbURL ||
+      other?.photoURL ||
+      (history.fromUserId === currentUserId ? history.toPhotoURL : history.fromPhotoURL) ||
+      "";
+    const initials = (otherName || "?").trim().charAt(0).toUpperCase();
+    const won = !!history.winnerId && history.winnerId === currentUserId;
+    const resultLabel = history.winnerId ? (won ? "Win" : "Loss") : "Played";
+    const resultTone: ChipTone = history.winnerId ? (won ? "success" : "neutral") : "brand";
+    const summaryLine = `${formatHistoryDate(history.completedAt, history.playedDate)} · ${formatMatchType(history.matchType)}`;
+    const detailsHref = `/matches/history/${history.id}`;
+    const rematchRequested = !!requestedRematches[history.id];
+
+    return (
+      <div
+        key={history.id}
+        className="rounded-3xl border border-black/10 bg-white p-5 shadow-sm"
+      >
+        <div className="flex items-start gap-4">
+          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-black/5">
+            {avatarSrc ? (
+              <Image
+                src={avatarSrc}
+                alt={otherName}
+                fill
+                sizes="56px"
+                className="object-cover"
+              />
+            ) : (
+              <div className="grid h-full w-full place-items-center text-base font-extrabold text-black/45">
+                {initials}
+              </div>
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="truncate text-base font-extrabold text-black">
+                  {otherName}
+                </div>
+                <div className="mt-1 text-sm text-black/55">{summaryLine}</div>
+                {history.location ? (
+                  <div className="mt-1 truncate text-sm text-black/40">{history.location}</div>
+                ) : null}
+              </div>
+
+              <div className="shrink-0 text-right">
+                <Chip tone={resultTone}>{resultLabel}</Chip>
+                <div className="mt-2 text-sm font-extrabold text-black/80">
+                  {history.score?.trim() || "No score"}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => router.push(detailsHref)}
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-black/55 hover:text-black/80"
+              >
+                Match Details
+                <ArrowRight className="h-4 w-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleRequestRematch(history)}
+                disabled={rematchRequested || rematchingId === history.id}
+                className="rounded-full px-4 py-2 text-sm font-extrabold text-[#0B3D2E] disabled:bg-black/5 disabled:text-black/35"
+                style={rematchRequested || rematchingId === history.id ? undefined : { background: "#39FF14" }}
+              >
+                {rematchRequested
+                  ? "Requested"
+                  : rematchingId === history.id
+                  ? "Sending..."
+                  : "Rematch"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }, [currentUserId, handleRequestRematch, oppCache, rematchingId, requestedRematches, router]);
+
   /* ----------------------------------- RENDER ----------------------------------- */
 
   const TM = {
@@ -947,13 +1332,21 @@ const visibleMatches = useMemo(() => {
                           color: TM.forest,
                         }}
                       >
-                        {tab === "accepted" ? accepted.length : pending.length}{" "}
-                        {tab === "accepted" ? "matches" : "requests"}
+                        {tab === "accepted"
+                          ? accepted.length
+                          : tab === "history"
+                          ? historyCount
+                          : pending.length}{" "}
+                        {tab === "accepted"
+                          ? "matches"
+                          : tab === "history"
+                          ? "results"
+                          : "requests"}
                       </span>
                     </div>
 
                     <div className="mt-1 text-[12px] text-gray-600">
-                      Manage your confirmed games and pending requests.
+                      Manage your confirmed games, pending requests, and match history.
                     </div>
                   </div>
 
@@ -984,54 +1377,79 @@ const visibleMatches = useMemo(() => {
                   </div>
                 </div>
 
-               <button
-  className={`pb-3 text-sm font-semibold ${
-    tab === "accepted"
-      ? "text-[#0B3D2E] border-b-2 border-[#39FF14]"
-      : "text-black/40"
-  }`}
-  onClick={() => setTab("accepted")}
->
-  <span className="inline-flex items-center gap-2">
-    Confirmed Matches
-    <span
-      className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-2 text-[11px] font-extrabold"
-      style={{
-        background: tab === "accepted" ? "#39FF14" : "rgba(11,61,46,0.10)",
-        color: "#0B3D2E",
-        border: "1px solid rgba(11,61,46,0.18)",
-      }}
-    >
-      {accepted.length}
-    </span>
-  </span>
-</button>
+                <div className="mt-6 flex items-center gap-8 border-b border-black/10">
+                  <button
+                    className={`pb-3 text-sm font-semibold ${
+                      tab === "accepted"
+                        ? "text-[#0B3D2E] border-b-2 border-[#39FF14]"
+                        : "text-black/40"
+                    }`}
+                    onClick={() => setTab("accepted")}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      Confirmed Matches
+                      <span
+                        className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-2 text-[11px] font-extrabold"
+                        style={{
+                          background: tab === "accepted" ? "#39FF14" : "rgba(11,61,46,0.10)",
+                          color: "#0B3D2E",
+                          border: "1px solid rgba(11,61,46,0.18)",
+                        }}
+                      >
+                        {accepted.length}
+                      </span>
+                    </span>
+                  </button>
 
-<button
-  className={`pb-3 text-sm font-semibold ${
-    tab === "pending"
-      ? "text-[#0B3D2E] border-b-2 border-[#39FF14]"
-      : "text-black/40"
-  }`}
-  onClick={() => setTab("pending")}
->
-  <span className="inline-flex items-center gap-2">
-    Pending Requests
-    <span
-      className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-2 text-[11px] font-extrabold"
-      style={{
-        background: tab === "pending" ? "#39FF14" : "rgba(11,61,46,0.10)",
-        color: "#0B3D2E",
-        border: "1px solid rgba(11,61,46,0.18)",
-      }}
-    >
-      {pending.length}
-    </span>
-  </span>
-</button>
+                  <button
+                    className={`pb-3 text-sm font-semibold ${
+                      tab === "pending"
+                        ? "text-[#0B3D2E] border-b-2 border-[#39FF14]"
+                        : "text-black/40"
+                    }`}
+                    onClick={() => setTab("pending")}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      Pending Requests
+                      <span
+                        className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-2 text-[11px] font-extrabold"
+                        style={{
+                          background: tab === "pending" ? "#39FF14" : "rgba(11,61,46,0.10)",
+                          color: "#0B3D2E",
+                          border: "1px solid rgba(11,61,46,0.18)",
+                        }}
+                      >
+                        {pending.length}
+                      </span>
+                    </span>
+                  </button>
+
+                  <button
+                    className={`pb-3 text-sm font-semibold ${
+                      tab === "history"
+                        ? "text-[#0B3D2E] border-b-2 border-[#39FF14]"
+                        : "text-black/40"
+                    }`}
+                    onClick={() => setTab("history")}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      Match History
+                      <span
+                        className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-2 text-[11px] font-extrabold"
+                        style={{
+                          background: tab === "history" ? "#39FF14" : "rgba(11,61,46,0.10)",
+                          color: "#0B3D2E",
+                          border: "1px solid rgba(11,61,46,0.18)",
+                        }}
+                      >
+                        {historyCount}
+                      </span>
+                    </span>
+                  </button>
+                </div>
 
                 {/* Content */}
-                {loading ? (
+                {isTabLoading ? (
                   <div className="mt-6 space-y-4">
                     <div className="h-[180px] rounded-3xl bg-white/70 ring-1 ring-black/10 animate-pulse" />
                     <div className="h-[220px] rounded-3xl bg-white/70 ring-1 ring-black/10 animate-pulse" />
@@ -1166,7 +1584,7 @@ const visibleMatches = useMemo(() => {
                       </div>
                     )}
                   </div>
-                ) : (
+                ) : tab === "pending" ? (
                   // PENDING
                   <div className="mt-6">
                     {visibleMatches.length === 0 ? (
@@ -1332,6 +1750,18 @@ const visibleMatches = useMemo(() => {
                       </div>
                     )}
                   </div>
+                ) : (
+                  <div className="mt-6">
+                    {visibleHistoryMatches.length === 0 ? (
+                      <div className="rounded-3xl bg-white ring-1 ring-black/10 p-6 text-sm text-black/55">
+                        No past matches yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {visibleHistoryMatches.map((m) => renderHistoryMatch(m))}
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* 🎾 Chat prompt modal (UNCHANGED) */}
@@ -1473,21 +1903,28 @@ const visibleMatches = useMemo(() => {
                   <div className="text-xs font-extrabold tracking-widest text-black/45">
                     COUNTS
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl bg-black/5 p-4">
-                      <div className="text-xs font-extrabold text-black/50">Confirmed</div>
-                      <div className="mt-1 text-2xl font-extrabold text-black/90">
-                        {accepted.length}
-                      </div>
+                    <div className="mt-3 grid grid-cols-3 gap-3">
+                      <div className="rounded-2xl bg-black/5 p-4">
+                        <div className="text-xs font-extrabold text-black/50">Confirmed</div>
+                        <div className="mt-1 text-2xl font-extrabold text-black/90">
+                          {accepted.length}
+                        </div>
                     </div>
 
-                    <div className="rounded-2xl bg-black/5 p-4">
-                      <div className="text-xs font-extrabold text-black/50">Pending</div>
-                      <div className="mt-1 text-2xl font-extrabold text-black/90">
-                        {pending.length}
+                      <div className="rounded-2xl bg-black/5 p-4">
+                        <div className="text-xs font-extrabold text-black/50">Pending</div>
+                        <div className="mt-1 text-2xl font-extrabold text-black/90">
+                          {pending.length}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl bg-black/5 p-4">
+                        <div className="text-xs font-extrabold text-black/50">History</div>
+                        <div className="mt-1 text-2xl font-extrabold text-black/90">
+                          {historyCount}
+                        </div>
                       </div>
                     </div>
-                  </div>
                 </div>
               </aside>
             </div>

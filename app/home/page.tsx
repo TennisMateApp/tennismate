@@ -38,6 +38,7 @@ import { Capacitor } from "@capacitor/core";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { trackEvent } from "@/lib/mixpanel";
+import { resolveProfilePhoto } from "@/lib/profilePhoto";
 
 
 const TM = {
@@ -276,11 +277,12 @@ function saveNextEventsCache(uid: string, data: CalendarEvent[]) {
 // -----------------------
 // Opponent profile cache (localStorage) - name + avatar
 // -----------------------
-const OPP_PROFILE_CACHE_KEY = "tm_opponentProfile_v5";
+const OPP_PROFILE_CACHE_KEY = "tm_opponentProfile_v6";
 const OPP_PROFILE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 type OpponentProfile = {
   name?: string;
+  photoThumbURL?: string | null;
   photoURL?: string | null;      // players.photoURL
   avatar?: string | null;        // optional fallback
 };
@@ -656,6 +658,7 @@ useEffect(() => {
           ? p.name.trim()
           : null;
 
+      const resolvedPhoto = resolveProfilePhoto(p);
       const thumb = typeof p.photoThumbURL === "string" ? p.photoThumbURL : null;
       const full = typeof p.photoURL === "string" ? p.photoURL : null;
       const avatar = typeof p.avatar === "string" ? p.avatar : null;
@@ -667,7 +670,7 @@ useEffect(() => {
         null;
 
       if (playerName) setUserName(playerName);
-      setAvatarUrl(thumb || full || avatar || authUser?.photoURL || null);
+      setAvatarUrl(resolvedPhoto || thumb || full || avatar || authUser?.photoURL || null);
 
       if (skill) {
         setLevelLabel(String(skill).toUpperCase());
@@ -787,7 +790,7 @@ const missing = opponentIds.filter((id) => {
   const cached = existing[id];
 
  const hasName = !!cached?.name;
-const hasPhoto = !!(cached?.photoURL || cached?.avatar);
+ const hasPhoto = !!(cached?.photoThumbURL || cached?.photoURL || cached?.avatar);
 
 
   // ✅ fetch if we are missing EITHER name OR photo
@@ -814,16 +817,18 @@ try {
       const pSnap = await getDoc(doc(db, "players", otherUid));
 
       if (!pSnap.exists()) {
-        fetched[otherUid] = { name: undefined, photoURL: null, avatar: null };
+        fetched[otherUid] = { name: undefined, photoThumbURL: null, photoURL: null, avatar: null };
         return;
       }
 
       const p: any = pSnap.data();
+      const resolvedPhoto = resolveProfilePhoto(p);
 
       fetched[otherUid] = {
         name: typeof p.name === "string" ? p.name : undefined,
+        photoThumbURL: resolvedPhoto,
         photoURL: typeof p.photoURL === "string" ? p.photoURL : null,
-        avatar: typeof p.avatar === "string" ? p.avatar : null,
+        avatar: resolvedPhoto,
       };
     })
   );
@@ -879,7 +884,7 @@ useEffect(() => {
   const missing = opponentIds.filter((id) => {
     const cached = existing[id];
     const hasName = !!cached?.name;
-    const hasPhoto = !!(cached?.photoURL || cached?.avatar);
+    const hasPhoto = !!(cached?.photoThumbURL || cached?.photoURL || cached?.avatar);
 
     if (hasName && hasPhoto) return false;
     if (fetchingNamesRef.current.has(id)) return false;
@@ -902,18 +907,20 @@ useEffect(() => {
           try {
             const pSnap = await getDoc(doc(db, "players", otherUid));
             if (!pSnap.exists()) {
-              fetched[otherUid] = { name: undefined, photoURL: null, avatar: null };
+              fetched[otherUid] = { name: undefined, photoThumbURL: null, photoURL: null, avatar: null };
               return;
             }
 
             const p: any = pSnap.data();
+            const resolvedPhoto = resolveProfilePhoto(p);
             fetched[otherUid] = {
               name: typeof p.name === "string" ? p.name : undefined,
+              photoThumbURL: resolvedPhoto,
               photoURL: typeof p.photoURL === "string" ? p.photoURL : null,
-              avatar: typeof p.avatar === "string" ? p.avatar : null,
+              avatar: resolvedPhoto,
             };
           } catch {
-            fetched[otherUid] = { name: undefined, photoURL: null, avatar: null };
+            fetched[otherUid] = { name: undefined, photoThumbURL: null, photoURL: null, avatar: null };
           }
         })
       );
@@ -1456,9 +1463,8 @@ style={{
 <div className="mt-2 flex items-center gap-2 text-xs text-black/60">
   <GiTennisBall className="h-4 w-4" style={{ color: matchAccent }} />
   <span>Tap to view profile</span>
-</div>
-
-</div>
+          </div>
+        </div>
 
 
             {/* neon underline */}

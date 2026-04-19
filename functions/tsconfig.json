@@ -13,9 +13,12 @@
     "sourceMap": true,
     "strict": true,
     "target": "es2017",
+    "lib": ["es2022"],
     "skipLibCheck": true,
     "esModuleInterop": true,
     "moduleResolution": "nodenext",
-    "noUnusedLocals": true
+    "noUnusedLocals": true,
+    "types": ["node"],
+    "typeRoots": ["./node_modules/@types"]
   }
 }

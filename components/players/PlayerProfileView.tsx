@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db } from "@/lib/firebase";
+import { db } from "@/lib/firebaseConfig";
 import {
   doc,
   getDoc,
@@ -16,10 +16,11 @@ import {
 } from "firebase/firestore";
 import Image from "next/image";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth } from "@/lib/firebaseConfig";
 import { CalendarDays, CheckCircle2, Trophy } from "lucide-react";
 import type { SkillBand } from "@/lib/skills";
 import { SKILL_OPTIONS, skillFromUTR } from "@/lib/skills";
+import { resolveProfilePhoto } from "@/lib/profilePhoto";
 
 const TM = {
   forest: "#0B3D2E",
@@ -156,7 +157,7 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
             skillLevel: computedSkillLabel,
             availability: d.availability || [],
             bio: d.bio || "",
-            photoURL: d.photoURL,
+            photoURL: resolveProfilePhoto(d) || undefined,
             gender: typeof d.gender === "string" ? d.gender : null,
             skillRating: ratingNumber,
             utr: d.utr ?? null,

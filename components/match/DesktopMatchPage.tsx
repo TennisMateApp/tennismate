@@ -127,10 +127,39 @@ setActivityFilter: (v: ActivityFilter) => void;
 
   hideContacted: boolean;
   setHideContacted: (v: boolean) => void;
+  matchSurface: "players" | "availability";
+  setMatchSurface: (v: "players" | "availability") => void;
+  activeAvailability: {
+    dateLabel: string;
+    timeLabel: string;
+    postcode: string;
+    radiusLabel: string;
+    matchTypeLabel: string;
+    note: string;
+  } | null;
+  browseAvailabilityCards: Array<{
+    id: string;
+    userId: string;
+    availabilityInstanceId: string;
+    name: string;
+    photoURL?: string | null;
+    postcode?: string | null;
+    skillLabel: string;
+    distanceLabel: string;
+    dateLabel: string;
+    timeLabel: string;
+    matchTypeLabel: string;
+    note?: string;
+  }>;
+  sentRequestUserIds: Set<string>;
+  sendingRequestUserIds: Set<string>;
+  pendingAvailabilityInterestKeys: Set<string>;
 
   onLoadMore: () => void;
   onInvite: (match: any) => void;
   onViewProfile: (id: string) => void;
+  onOpenAvailabilityRequest: () => void;
+  onOpenAvailabilityActions: () => void;
 
   profileOpenId: string | null;
   setProfileOpenId: (id: string | null) => void;
@@ -154,14 +183,23 @@ setActivityFilter: (v: ActivityFilter) => void;
     setAgeBand,
     genderFilter,
     setGenderFilter,
-     activityFilter,
+    activityFilter,
     setActivityFilter,
     hideContacted,
     setHideContacted,
+    matchSurface,
+    setMatchSurface,
+    activeAvailability,
+    browseAvailabilityCards,
+    sentRequestUserIds,
+    sendingRequestUserIds,
+    pendingAvailabilityInterestKeys,
 
     onLoadMore,
     onInvite,
     onViewProfile,
+    onOpenAvailabilityRequest,
+    onOpenAvailabilityActions,
 
     profileOpenId,
     setProfileOpenId,
@@ -296,11 +334,188 @@ const handleInvite = useCallback(
                   Recommended tennis players based on your profile, distance and availability.
                 </div>
               </div>
+
+              <button
+                type="button"
+                onClick={onOpenAvailabilityRequest}
+                className="shrink-0 rounded-full px-4 py-2.5 text-sm font-extrabold"
+                style={{
+                  background: TM.forest,
+                  color: "white",
+                  boxShadow: "0 10px 24px rgba(11,61,46,0.18)",
+                }}
+              >
+                Post Availability
+              </button>
             </div>
 
             {/* GRID */}
             <main className="mt-6">
-              {visibleMatches.length === 0 ? (
+              <div className="mb-5 inline-flex rounded-full bg-white p-1 ring-1 ring-black/10">
+                <button
+                  type="button"
+                  onClick={() => setMatchSurface("players")}
+                  className="rounded-full px-4 py-2 text-sm font-extrabold transition"
+                  style={
+                    matchSurface === "players"
+                      ? { background: TM.neon, color: TM.forest }
+                      : { background: "transparent", color: "rgba(11,61,46,0.62)" }
+                  }
+                >
+                  Players
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatchSurface("availability")}
+                  className="rounded-full px-4 py-2 text-sm font-extrabold transition"
+                  style={
+                    matchSurface === "availability"
+                      ? { background: TM.neon, color: TM.forest }
+                      : { background: "transparent", color: "rgba(11,61,46,0.62)" }
+                  }
+                >
+                  Availabilities
+                </button>
+              </div>
+
+              {matchSurface === "availability" ? (
+                <div className="space-y-5">
+                  {activeAvailability ? (
+                    <button
+                      type="button"
+                      onClick={onOpenAvailabilityActions}
+                      className="w-full rounded-3xl border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-black/45">
+                            My Availability
+                          </div>
+                          <div className="mt-2 text-xl font-black text-[#0B3D2E]">
+                            {activeAvailability.dateLabel}
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-black/60">
+                            {activeAvailability.timeLabel} | {activeAvailability.matchTypeLabel}
+                          </div>
+                        </div>
+
+                        <span
+                          className="rounded-full px-3 py-1 text-xs font-extrabold"
+                          style={{ background: "rgba(57,255,20,0.16)", color: TM.forest }}
+                        >
+                          Looking
+                        </span>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-black/65">
+                        <div className="rounded-2xl bg-[#F6F7F8] px-4 py-3">
+                          {activeAvailability.postcode} | {activeAvailability.radiusLabel}
+                        </div>
+                        <div className="rounded-2xl bg-[#F6F7F8] px-4 py-3">
+                          {activeAvailability.note || "No note added"}
+                        </div>
+                      </div>
+                      <div className="mt-4 text-xs font-extrabold uppercase tracking-[0.16em] text-black/45">
+                        Tap to edit or cancel
+                      </div>
+                    </button>
+                  ) : (
+                    <div className="rounded-3xl border bg-white p-6 shadow-sm">
+                      <div className="text-lg font-black text-[#0B3D2E]">No live availability yet</div>
+                      <div className="mt-2 text-sm text-black/60">
+                        Post a time you want to play and browse other open requests here.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={onOpenAvailabilityRequest}
+                        className="mt-4 rounded-full px-4 py-3 text-sm font-extrabold"
+                        style={{ background: TM.forest, color: "#FFFFFF" }}
+                      >
+                        Post Availability
+                      </button>
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="mb-3 text-[11px] font-extrabold uppercase tracking-[0.16em] text-black/45">
+                      Browse Open Requests
+                    </div>
+                    <div className="mb-4 text-sm text-black/60">
+                      Explore players who are already looking to play and raise your hand when someone fits.
+                    </div>
+
+                    {browseAvailabilityCards.length === 0 ? (
+                      <div className="rounded-3xl border bg-white p-6 shadow-sm text-sm text-black/60">
+                        No open availability requests are live right now.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-5 2xl:grid-cols-3">
+                        {browseAvailabilityCards.map((card) => (
+                          <div key={card.id} className="rounded-3xl border bg-white p-5 shadow-sm">
+                            {(() => {
+                              const recipientUid = card.userId;
+                              const interestKey = `${recipientUid}:${card.availabilityInstanceId}`;
+                              const alreadySent = pendingAvailabilityInterestKeys.has(interestKey);
+                              const sending = sendingRequestUserIds.has(recipientUid);
+
+                              return (
+                                <>
+                            <div className="flex items-start gap-3">
+                              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-black/5">
+                                {card.photoURL ? (
+                                  <Image src={card.photoURL} alt={card.name} fill sizes="56px" className="object-cover" />
+                                ) : (
+                                  <div className="grid h-full w-full place-items-center text-lg font-extrabold text-black/40">
+                                    {(card.name || "?").charAt(0).toUpperCase()}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-base font-extrabold text-[#0B3D2E]">{card.name}</div>
+                                <div className="mt-1 text-sm font-semibold text-black/55">
+                                  {card.dateLabel} | {card.timeLabel}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <span className="rounded-full bg-[#F6F7F8] px-3 py-1 text-xs font-extrabold text-[#0B3D2E]">
+                                {card.matchTypeLabel}
+                              </span>
+                              <span className="rounded-full bg-[#F6F7F8] px-3 py-1 text-xs font-extrabold text-[#0B3D2E]">
+                                {card.skillLabel}
+                              </span>
+                            </div>
+
+                            <div className="mt-3 space-y-1 text-sm text-black/60">
+                              <div>{card.distanceLabel}{card.postcode ? ` | ${card.postcode}` : ""}</div>
+                              <div>{card.note || "Open to a casual hit."}</div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => onInvite(card)}
+                              disabled={alreadySent || sending}
+                              className="mt-4 w-full rounded-full py-3 text-sm font-extrabold"
+                              style={{
+                                background: alreadySent ? "rgba(11,61,46,0.10)" : TM.neon,
+                                color: alreadySent ? "rgba(11,61,46,0.60)" : TM.forest,
+                                opacity: sending ? 0.75 : 1,
+                              }}
+                            >
+                              {sending ? "Sending..." : alreadySent ? "Request Sent" : "I'm Interested"}
+                            </button>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : visibleMatches.length === 0 ? (
   <div className="rounded-2xl border bg-white p-6 shadow-sm text-sm text-gray-700">
     No matches found yet. Try adjusting your filters.
   </div>
