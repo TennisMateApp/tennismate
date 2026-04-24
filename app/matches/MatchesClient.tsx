@@ -395,6 +395,7 @@ useEffect(() => {
 const acceptMatch = async (matchId: string, currentUserId: string) => {
   // Snapshot of previous status (for revert)
   const prevStatus = matches.find((m) => m.id === matchId)?.status;
+  let acceptedPersisted = false;
 
   try {
     setAcceptingId(matchId);
@@ -415,20 +416,25 @@ const acceptMatch = async (matchId: string, currentUserId: string) => {
       status: "accepted",
       players: [fromUserId, toUserId],
     });
+    acceptedPersisted = true;
 
-    await Promise.all([
-      setDoc(doc(db, "players", toUserId), { badges: arrayUnion("firstMatch") }, { merge: true }),
-      setDoc(doc(db, "players", fromUserId), { badges: arrayUnion("firstMatch") }, { merge: true }),
-    ]);
+    try {
+      await setDoc(doc(db, "players", toUserId), { badges: arrayUnion("firstMatch") }, { merge: true });
+      // TODO: Award the sender's first-match badge from a Cloud Function triggered by match_requests status changing to accepted.
+    } catch (badgeError) {
+      console.warn("Failed to award local first-match badge after accept:", badgeError);
+    }
   } catch (err) {
     console.error("❌ Error accepting match:", err);
-    // Revert optimistic flip
-    setMatches((prev) =>
-      prev.map((m) =>
-        m.id === matchId ? { ...m, status: prevStatus ?? "pending" } : m
-      )
-    );
-    alert("Could not accept the request. Please try again.");
+    if (!acceptedPersisted) {
+      // Revert optimistic flip
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.id === matchId ? { ...m, status: prevStatus ?? "pending" } : m
+        )
+      );
+      alert("Could not accept the request. Please try again.");
+    }
   } finally {
     setAcceptingId(null);
   }

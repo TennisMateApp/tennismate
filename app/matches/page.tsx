@@ -1007,6 +1007,7 @@ setOppCache((prev) => ({
 // Accept a match and award badge + prompt to chat
 const acceptMatch = async (matchId: string, currentUserId: string) => {
   const prevStatus = matches.find((m) => m.id === matchId)?.status;
+  let acceptedPersisted = false;
 
   try {
     setAcceptingId(matchId);
@@ -1040,6 +1041,7 @@ const responseHours =
   players: [fromUserId, toUserId],
   acceptedAt: serverTimestamp(),
 });
+acceptedPersisted = true;
 
 if (requestContext === "availability_interest" && availabilityInstanceId) {
   const availabilityRef = doc(db, "availabilities", toUserId);
@@ -1100,18 +1102,16 @@ if (requestContext === "availability_interest" && availabilityInstanceId) {
   responseHours,
 });
 
-    await Promise.all([
-      setDoc(
+    try {
+      await setDoc(
         doc(db, "players", toUserId),
         { badges: arrayUnion("firstMatch") },
         { merge: true }
-      ),
-      setDoc(
-        doc(db, "players", fromUserId),
-        { badges: arrayUnion("firstMatch") },
-        { merge: true }
-      ),
-    ]);
+      );
+      // TODO: Award the sender's first-match badge from a Cloud Function triggered by match_requests status changing to accepted.
+    } catch (badgeError) {
+      console.warn("Failed to award local first-match badge after accept:", badgeError);
+    }
 
     const localMatch = matches.find((m) => m.id === matchId);
     if (localMatch) {
@@ -1136,13 +1136,15 @@ if (requestContext === "availability_interest" && availabilityInstanceId) {
   } catch (err) {
     console.error("❌ Error accepting match:", err);
 
-    setMatches((prev) =>
-      prev.map((m) =>
-        m.id === matchId ? { ...m, status: prevStatus ?? "pending" } : m
-      )
-    );
+    if (!acceptedPersisted) {
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.id === matchId ? { ...m, status: prevStatus ?? "pending" } : m
+        )
+      );
 
-    alert("Could not accept the request. Please try again.");
+      alert("Could not accept the request. Please try again.");
+    }
   } finally {
     setAcceptingId(null);
   }

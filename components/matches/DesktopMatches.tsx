@@ -816,6 +816,7 @@ const unsubTo = onSnapshot(
 
   const acceptMatch = async (matchId: string, uid: string) => {
     const prevStatus = matches.find((m) => m.id === matchId)?.status;
+    let acceptedPersisted = false;
 
     try {
       // optimistic
@@ -833,6 +834,7 @@ const unsubTo = onSnapshot(
       if (uid !== toUserId) throw new Error("Not the recipient");
 
       await updateDoc(matchRef, { status: "accepted", players: [fromUserId, toUserId] });
+      acceptedPersisted = true;
 
       if (requestContext === "availability_interest" && availabilityInstanceId) {
         const availabilityRef = doc(db, "availabilities", toUserId);
@@ -886,10 +888,12 @@ const unsubTo = onSnapshot(
         to_user_id: toUserId,
       });
 
-      await Promise.all([
-        setDoc(doc(db, "players", toUserId), { badges: arrayUnion("firstMatch") }, { merge: true }),
-        setDoc(doc(db, "players", fromUserId), { badges: arrayUnion("firstMatch") }, { merge: true }),
-      ]);
+      try {
+        await setDoc(doc(db, "players", toUserId), { badges: arrayUnion("firstMatch") }, { merge: true });
+        // TODO: Award the sender's first-match badge from a Cloud Function triggered by match_requests status changing to accepted.
+      } catch (badgeError) {
+        console.warn("Failed to award local first-match badge after accept:", badgeError);
+      }
 
       // prompt to chat
       const localMatch = matches.find((m) => m.id === matchId);
@@ -910,10 +914,12 @@ const unsubTo = onSnapshot(
       }
     } catch (err) {
       console.error("❌ Error accepting match:", err);
-      setMatches((prev) =>
-        prev.map((m) => (m.id === matchId ? { ...m, status: prevStatus ?? "pending" } : m))
-      );
-      alert("Could not accept the request. Please try again.");
+      if (!acceptedPersisted) {
+        setMatches((prev) =>
+          prev.map((m) => (m.id === matchId ? { ...m, status: prevStatus ?? "pending" } : m))
+        );
+        alert("Could not accept the request. Please try again.");
+      }
     }
   };
 
