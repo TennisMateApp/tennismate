@@ -1,12 +1,22 @@
 import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
-import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
+import {
+  onDocumentCreated,
+  onDocumentUpdated,
+  onDocumentWritten,
+} from "firebase-functions/v2/firestore";
 import { sendEventRemindersV2 } from "./eventReminders";
 import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import * as crypto from "crypto";
 import { pubsub } from "firebase-functions/v1";
 import { fetchNearbyPlayersForUser } from "./nearbyPlayers";
 import { fetchSuggestedCourtsForInvite } from "./suggestedCourtsForInvite";
+import {
+  affectedUserIdsFromCompletedMatch,
+  affectedUserIdsFromMatchHistory,
+  affectedUserIdsFromMatchRequest,
+  recomputePlayerPublicStats,
+} from "./playerPublicStats";
 
 
 // ✅ Set correct region for Firestore: australia-southeast2
@@ -16,6 +26,38 @@ if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 const db = admin.firestore();
+
+async function recomputePublicStatsForUids(
+  uids: string[],
+  source: string,
+  context: Record<string, unknown> = {}
+) {
+  const uniqueUids = Array.from(new Set(uids.filter(Boolean)));
+  if (!uniqueUids.length) return;
+
+  await Promise.all(
+    uniqueUids.map(async (uid) => {
+      try {
+        const stats = await recomputePlayerPublicStats(uid);
+        console.log("[player_public_stats] recomputed", {
+          source,
+          uid,
+          context,
+          acceptedMatches: stats.acceptedMatches,
+          completedMatches: stats.completedMatches,
+          wins: stats.wins,
+        });
+      } catch (error) {
+        console.error("[player_public_stats] recompute failed", {
+          source,
+          uid,
+          context,
+          error,
+        });
+      }
+    })
+  );
+}
 
 // -------------------- MATCH INVITE → CALENDAR SYNC HELPERS --------------------
 
@@ -292,6 +334,54 @@ export const getSuggestedCourtsForInvite = onCall(async (request) => {
     searchRadiusKm?: number;
   });
 });
+
+export const syncPlayerPublicStatsOnMatchRequestWrite = onDocumentWritten(
+  "match_requests/{matchId}",
+  async (event) => {
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    const uids = [
+      ...affectedUserIdsFromMatchRequest(before),
+      ...affectedUserIdsFromMatchRequest(after),
+    ];
+
+    await recomputePublicStatsForUids(uids, "match_requests", {
+      matchId: event.params.matchId,
+    });
+  }
+);
+
+export const syncPlayerPublicStatsOnMatchHistoryWrite = onDocumentWritten(
+  "match_history/{historyId}",
+  async (event) => {
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    const uids = [
+      ...affectedUserIdsFromMatchHistory(before),
+      ...affectedUserIdsFromMatchHistory(after),
+    ];
+
+    await recomputePublicStatsForUids(uids, "match_history", {
+      historyId: event.params.historyId,
+    });
+  }
+);
+
+export const syncPlayerPublicStatsOnCompletedMatchWrite = onDocumentWritten(
+  "completed_matches/{docId}",
+  async (event) => {
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    const uids = [
+      ...affectedUserIdsFromCompletedMatch(before),
+      ...affectedUserIdsFromCompletedMatch(after),
+    ];
+
+    await recomputePublicStatsForUids(uids, "completed_matches", {
+      docId: event.params.docId,
+    });
+  }
+);
 
 export const deleteMyCoachProfile = onCall(async (request) => {
   const runId =

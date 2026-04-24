@@ -9,7 +9,6 @@ import {
   query,
   where,
   getDocs,
-  getCountFromServer,
   addDoc,
   serverTimestamp,
   updateDoc,
@@ -171,6 +170,26 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
           return;
         }
 
+        try {
+          const publicStatsSnap = await getDoc(doc(db, "player_public_stats", playerUserId));
+          const publicStats = publicStatsSnap.exists() ? (publicStatsSnap.data() as any) : null;
+
+          setMatchStats({
+            matches:
+              typeof publicStats?.acceptedMatches === "number" ? publicStats.acceptedMatches : 0,
+            completed:
+              typeof publicStats?.completedMatches === "number" ? publicStats.completedMatches : 0,
+            wins: typeof publicStats?.wins === "number" ? publicStats.wins : 0,
+          });
+        } catch (statsError) {
+          console.warn("Public player stats unavailable for profile view:", statsError);
+          setMatchStats({
+            matches: 0,
+            completed: 0,
+            wins: 0,
+          });
+        }
+
                 // ✅ Determine whether this player is pending or already accepted
         try {
           if (currentUid === playerUserId) {
@@ -235,69 +254,6 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
           setMatchRequestStatus("none");
           setPendingRequestDirection(null);
           setPendingRequestId(null);
-        }
-
-        const canLoadPrivateStats = currentUid === playerUserId;
-
-        if (!canLoadPrivateStats) {
-          setMatchStats({
-            matches: 0,
-            completed: 0,
-            wins: 0,
-          });
-          return;
-        }
-
-        try {
-          // Own-profile stats only. Public profiles must not depend on party-only/private collections.
-          const acceptedFromQ = query(
-            collection(db, "match_requests"),
-            where("fromUserId", "==", playerUserId),
-            where("status", "==", "accepted")
-          );
-          const acceptedToQ = query(
-            collection(db, "match_requests"),
-            where("toUserId", "==", playerUserId),
-            where("status", "==", "accepted")
-          );
-
-          const [acceptedFromCount, acceptedToCount] = await Promise.all([
-            getCountFromServer(acceptedFromQ),
-            getCountFromServer(acceptedToQ),
-          ]);
-
-          const acceptedMatchesCount =
-            (acceptedFromCount.data().count ?? 0) +
-            (acceptedToCount.data().count ?? 0);
-
-          const historyQ = query(
-            collection(db, "match_history"),
-            where("players", "array-contains", playerUserId)
-          );
-
-          const historySnap = await getDocs(historyQ);
-
-          let completed = 0;
-          let wins = 0;
-
-          historySnap.forEach((docSnap) => {
-            const match = docSnap.data() as any;
-            if (match.completed === true || match.status === "completed") completed++;
-            if (match.winnerId === playerUserId) wins++;
-          });
-
-          setMatchStats({
-            matches: acceptedMatchesCount,
-            completed,
-            wins,
-          });
-        } catch (statsError) {
-          console.warn("Player stats unavailable for profile view:", statsError);
-          setMatchStats({
-            matches: 0,
-            completed: 0,
-            wins: 0,
-          });
         }
       } catch (error) {
         console.error("Error loading player profile:", error);
