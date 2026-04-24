@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import debounce from "lodash.debounce";
 import { ArrowLeft, CalendarPlus, Info, Send } from "lucide-react";
-import { suggestCourt } from "@/lib/suggestCourt";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
+import { getSuggestedCourtsForInvite } from "@/lib/suggestedCourtsClient";
 
 import { db, auth } from "@/lib/firebaseConfig";
 import {
@@ -859,44 +859,13 @@ setShowInvite(true);
   setCourtError(null);
   setSuggestedCourt(null);
 
-  try {
-    const [meSnap, otherSnap] = await Promise.all([
-      getDoc(doc(db, "players", user.uid)),
-      getDoc(doc(db, "players", otherId)),
-    ]);
+ try {
+    const res = await getSuggestedCourtsForInvite({
+      conversationId: String(conversationID),
+      maxResults: 1,
+    });
 
-    const me = meSnap.exists() ? (meSnap.data() as any) : null;
-    const other = otherSnap.exists() ? (otherSnap.data() as any) : null;
-
-    const toNum = (v: any) => {
-      if (typeof v === "number") return v;
-      if (typeof v === "string" && v.trim() !== "" && !isNaN(Number(v))) return Number(v);
-      return null;
-    };
-
-    const meLat = toNum(me?.lat);
-    const meLng = toNum(me?.lng);
-    const otherLat = toNum(other?.lat);
-    const otherLng = toNum(other?.lng);
-
-    if (
-      typeof meLat !== "number" ||
-      typeof meLng !== "number" ||
-      typeof otherLat !== "number" ||
-      typeof otherLng !== "number"
-    ) {
-      setCourtError("Missing player location (lat/lng).");
-      return null;
-    }
-
-    // ✅ Correct signature + correct return shape
-    const res = await suggestCourt(
-      { lat: meLat, lng: meLng },
-      { lat: otherLat, lng: otherLng },
-      { maxResults: 1 }
-    );
-
-    const best = res?.results?.[0] || null;
+    const best = res?.courts?.[0] || null;
 
     if (!best) {
       setCourtError("No suitable court found.");

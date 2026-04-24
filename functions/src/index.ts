@@ -6,6 +6,7 @@ import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import * as crypto from "crypto";
 import { pubsub } from "firebase-functions/v1";
 import { fetchNearbyPlayersForUser } from "./nearbyPlayers";
+import { fetchSuggestedCourtsForInvite } from "./suggestedCourtsForInvite";
 
 
 // ✅ Set correct region for Firestore: australia-southeast2
@@ -276,6 +277,19 @@ export const getNearbyPlayers = onCall(async (request) => {
     radiusKm?: number;
     activeWithinHours?: number | null;
     limit?: number;
+  });
+});
+
+export const getSuggestedCourtsForInvite = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Authentication required.");
+  }
+
+  return fetchSuggestedCourtsForInvite(uid, (request.data || {}) as {
+    conversationId?: string;
+    maxResults?: number;
+    searchRadiusKm?: number;
   });
 });
 
