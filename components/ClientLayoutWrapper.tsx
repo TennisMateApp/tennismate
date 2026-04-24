@@ -164,6 +164,8 @@ const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
 const router = useRouter();
 const pathname = usePathname() || "";
 
+console.log("[LayoutWrapper] render start", { pathname });
+
 const isDesktop = useIsDesktop(1024);
 const isApp = Capacitor.isNativePlatform();
 const isDesktopWeb = isDesktop && !isApp;
@@ -452,7 +454,16 @@ useEffect(() => {
     const requireVerification = snap.exists() && snap.data()?.requireVerification === true;
     const needsVerify = requireVerification && !u.emailVerified;
 
+    console.log("[LayoutWrapper] verification gate check", {
+      pathname,
+      uid: u.uid,
+      requireVerification,
+      emailVerified: u.emailVerified,
+      needsVerify,
+    });
+
     if (needsVerify && !pathname?.startsWith("/verify-email")) {
+      console.log("[LayoutWrapper] redirecting to /verify-email", { pathname });
       router.replace("/verify-email");
     }
   })();
@@ -482,6 +493,14 @@ useEffect(() => {
 
   // 🔒 If incomplete, force them to complete profile before doing anything else
   if (profileComplete === false) {
+    console.log("[LayoutWrapper] redirecting incomplete profile to /profile?edit=true", {
+      pathname,
+      uid: user.uid,
+      profileComplete,
+      showVerify,
+      showAgeGate,
+      ageGateChecked,
+    });
     router.replace("/profile?edit=true");
   }
 }, [user, profileComplete, showVerify, showAgeGate, ageGateChecked, pathname, router]);
@@ -551,13 +570,26 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
     showVerify &&
     !pathname.startsWith("/verify-email");
 
-    const shouldHoldProtectedRender =
+const shouldHoldProtectedRender =
   !!user &&
   !PUBLIC_ROUTES.has(pathname || "") &&
   !pathname.startsWith("/verify-email") &&
   !profileGateReady;
 
+console.log("[LayoutWrapper] gate state", {
+  pathname,
+  hasUser: !!user,
+  profileComplete,
+  showVerify,
+  showAgeGate,
+  ageGateChecked,
+  profileGateReady,
+  shouldGateToVerify,
+  shouldHoldProtectedRender,
+});
+
 if (shouldGateToVerify) {
+  console.log("[LayoutWrapper] rendering verify gate", { pathname });
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-white">
       <BackButtonHandler />
@@ -570,6 +602,15 @@ if (shouldGateToVerify) {
 }
 
 if (shouldHoldProtectedRender) {
+  console.log("[LayoutWrapper] holding protected render before children mount", {
+    pathname,
+    hasUser: !!user,
+    profileGateReady,
+    profileComplete,
+    showVerify,
+    showAgeGate,
+    ageGateChecked,
+  });
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-white">
       <BackButtonHandler />

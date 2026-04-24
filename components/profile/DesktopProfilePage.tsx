@@ -233,6 +233,10 @@ export default function DesktopProfilePage() {
 
     const searchParams = useSearchParams();
   const isEditing = searchParams.get("edit") === "true";
+  console.log("[DesktopProfilePage] render start", {
+    isEditing,
+    search: searchParams.toString(),
+  });
 
 const [deletingAccount, setDeletingAccount] = useState(false);
 const [deleteError, setDeleteError] = useState<string | null>(null);

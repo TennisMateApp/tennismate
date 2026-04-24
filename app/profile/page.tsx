@@ -11,6 +11,12 @@ export default function ProfilePage() {
   const isDesktop = useIsDesktop();
   const editMode = searchParams.get("edit") === "true";
 
+  console.log("[ProfilePage] render start", {
+    isDesktop,
+    editMode,
+    search: searchParams.toString(),
+  });
+
   if (isDesktop && editMode) return <DesktopProfileEditPage />;
   if (isDesktop && !editMode) return <DesktopProfilePage />;
 

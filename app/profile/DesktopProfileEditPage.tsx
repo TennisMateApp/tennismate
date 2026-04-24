@@ -97,6 +97,7 @@ async function logFirestoreCall<T>(label: string, operation: () => Promise<T>): 
 
 export default function DesktopProfileEditPage() {
   const router = useRouter();
+  console.log("[DesktopProfileEditPage] render start");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");

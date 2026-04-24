@@ -124,6 +124,7 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
 
       const fetchPlayerAndStats = async (currentUid: string) => {
       let playerUserId: string = playerId;
+      let playerLoaded = false;
 
       try {
         const playerRef = doc(db, "players", playerId);
@@ -164,6 +165,7 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
             skillBand: d.skillBand ?? null,
             skillBandLabel: d.skillBandLabel ?? null,
           });
+          playerLoaded = true;
         } else {
           setPlayer(null);
           return;
@@ -235,53 +237,73 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
           setPendingRequestId(null);
         }
 
+        const canLoadPrivateStats = currentUid === playerUserId;
 
-        // Accepted matches count (sent + received)
-        const acceptedFromQ = query(
-          collection(db, "match_requests"),
-          where("fromUserId", "==", playerUserId),
-          where("status", "==", "accepted")
-        );
-        const acceptedToQ = query(
-          collection(db, "match_requests"),
-          where("toUserId", "==", playerUserId),
-          where("status", "==", "accepted")
-        );
+        if (!canLoadPrivateStats) {
+          setMatchStats({
+            matches: 0,
+            completed: 0,
+            wins: 0,
+          });
+          return;
+        }
 
-        const [acceptedFromCount, acceptedToCount] = await Promise.all([
-          getCountFromServer(acceptedFromQ),
-          getCountFromServer(acceptedToQ),
-        ]);
+        try {
+          // Own-profile stats only. Public profiles must not depend on party-only/private collections.
+          const acceptedFromQ = query(
+            collection(db, "match_requests"),
+            where("fromUserId", "==", playerUserId),
+            where("status", "==", "accepted")
+          );
+          const acceptedToQ = query(
+            collection(db, "match_requests"),
+            where("toUserId", "==", playerUserId),
+            where("status", "==", "accepted")
+          );
 
-        const acceptedMatchesCount =
-          (acceptedFromCount.data().count ?? 0) +
-          (acceptedToCount.data().count ?? 0);
+          const [acceptedFromCount, acceptedToCount] = await Promise.all([
+            getCountFromServer(acceptedFromQ),
+            getCountFromServer(acceptedToQ),
+          ]);
 
-        // Completed + wins (match_history)
-        const historyQ = query(
-          collection(db, "match_history"),
-          where("players", "array-contains", playerUserId)
-        );
+          const acceptedMatchesCount =
+            (acceptedFromCount.data().count ?? 0) +
+            (acceptedToCount.data().count ?? 0);
 
-        const historySnap = await getDocs(historyQ);
+          const historyQ = query(
+            collection(db, "match_history"),
+            where("players", "array-contains", playerUserId)
+          );
 
-        let completed = 0;
-        let wins = 0;
+          const historySnap = await getDocs(historyQ);
 
-        historySnap.forEach((docSnap) => {
-          const match = docSnap.data() as any;
-          if (match.completed === true || match.status === "completed") completed++;
-          if (match.winnerId === playerUserId) wins++;
-        });
+          let completed = 0;
+          let wins = 0;
 
-        setMatchStats({
-          matches: acceptedMatchesCount,
-          completed,
-          wins,
-        });
+          historySnap.forEach((docSnap) => {
+            const match = docSnap.data() as any;
+            if (match.completed === true || match.status === "completed") completed++;
+            if (match.winnerId === playerUserId) wins++;
+          });
+
+          setMatchStats({
+            matches: acceptedMatchesCount,
+            completed,
+            wins,
+          });
+        } catch (statsError) {
+          console.warn("Player stats unavailable for profile view:", statsError);
+          setMatchStats({
+            matches: 0,
+            completed: 0,
+            wins: 0,
+          });
+        }
       } catch (error) {
         console.error("Error loading player profile:", error);
-        setPlayer(null);
+        if (!playerLoaded) {
+          setPlayer(null);
+        }
       } finally {
         setLoading(false);
       }

@@ -136,6 +136,10 @@ export default function ProfileContent() {
   const router = useRouter();
   const isDesktop = useIsDesktop();
   const searchParams = useSearchParams();
+  console.log("[ProfileContent] render start", {
+    isDesktop,
+    search: searchParams.toString(),
+  });
   const [user, setUser] = useState<any>(null);
   const [userRole, setUserRole] = useState<string>("");
   const [coachInvited, setCoachInvited] = useState<boolean>(false);
