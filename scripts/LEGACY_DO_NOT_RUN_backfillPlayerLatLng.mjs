@@ -1,3 +1,6 @@
+// DO NOT RUN. Legacy script. This writes lat/lng/geohash into public players and violates the current privacy model.
+// Location must only be stored in players_private.
+
 import admin from "firebase-admin";
 import { geohashForLocation } from "geofire-common";
 import fs from "fs";
