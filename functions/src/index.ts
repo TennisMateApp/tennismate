@@ -17,6 +17,9 @@ import {
   affectedUserIdsFromMatchRequest,
   recomputePlayerPublicStats,
 } from "./playerPublicStats";
+import {
+  updateMessageNotificationStateForMessage,
+} from "./messageNotifications";
 
 
 // ✅ Set correct region for Firestore: australia-southeast2
@@ -1991,27 +1994,7 @@ if (!emailAllowed) {
 
 
     if (notif.type === "message") {
-      const fromName = notif.fromUserId ? await getPlayerName(notif.fromUserId) : "A player";
-
-      const conversationId = notif.conversationId;
-      const body = (notif.body || notif.message || "").toString();
-      const snippet = body.length > 200 ? body.slice(0, 200) + "…" : body;
-
-      const subject = `New message from ${fromName} 🎾`;
-      const html = `
-        <p>${fromName} sent you a message:</p>
-        <blockquote>${snippet}</blockquote>
-        <p><a href="https://tennismate.vercel.app/messages">Open your conversation</a></p>
-        <p style="font-size:12px;color:#777">This is an automated TennisMate message alert.</p>
-      `;
-
-      await enqueueEmail(toEmail, subject, html, snippet, {
-        category: "msg_direct_notify",
-        conversationId,
-        fromUserId: notif.fromUserId || "",
-        recipientId,
-      });
-      console.log(`✅ Email sent (message) to ${toEmail}`);
+      console.log(`[MR_BELL_CONSUMER] skipping DM email for notif ${notifId}; handled by notifyOnNewMessage cooldown state.`);
       return;
     }
 
@@ -2163,30 +2146,107 @@ if (recipientId === senderId) return;
 const read = message.read === true;
 if (read) return;
 
-// 1) Try native Android/iOS first
-const nativeSent = await sendAndroidPushToUser(recipientId, {
+      const convoSnap = await db.collection("conversations").doc(conversationId).get();
+      const convo = convoSnap.exists ? (convoSnap.data() as any) : null;
+      const recipientLastReadAt = convo?.lastRead?.[recipientId];
 
-        title: `New message from ${senderName}`,
-        body,
-        route: `/messages/${conversationId}`,
-        type: "new_message",
+      const messageNotifState = await updateMessageNotificationStateForMessage({
+        conversationId,
+        recipientId,
+        messageId,
+        conversationLastReadAt: recipientLastReadAt,
       });
 
-      // 2) Fallback to web push if no native devices
-      if (!nativeSent) {
-        await sendWebPushToUser(recipientId, {
+      console.log("[notifyOnNewMessage] DM state updated", {
+        conversationId,
+        messageId,
+        recipientId,
+        stateId: messageNotifState.stateId,
+        unreadCount: messageNotifState.unreadCount,
+        activeInThread: messageNotifState.activeInThread,
+        sendPush: messageNotifState.sendPush,
+        sendEmail: messageNotifState.sendEmail,
+      });
+
+      if (messageNotifState.sendPush) {
+        const nativeSent = await sendAndroidPushToUser(recipientId, {
           title: `New message from ${senderName}`,
           body,
           route: `/messages/${conversationId}`,
           type: "new_message",
         });
+
+        if (!nativeSent) {
+          await sendWebPushToUser(recipientId, {
+            title: `New message from ${senderName}`,
+            body,
+            route: `/messages/${conversationId}`,
+            type: "new_message",
+          });
+        }
+
+        console.log(`[notifyOnNewMessage] push attempted (native=${nativeSent})`, {
+          recipientId,
+          conversationId,
+          messageId,
+          stateId: messageNotifState.stateId,
+        });
+      } else {
+        console.log("[notifyOnNewMessage] push suppressed for DM", {
+          recipientId,
+          conversationId,
+          messageId,
+          stateId: messageNotifState.stateId,
+          reason: messageNotifState.activeInThread ? "active_in_thread" : "push_cooldown",
+        });
       }
 
-      console.log(`[notifyOnNewMessage] push attempted (native=${nativeSent})`, {
-        recipientId,
-        conversationId,
-        messageId,
-      });
+      if (messageNotifState.sendEmail) {
+        const toEmail = await getUserEmail(recipientId);
+        if (!toEmail) {
+          console.log(`[notifyOnNewMessage] no email found for recipient ${recipientId}`);
+        } else {
+          const emailAllowed = await shouldEmailUser(recipientId);
+          if (!emailAllowed) {
+            console.log("[notifyOnNewMessage] suppressing DM email (active native push)", {
+              recipientId,
+              conversationId,
+              messageId,
+            });
+          } else {
+            const subject = "You have new messages on TennisMate";
+            const html = `
+              <p>You have new messages on TennisMate.</p>
+              <p><a href="https://tennismate.vercel.app/messages/${conversationId}">Open your conversation</a></p>
+              <p style="font-size:12px;color:#777">This is an automated TennisMate message alert.</p>
+            `;
+
+            await enqueueEmail(toEmail, subject, html, "You have new messages on TennisMate.", {
+              category: "msg_direct_digest",
+              conversationId,
+              fromUserId: senderId,
+              recipientId,
+              messageId,
+              stateId: messageNotifState.stateId,
+            });
+
+            console.log("[notifyOnNewMessage] DM email queued", {
+              recipientId,
+              conversationId,
+              messageId,
+              stateId: messageNotifState.stateId,
+            });
+          }
+        }
+      } else {
+        console.log("[notifyOnNewMessage] email suppressed for DM", {
+          recipientId,
+          conversationId,
+          messageId,
+          stateId: messageNotifState.stateId,
+          reason: messageNotifState.activeInThread ? "active_in_thread" : "email_cooldown",
+        });
+      }
 
       // ✅ In-app bell doc for DM (drives list + email), never triggers push watcher
       const notifId = `msg_${conversationId}_${messageId}_${recipientId}`;
