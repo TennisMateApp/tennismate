@@ -639,7 +639,6 @@ const badges = Array.isArray(formData.badges) ? formData.badges : [];
 const playerPayload = {
   postcode: newPostcode,
   badges,
-  ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
   gender: formData.gender || null,
   skillBand: formData.skillBand || null,
   skillBandLabel: toSkillLabel(formData.skillBand),

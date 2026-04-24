@@ -372,7 +372,6 @@ const playerPayload = {
   skillRating: formData.rating === "" ? null : formData.rating,
   utr: formData.rating === "" ? null : formData.rating,
   skillLevel: coarseFromBand(formData.skillBand),
-  ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
 
   photoURL,
   photoThumbURL,
