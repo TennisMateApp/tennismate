@@ -3,6 +3,12 @@ import { ref, listAll, deleteObject, type FirebaseStorage } from "firebase/stora
 export const PROFILE_FULL_PATH = (uid: string) => `profile_pictures/${uid}/avatar_full.jpg`;
 export const PROFILE_THUMB_PATH = (uid: string) => `profile_pictures/${uid}/avatar_thumb.jpg`;
 
+export function withPhotoCacheBust(url: string | null | undefined, version: string | number): string {
+  if (typeof url !== "string" || !url.trim()) return "";
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${encodeURIComponent(String(version))}`;
+}
+
 export function resolveProfilePhoto(data: any): string | null {
   if (!data || typeof data !== "object") return null;
 

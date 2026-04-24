@@ -17,6 +17,7 @@ import {
   PROFILE_THUMB_PATH,
   cleanupLegacyProfilePhotos,
   resolveProfilePhoto,
+  withPhotoCacheBust,
 } from "@/lib/profilePhoto";
 
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
@@ -368,8 +369,9 @@ if (croppedImage) {
   const thumbRef = ref(storage, PROFILE_THUMB_PATH(user.uid));
   await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
   await uploadBytes(thumbRef, croppedImage, { contentType: "image/jpeg" });
-  photoURL = await getDownloadURL(fullRef);
-  photoThumbURL = await getDownloadURL(thumbRef);
+  const cacheBustVersion = Date.now();
+  photoURL = withPhotoCacheBust(await getDownloadURL(fullRef), cacheBustVersion);
+  photoThumbURL = withPhotoCacheBust(await getDownloadURL(thumbRef), cacheBustVersion);
   await cleanupLegacyProfilePhotos(storage, user.uid);
 }
 
@@ -446,7 +448,7 @@ if (auth.currentUser) {
   photoURL,
   photoThumbURL,
 }));
-setPreviewURL(photoURL);
+setPreviewURL(photoThumbURL || photoURL);
       originalPostcodeRef.current = newPostcode;
 
       setStatus("✅ Saved!");

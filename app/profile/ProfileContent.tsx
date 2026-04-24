@@ -32,6 +32,7 @@ import {
   PROFILE_THUMB_PATH,
   cleanupLegacyProfilePhotos,
   resolveProfilePhoto,
+  withPhotoCacheBust,
 } from "@/lib/profilePhoto";
 
 
@@ -662,10 +663,9 @@ if (croppedImage) {
   const thumbRef = ref(storage, PROFILE_THUMB_PATH(user.uid));
   await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
   await uploadBytes(thumbRef, croppedImage, { contentType: "image/jpeg" });
-  photoURL = await getDownloadURL(fullRef);
-
-  // For now use the same image for both until you generate real thumbnails
-  photoThumbURL = await getDownloadURL(thumbRef);
+  const cacheBustVersion = Date.now();
+  photoURL = withPhotoCacheBust(await getDownloadURL(fullRef), cacheBustVersion);
+  photoThumbURL = withPhotoCacheBust(await getDownloadURL(thumbRef), cacheBustVersion);
   await cleanupLegacyProfilePhotos(storage, user.uid);
 }
 
@@ -743,7 +743,7 @@ setFormData((p) => ({
   photoThumbURL,
 }));
 
-setPreviewURL(photoURL);    
+setPreviewURL(photoThumbURL || photoURL);    
 
     originalPostcodeRef.current = newPostcode;
 
