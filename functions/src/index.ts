@@ -5,6 +5,7 @@ import { sendEventRemindersV2 } from "./eventReminders";
 import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import * as crypto from "crypto";
 import { pubsub } from "firebase-functions/v1";
+import { fetchNearbyPlayersForUser } from "./nearbyPlayers";
 
 
 // ✅ Set correct region for Firestore: australia-southeast2
@@ -263,6 +264,19 @@ export const deleteMyAccount = onCall(async (request) => {
     message: e?.message || String(e),
   });
 }
+});
+
+export const getNearbyPlayers = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Authentication required.");
+  }
+
+  return fetchNearbyPlayersForUser(uid, (request.data || {}) as {
+    radiusKm?: number;
+    activeWithinHours?: number | null;
+    limit?: number;
+  });
 });
 
 export const deleteMyCoachProfile = onCall(async (request) => {

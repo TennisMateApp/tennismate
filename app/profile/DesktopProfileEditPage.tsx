@@ -138,8 +138,13 @@ const [formData, setFormData] = useState({
       setUser(u);
 
       const playerRef = doc(db, "players", u.uid);
-      const snap = await getDoc(playerRef);
+      const privatePlayerRef = doc(db, "players_private", u.uid);
+      const [snap, privateSnap] = await Promise.all([
+        getDoc(playerRef),
+        getDoc(privatePlayerRef),
+      ]);
       const data = snap.exists() ? (snap.data() as any) : {};
+      const privateData = privateSnap.exists() ? (privateSnap.data() as any) : {};
 
       const ratingNumber =
         typeof data.skillRating === "number"
@@ -156,20 +161,20 @@ const [formData, setFormData] = useState({
 
 setFormData({
   name: data.name || "",
-  postcode: data.postcode || "",
+  postcode: privateData.postcode || data.postcode || "",
   skillBand: derivedBand || "",
   rating: typeof ratingNumber === "number" ? ratingNumber : "",
   availability: normalizeAvailability(data.availability),
   bio: data.bio || "",
   photoURL: typeof data.photoURL === "string" ? data.photoURL : "",
   photoThumbURL: resolveProfilePhoto(data) || "",
-  birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
+  birthYear: typeof privateData.birthYear === "number" ? privateData.birthYear : "",
   gender: typeof data.gender === "string" ? data.gender : "",
   isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
   badges: Array.isArray(data.badges) ? data.badges : [],
 });
 
-      originalPostcodeRef.current = String(data.postcode || "").trim();
+      originalPostcodeRef.current = String(privateData.postcode || data.postcode || "").trim();
       const currentPhoto = resolveProfilePhoto(data);
       if (currentPhoto) setPreviewURL(currentPhoto);
 
@@ -358,7 +363,6 @@ const playerPayload = {
   postcode: newPostcode,
   bio: formData.bio || "",
   availability: formData.availability || [],
-  birthYear: formData.birthYear === "" ? null : formData.birthYear,
   gender: formData.gender || null,
   isMatchable: !!formData.isMatchable,
   badges: Array.isArray(formData.badges) ? formData.badges : [],
@@ -368,15 +372,21 @@ const playerPayload = {
   skillRating: formData.rating === "" ? null : formData.rating,
   utr: formData.rating === "" ? null : formData.rating,
   skillLevel: coarseFromBand(formData.skillBand),
-
   ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
 
   photoURL,
   photoThumbURL,
   nameLower: (formData.name || "").toLowerCase(),
-  email: user.email,
   timestamp: serverTimestamp(),
   profileComplete: true,
+};
+
+const privatePlayerPayload = {
+  email: user.email || "",
+  postcode: newPostcode,
+  birthYear: formData.birthYear === "" ? null : formData.birthYear,
+  ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
+  updatedAt: serverTimestamp(),
 };
 
 const userPayload = {
@@ -397,6 +407,7 @@ await Promise.all([
     },
     { merge: true }
   ),
+  setDoc(doc(db, "players_private", user.uid), privatePlayerPayload, { merge: true }),
   setDoc(doc(db, "users", user.uid), userPayload, { merge: true }),
 ]);
 

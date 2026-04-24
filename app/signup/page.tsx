@@ -362,21 +362,14 @@ const handleSubmit = async (e: React.FormEvent) => {
       const playerRef = doc(db, "players", user.uid);
       const playerSnap = await getDoc(playerRef);
 
-      const playerData = {
+      const publicPlayerData = {
         name: formData.name,
         nameLower: (formData.name || "").toLowerCase(),
-        email,
         postcode: formData.postcode,
-
-        gender: formData.gender || null,
-        birthYear: formData.birthYear ? Number(formData.birthYear) : null,
-
         isMatchable: true,
-
         lat,
         lng,
         geohash,
-
         skillRating: ratingOrNull,
         utr: ratingOrNull,
         skillBand: skillBandValue,
@@ -389,13 +382,40 @@ const handleSubmit = async (e: React.FormEvent) => {
         updatedAt: serverTimestamp(),
       };
 
+      const privatePlayerData = {
+        email,
+        postcode: formData.postcode,
+        birthYear: formData.birthYear ? Number(formData.birthYear) : null,
+        lat,
+        lng,
+        geohash,
+        updatedAt: serverTimestamp(),
+      };
+
            if (!playerSnap.exists()) {
-        await setDoc(playerRef, {
-          ...playerData,
-          createdAt: userCreatedAt || serverTimestamp(),
-        });
+        await Promise.all([
+          setDoc(
+            playerRef,
+            {
+              ...publicPlayerData,
+              createdAt: userCreatedAt || serverTimestamp(),
+            },
+            { merge: true }
+          ),
+          setDoc(
+            doc(db, "players_private", user.uid),
+            {
+              ...privatePlayerData,
+              createdAt: userCreatedAt || serverTimestamp(),
+            },
+            { merge: true }
+          ),
+        ]);
       } else {
-        await setDoc(playerRef, playerData, { merge: true });
+        await Promise.all([
+          setDoc(playerRef, publicPlayerData, { merge: true }),
+          setDoc(doc(db, "players_private", user.uid), privatePlayerData, { merge: true }),
+        ]);
       }
 
       trackEvent("signup_completed", {

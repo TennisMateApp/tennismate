@@ -310,19 +310,24 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
       setShowVerify(requireVerification && !u.emailVerified);
 
 const playerRef = doc(db, "players", u.uid);
+const privatePlayerRef = doc(db, "players_private", u.uid);
 
-unsubPlayer = onSnapshot(playerRef, (docSnap) => {
+unsubPlayer = onSnapshot(playerRef, async (docSnap) => {
   const canShowGate = !PUBLIC_ROUTES.has(pathname || "") && !showVerify;
 
   if (docSnap.exists()) {
     const data = docSnap.data() as any;
+    const privateSnap = await getDoc(privatePlayerRef);
+    const privateData = privateSnap.exists() ? (privateSnap.data() as any) : null;
 
     setPhotoURL(typeof data.photoURL === "string" ? data.photoURL : null);
     setPhotoThumbURL(typeof data.photoThumbURL === "string" ? data.photoThumbURL : null);
     setProfileComplete(data.profileComplete === true);
 
     const birthYear =
-      typeof data.birthYear === "number" && Number.isFinite(data.birthYear)
+      typeof privateData?.birthYear === "number" && Number.isFinite(privateData.birthYear)
+        ? privateData.birthYear
+        : typeof data.birthYear === "number" && Number.isFinite(data.birthYear)
         ? data.birthYear
         : null;
 
@@ -601,10 +606,11 @@ return (
       if (!u) return;
 
       await setDoc(
-        doc(db, "players", u.uid),
+        doc(db, "players_private", u.uid),
         {
           birthYear,
           birthYearUpdatedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         },
         { merge: true }
       );

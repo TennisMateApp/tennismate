@@ -261,9 +261,13 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) return;
 
-      // players/{uid}
-      const playerSnap = await getDoc(doc(db, "players", u.uid));
+      // players/{uid} + players_private/{uid}
+      const [playerSnap, privateSnap] = await Promise.all([
+        getDoc(doc(db, "players", u.uid)),
+        getDoc(doc(db, "players_private", u.uid)),
+      ]);
       const data = playerSnap.exists() ? (playerSnap.data() as any) : {};
+      const privateData = privateSnap.exists() ? (privateSnap.data() as any) : {};
 
       const ratingNumber =
         typeof data.skillRating === "number"
@@ -286,7 +290,7 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
         bio: data.bio || "",
         photoURL: data.photoURL || "",
         badges: normalizeBadges(data.badges),
-        birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
+        birthYear: typeof privateData.birthYear === "number" ? privateData.birthYear : "",
         gender: typeof data.gender === "string" ? data.gender : "",
         availability: normalizeAvailability(data.availability),
         memberSince: data.memberSince || "", // optional if you store it

@@ -196,8 +196,13 @@ const safeBadges = Array.isArray(formData.badges) ? formData.badges : [];
 
 
     const playerRef = doc(db, "players", currentUser.uid);
-    const snap = await getDoc(playerRef);
+    const privatePlayerRef = doc(db, "players_private", currentUser.uid);
+    const [snap, privateSnap] = await Promise.all([
+      getDoc(playerRef),
+      getDoc(privatePlayerRef),
+    ]);
     const data = snap.data() || {};
+    const privateData = privateSnap.data() || {};
 
     // ⬇️ Add this block
   // Derive band from skillRating or fallback to UTR or legacy level
@@ -213,7 +218,7 @@ const derivedBand: SkillBand | "" =
 
 setFormData({
   name: data.name || "",
-  postcode: data.postcode || "",
+  postcode: privateData.postcode || data.postcode || "",
   skillBand: derivedBand || "",
   rating: typeof ratingNumber === "number" ? ratingNumber : "",
   availability: data.availability || [],
@@ -222,12 +227,12 @@ setFormData({
   photoURL: typeof data.photoURL === "string" ? data.photoURL : "",
   photoThumbURL: resolveProfilePhoto(data) || "",
   badges: normalizeBadges(data.badges),
-  birthYear: typeof data.birthYear === "number" ? data.birthYear : "",
+  birthYear: typeof privateData.birthYear === "number" ? privateData.birthYear : "",
   gender: typeof data.gender === "string" ? data.gender : "",
   timestamp: data.timestamp || null,
 });
 
-originalPostcodeRef.current = String(data.postcode || "").trim();
+originalPostcodeRef.current = String(privateData.postcode || data.postcode || "").trim();
 
     const currentPhoto = resolveProfilePhoto(data);
     if (currentPhoto) setPreviewURL(currentPhoto);
@@ -635,7 +640,6 @@ const playerPayload = {
   postcode: newPostcode,
   badges,
   ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
-  birthYear: formData.birthYear === "" ? null : formData.birthYear,
   gender: formData.gender || null,
   skillBand: formData.skillBand || null,
   skillBandLabel: toSkillLabel(formData.skillBand),
@@ -648,10 +652,17 @@ const playerPayload = {
   nameLower: (formData.name || "").toLowerCase(),
   bio: formData.bio || "",
   availability: formData.availability || [],
-  email: user.email,
   timestamp: serverTimestamp(),
   profileComplete: true,
   isMatchable: !!formData.isMatchable,
+};
+
+const privatePlayerPayload = {
+  email: user.email || "",
+  postcode: newPostcode,
+  birthYear: formData.birthYear === "" ? null : formData.birthYear,
+  ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
+  updatedAt: serverTimestamp(),
 };
 
 const userPayload = {
@@ -672,6 +683,7 @@ await Promise.all([
     },
     { merge: true }
   ),
+  setDoc(doc(db, "players_private", user.uid), privatePlayerPayload, { merge: true }),
   setDoc(doc(db, "users", user.uid), userPayload, { merge: true }),
 ]);
 

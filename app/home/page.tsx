@@ -17,20 +17,16 @@ import {
   onSnapshot, // ✅ ADD THIS
   query,
   where,
-  orderBy,
   limit,
   getDocs,
   getDoc,
   doc,
   updateDoc,
   serverTimestamp,
-  startAt,
-  endAt,
 } from "firebase/firestore";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import DesktopDashboardHome from "@/components/home/DesktopDashboardHome";
 
-import { geohashQueryBounds } from "geofire-common";
 import { GiTennisBall } from "react-icons/gi";
 import { onAuthStateChanged } from "firebase/auth";
 import { useIsDesktop } from "@/lib/useIsDesktop";
@@ -39,6 +35,7 @@ import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { trackEvent } from "@/lib/mixpanel";
 import { resolveProfilePhoto } from "@/lib/profilePhoto";
+import { getNearbyPlayers } from "@/lib/nearbyPlayersClient";
 
 
 const TM = {
@@ -441,90 +438,29 @@ type ActivePlayer = {
   photoThumbURL?: string | null;
   avatar?: string | null;
   lastActiveAt?: any;
-  lat?: number | null;
-  lng?: number | null;
 };
 
 async function loadNearbyActivePlayers(uid: string): Promise<ActivePlayer[]> {
-  // 1) Load my profile for lat/lng
-  const meSnap = await getDoc(doc(db, "players", uid));
-  if (!meSnap.exists()) {
-    console.warn("[Home] current player doc missing for nearby active:", uid);
-    return [];
-  }
+  const response = await getNearbyPlayers({
+    radiusKm: ACTIVE_RADIUS_KM,
+    activeWithinHours: ACTIVE_LOOKBACK_HOURS,
+    limit: MAX_BOUND_READS,
+  });
 
-  const me: any = meSnap.data();
-  const myLat = typeof me.lat === "number" ? me.lat : null;
-  const myLng = typeof me.lng === "number" ? me.lng : null;
-
-  if (myLat == null || myLng == null) {
-    console.warn("[Home] current player has no lat/lng for nearby active:", {
-      uid,
-      lat: me.lat,
-      lng: me.lng,
+  return response.players
+    .map((p) => ({
+      id: p.uid,
+      name: p.name,
+      photoThumbURL: p.photoThumbURL ?? null,
+      photoURL: p.photoURL ?? null,
+      avatar: p.photoThumbURL ?? p.photoURL ?? null,
+      lastActiveAt: p.lastActiveAt ?? null,
+    }))
+    .sort((a, b) => {
+      const aMs = toDateSafe(a.lastActiveAt)?.getTime() ?? 0;
+      const bMs = toDateSafe(b.lastActiveAt)?.getTime() ?? 0;
+      return bMs - aMs;
     });
-    return [];
-  }
-
-  // 2) Build geohash bounds around me
-  const bounds = geohashQueryBounds([myLat, myLng], ACTIVE_RADIUS_KM * 1000);
-
-  // 3) Read nearby players (bounded by geohash), collect candidates
-  const seen = new Set<string>();
-  const candidates: ActivePlayer[] = [];
-
-  await Promise.all(
-    bounds.map(async ([start, end]) => {
-      const qRef = query(
-        collection(db, "players"),
-        orderBy("geohash"),
-        startAt(start),
-        endAt(end),
-        limit(MAX_BOUND_READS)
-      );
-
-      const snap = await getDocs(qRef);
-
-      snap.forEach((d) => {
-        if (d.id === uid) return;
-        if (seen.has(d.id)) return;
-        seen.add(d.id);
-
-        const p: any = d.data();
-        candidates.push({
-          id: d.id,
-          name: typeof p.name === "string" ? p.name : undefined,
-          photoThumbURL: typeof p.photoThumbURL === "string" ? p.photoThumbURL : null,
-          photoURL: typeof p.photoURL === "string" ? p.photoURL : null,
-          avatar: typeof p.avatar === "string" ? p.avatar : null,
-          lastActiveAt: p.lastActiveAt ?? null,
-          lat: typeof p.lat === "number" ? p.lat : null,
-          lng: typeof p.lng === "number" ? p.lng : null,
-        });
-      });
-    })
-  );
-
-  // 4) Filter to exact 10km + recent activity + sort most recent
-  const sinceMs = Date.now() - ACTIVE_LOOKBACK_HOURS * 60 * 60 * 1000;
-
-  const filtered = candidates
-    .map((p) => {
-      const d = toDateSafe(p.lastActiveAt);
-      if (!d) return null;
-      if (d.getTime() < sinceMs) return null;
-
-      if (p.lat == null || p.lng == null) return null;
-      const km = getDistanceFromLatLonInKm(myLat, myLng, p.lat, p.lng);
-      if (km > ACTIVE_RADIUS_KM) return null;
-
-      return { ...p, _lastActiveMs: d.getTime() };
-    })
-    .filter(Boolean) as Array<ActivePlayer & { _lastActiveMs: number }>;
-
-  filtered.sort((a, b) => b._lastActiveMs - a._lastActiveMs);
-
-  return filtered;
 }
 
 function getOtherUserId(m: any, myUid: string) {

@@ -17,9 +17,6 @@ import {
   updateDoc,
   deleteDoc,
   Timestamp,
-  orderBy,
-  startAt,
-  endAt,
   limit,
   onSnapshot,
 } from "firebase/firestore";
@@ -29,12 +26,12 @@ import Link from "next/link";
 import { CheckCircle2, SlidersHorizontal, CalendarDays, MapPin, ArrowLeft, X } from "lucide-react";
 import Image from "next/image";
 import { track } from "@/lib/track";
-import { geohashQueryBounds } from "geofire-common";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import DesktopMatchPage from "@/components/match/DesktopMatchPage";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import { trackEvent } from "@/lib/mixpanel";
+import { getNearbyPlayers } from "@/lib/nearbyPlayersClient";
 
 
 
@@ -74,7 +71,6 @@ interface Player {
   distance?: number;
   lat?: number | null;
   lng?: number | null;
-  geohash?: string | null;
 }
 
 type ScoredPlayer = Player & {
@@ -225,7 +221,7 @@ function getDistanceFromLatLonInKm(
   return Math.round(R * c);
 }
 
-const MAX_NEARBY_READS = 600; // max docs per geohash bound query (safety cap)
+const MAX_NEARBY_READS = 600; // max callable result cap for nearby players
 const SENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const SENT_LOOKBACK_DAYS = 14; // when cache expires, only read last 14 days
 
@@ -921,89 +917,49 @@ const handleCancelAvailability = useCallback(async () => {
 
 
 const loadNearbyPlayers = useCallback(
-  async (myLat: number, myLng: number, radiusKm: number) => {
-    const bounds = geohashQueryBounds([myLat, myLng], radiusKm * 1000);
+  async (radiusKm: number) => {
+    const response = await getNearbyPlayers({
+      radiusKm,
+      activeWithinHours: null,
+      limit: MAX_NEARBY_READS,
+    });
 
-    const seen = new Set<string>();
-    const out: Player[] = [];
+    return response.players.map((data) => {
+      const uid = data.uid;
+      const photoURL =
+        typeof data.photoThumbURL === "string" ? data.photoThumbURL :
+        typeof data.photoURL === "string" ? data.photoURL :
+        null;
 
-    await Promise.all(
-      bounds.map(async ([start, end]) => {
-        const q = query(
-          collection(db, "players"),
-          orderBy("geohash"),
-          startAt(start),
-          endAt(end),
-          limit(MAX_NEARBY_READS)
-        );
-
-        const snap = await getDocs(q);
-
-        snap.forEach((d) => {
-          if (seen.has(d.id)) return;
-          seen.add(d.id);
-
-          const data = d.data() as any;
-
-          const birthYear =
-            typeof data.birthYear === "number" && Number.isFinite(data.birthYear)
-              ? data.birthYear
-              : null;
-
-          const derivedAge = deriveAgeFromBirthYear(birthYear);
-          const legacyAge =
-            typeof data.age === "number" && Number.isFinite(data.age) ? data.age : null;
-
-            const photoURL =
-            typeof data.photoThumbURL === "string" ? data.photoThumbURL :
-            typeof data.photoURL === "string" ? data.photoURL :
-            typeof data.photoUrl === "string" ? data.photoUrl :
-            typeof data.avatar === "string" ? data.avatar :
-            typeof data.avatarUrl === "string" ? data.avatarUrl :
-            null;
-
-  const docId = d.id;
-
-// if the firestore data itself contains an "id" field, keep it but DO NOT let it override docId
-const dataId =
-  typeof (data as any)?.id === "string" ? (data as any).id : null;
-
-  // ✅ IMPORTANT: auth uid used by match_requests (prod expects this)
-const userId =
-  typeof (data as any)?.userId === "string" ? (data as any).userId :
-  typeof (data as any)?.uid === "string" ? (data as any).uid :
-  docId; // fallback if your players doc id == auth uid
-
-out.push({
-  ...(data as Player),
-
-  // keep a copy for debugging only (optional)
-  docId,
-  dataId,
-    userId,
-
-  birthYear,
-  age: derivedAge ?? legacyAge ?? null,
-  gender: typeof data.gender === "string" ? data.gender : null,
-  lastActiveAt: data.lastActiveAt ?? null,
-  isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
-  lat: typeof data.lat === "number" ? data.lat : null,
-  lng: typeof data.lng === "number" ? data.lng : null,
-  geohash: typeof data.geohash === "string" ? data.geohash : null,
-  photoURL: photoURL ?? undefined,
-  photoThumbURL: typeof data.photoThumbURL === "string" ? data.photoThumbURL : null,
-  avatar: typeof data.avatar === "string" ? data.avatar : null,
-
-  // ✅ CRITICAL: force the true uid/doc id LAST so nothing can overwrite it
-  id: docId,
-});
-        });
-      })
-    );
-
-    return out;
+      return {
+        id: uid,
+        userId: uid,
+        docId: uid,
+        dataId: null,
+        name: data.name || "",
+        postcode: data.postcode || "",
+        skillLevel: data.skillLevel,
+        skillBand: (data.skillBand as SkillBand | "" | undefined) ?? "",
+        skillBandLabel: data.skillBandLabel ?? null,
+        utr: typeof data.skillRating === "number" ? data.skillRating : null,
+        skillRating: typeof data.skillRating === "number" ? data.skillRating : null,
+        availability: Array.isArray(data.availability) ? (data.availability as string[]) : [],
+        bio: data.bio || "",
+        email: "",
+        photoURL: photoURL ?? undefined,
+        photoThumbURL: typeof data.photoThumbURL === "string" ? data.photoThumbURL : null,
+        avatar: photoURL,
+        birthYear: null,
+        age: null,
+        gender: null,
+        isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
+        timestamp: null,
+        lastActiveAt: data.lastActiveAt ?? null,
+        distance: data.distanceKm,
+      } satisfies Player;
+    });
   },
-  [db]
+  []
 );
 
 const loadBlockedMatchUserIds = useCallback(async (currentUid: string) => {
@@ -1087,9 +1043,6 @@ const refreshMatches = useCallback(async () => {
       return;
     }
 
-    const myLat = typeof myData.lat === "number" ? myData.lat : null;
-    const myLng = typeof myData.lng === "number" ? myData.lng : null;
-
     const myBand = (
       myData.skillBand ||
       skillFromUTR((myData.skillRating ?? myData.utr) ?? null) ||
@@ -1103,9 +1056,6 @@ const refreshMatches = useCallback(async () => {
       skillBand: myBand,
       birthYear: myBirthYear,
       age: myAge,
-      lat: myLat,
-      lng: myLng,
-      geohash: typeof myData.geohash === "string" ? myData.geohash : null,
     });
 
     // 2) Sent requests (prefer local cache)
@@ -1140,84 +1090,69 @@ const refreshMatches = useCallback(async () => {
     const blockedIds = await loadBlockedMatchUserIds(auth.currentUser.uid);
     setBlockedMatchUserIds(blockedIds);
 
-    // 3) Load nearby players only (geohash bounds)
-    if (myLat == null || myLng == null) {
-      setRawMatches([]);
-      setLastUpdated(Date.now());
-      return;
-    }
-
-    const allPlayers = await loadNearbyPlayers(myLat, myLng, MAX_DISTANCE_KM);
+    // 3) Load nearby players via callable (caller location comes from players_private)
+    const allPlayers = await loadNearbyPlayers(MAX_DISTANCE_KM);
 
     const meRating = (myData.skillRating ?? myData.utr) ?? null;
 
     // 4) Score + distance filter
-    const scoredPlayers: ScoredPlayer[] = allPlayers
-      .filter((p) => {
-        const candidateUid = uidOf(p);
-        return !!candidateUid && candidateUid !== auth.currentUser!.uid;
-      })
-      .filter((p) => p.isMatchable !== false)
-      .filter((p) => {
-        const candidateUid = uidOf(p);
-        return !!candidateUid && !blockedIds.has(candidateUid);
-      })
-      .map((p) => {
-        let score = 0;
-        let distance = Infinity;
+    const scoredPlayers: ScoredPlayer[] = [];
 
-        const theirRating = (p.skillRating ?? p.utr) ?? null;
-        const theirBand: SkillBand | "" =
-          p.skillBand || skillFromUTR(theirRating) || legacyToBand(p.skillLevel) || "";
+    for (const p of allPlayers) {
+      const candidateUid = uidOf(p);
+      if (!candidateUid || candidateUid === auth.currentUser!.uid) continue;
+      if (p.isMatchable === false) continue;
+      if (blockedIds.has(candidateUid)) continue;
 
-        const bDist = bandDistance(myBand, theirBand);
-        const uGap = utrDelta(meRating, theirRating);
+      let score = 0;
+      let distance = Infinity;
 
-        if (matchMode === "utr" && meRating != null) {
+      const theirRating = (p.skillRating ?? p.utr) ?? null;
+      const theirBand: SkillBand | "" =
+        p.skillBand || skillFromUTR(theirRating) || legacyToBand(p.skillLevel) || "";
+
+      const bDist = bandDistance(myBand, theirBand);
+      const uGap = utrDelta(meRating, theirRating);
+
+      if (matchMode === "utr" && meRating != null) {
+        score += utrPoints(uGap);
+        score += bandPoints(bDist) * 0.5;
+      } else if (matchMode === "skill") {
+        score += bandPoints(bDist);
+        score += utrPoints(uGap) * 0.5;
+      } else {
+        if (meRating != null && theirRating != null) {
           score += utrPoints(uGap);
           score += bandPoints(bDist) * 0.5;
-        } else if (matchMode === "skill") {
+        } else {
           score += bandPoints(bDist);
           score += utrPoints(uGap) * 0.5;
-        } else {
-          if (meRating != null && theirRating != null) {
-            score += utrPoints(uGap);
-            score += bandPoints(bDist) * 0.5;
-          } else {
-            score += bandPoints(bDist);
-            score += utrPoints(uGap) * 0.5;
-          }
         }
+      }
 
-      // Availability (cap 4)
-const shared = A(p.availability).filter((a) =>
-  A(myData.availability).includes(a)
-).length;
-score += Math.min(shared, 4);
+      const shared = A(p.availability).filter((a) =>
+        A(myData.availability).includes(a)
+      ).length;
+      score += Math.min(shared, 4);
 
-// Activity boost based on lastActiveAt
-score += activityPoints(p.lastActiveAt);
+      score += activityPoints(p.lastActiveAt);
 
-// Distance bonus + HARD FILTER
-const theirLat = typeof p.lat === "number" ? p.lat : null;
-const theirLng = typeof p.lng === "number" ? p.lng : null;
+      if (typeof p.distance === "number" && Number.isFinite(p.distance)) {
+        distance = p.distance;
 
-        if (myLat != null && myLng != null && theirLat != null && theirLng != null) {
-          distance = getDistanceFromLatLonInKm(myLat, myLng, theirLat, theirLng);
+        if (distance > MAX_DISTANCE_KM) continue;
 
-          if (distance > MAX_DISTANCE_KM) return null;
+        if (distance < 5) score += 3;
+        else if (distance < 10) score += 2;
+        else if (distance < 20) score += 1;
+      } else {
+        continue;
+      }
 
-          if (distance < 5) score += 3;
-          else if (distance < 10) score += 2;
-          else if (distance < 20) score += 1;
-        } else {
-          return null;
-        }
+      if ((score ?? 0) <= 0) continue;
 
-        return { ...p, score, distance, skillBand: theirBand };
-      })
-      .filter((p): p is ScoredPlayer => p !== null)
-      .filter((p) => (p.score ?? 0) > 0);
+      scoredPlayers.push({ ...p, score, distance, skillBand: theirBand });
+    }
 
     // Check for bad ID mismatch now, after scoredPlayers is created
     const bad = scoredPlayers.find((p: any) => p?.docId && p?.id !== p?.docId);
@@ -1232,6 +1167,9 @@ const theirLng = typeof p.lng === "number" ? p.lng : null;
 
     setRawMatches(scoredPlayers);
     setLastUpdated(Date.now());
+  } catch (error) {
+    console.warn("[MATCH] refreshMatches failed:", error);
+    setRawMatches([]);
   } finally {
     refreshingRef.current = false;
     setRefreshing(false);
@@ -1610,7 +1548,7 @@ const filteredMatches = useMemo(() => {
     if (genderFilter !== "" && m.gender !== genderFilter) return false;
 
     // Age filter
-    if (ageBand !== "" && (m.age == null || !inAgeBand(m.age, ageBand))) return false;
+    if (ageBand !== "" && m.age != null && !inAgeBand(m.age, ageBand)) return false;
 
     // Activity filter
     const level = getActivityLevel(m.lastActiveAt);

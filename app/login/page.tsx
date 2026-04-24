@@ -133,11 +133,19 @@ useEffect(() => {
         doc(db, "players", u.uid),
         {
           name: u.displayName || "",
-          email: u.email || "",
           googlePhotoURL: fixedPhotoURL,
           photoURL: "",
           profileComplete: false,
           timestamp: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      await setDoc(
+        doc(db, "players_private", u.uid),
+        {
+          email: u.email || "",
+          updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
