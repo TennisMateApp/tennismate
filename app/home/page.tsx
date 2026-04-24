@@ -34,7 +34,7 @@ import { Capacitor } from "@capacitor/core";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { trackEvent } from "@/lib/mixpanel";
-import { resolveProfilePhoto } from "@/lib/profilePhoto";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import { getNearbyPlayers } from "@/lib/nearbyPlayersClient";
 
 
@@ -580,7 +580,7 @@ useEffect(() => {
 
   // fast fallback while Firestore loads
   setUserName(authUser?.displayName || "Player");
-  setAvatarUrl(authUser?.photoURL || null);
+  setAvatarUrl(null);
 
   const unsub = onSnapshot(
     doc(db, "players", uid),
@@ -594,10 +594,7 @@ useEffect(() => {
           ? p.name.trim()
           : null;
 
-      const resolvedPhoto = resolveProfilePhoto(p);
-      const thumb = typeof p.photoThumbURL === "string" ? p.photoThumbURL : null;
-      const full = typeof p.photoURL === "string" ? p.photoURL : null;
-      const avatar = typeof p.avatar === "string" ? p.avatar : null;
+      const resolvedPhoto = resolveSmallProfilePhoto(p);
 
       const skill =
         (typeof p.skillLevel === "string" && p.skillLevel) ||
@@ -606,7 +603,7 @@ useEffect(() => {
         null;
 
       if (playerName) setUserName(playerName);
-      setAvatarUrl(resolvedPhoto || thumb || full || avatar || authUser?.photoURL || null);
+      setAvatarUrl(resolvedPhoto || null);
 
       if (skill) {
         setLevelLabel(String(skill).toUpperCase());
@@ -758,7 +755,7 @@ try {
       }
 
       const p: any = pSnap.data();
-      const resolvedPhoto = resolveProfilePhoto(p);
+      const resolvedPhoto = resolveSmallProfilePhoto(p);
 
       fetched[otherUid] = {
         name: typeof p.name === "string" ? p.name : undefined,
@@ -848,7 +845,7 @@ useEffect(() => {
             }
 
             const p: any = pSnap.data();
-            const resolvedPhoto = resolveProfilePhoto(p);
+      const resolvedPhoto = resolveSmallProfilePhoto(p);
             fetched[otherUid] = {
               name: typeof p.name === "string" ? p.name : undefined,
               photoThumbURL: resolvedPhoto,
@@ -1165,7 +1162,7 @@ if (showDesktopWeb) {
       const opp = otherUid ? oppByUid[otherUid] : null;
 
       const opponentName = opp?.name || "Opponent";
-      const opponentPhoto = opp?.photoURL || opp?.avatar || null;
+      const opponentPhoto = opp?.photoThumbURL || opp?.photoURL || opp?.avatar || null;
 
       const whenLabel = formatStartLikeCard(nextEvent.start);
       const whereLabel = nextEvent.courtName || nextEvent.location || "Court TBA";
@@ -1305,7 +1302,7 @@ const otherUserId = myUid ? getOtherUserId(m, myUid) : null;
 const directName = myUid ? getOpponentName(m, myUid) : null;
 const cached = otherUserId ? oppByUid[otherUserId] : null;
 const cachedName = cached?.name || null;
-const cachedPhoto = cached?.photoURL || cached?.avatar || null;
+const cachedPhoto = cached?.photoThumbURL || cached?.photoURL || cached?.avatar || null;
 
 
 

@@ -36,6 +36,60 @@ export function resolveProfilePhoto(data: any): string | null {
   return legacy;
 }
 
+export function resolveSmallProfilePhoto(data: any): string | null {
+  if (!data || typeof data !== "object") return null;
+
+  const thumb =
+    typeof data.photoThumbURL === "string" && data.photoThumbURL.trim()
+      ? data.photoThumbURL.trim()
+      : null;
+  if (thumb) return thumb;
+
+  const full =
+    typeof data.photoURL === "string" && data.photoURL.trim()
+      ? data.photoURL.trim()
+      : typeof data.photoUrl === "string" && data.photoUrl.trim()
+      ? data.photoUrl.trim()
+      : null;
+  if (full) return full;
+
+  const avatar =
+    typeof data.avatar === "string" && data.avatar.trim()
+      ? data.avatar.trim()
+      : typeof data.avatarUrl === "string" && data.avatarUrl.trim()
+      ? data.avatarUrl.trim()
+      : null;
+
+  return avatar;
+}
+
+export function resolveLargeProfilePhoto(data: any): string | null {
+  if (!data || typeof data !== "object") return null;
+
+  const full =
+    typeof data.photoURL === "string" && data.photoURL.trim()
+      ? data.photoURL.trim()
+      : typeof data.photoUrl === "string" && data.photoUrl.trim()
+      ? data.photoUrl.trim()
+      : null;
+  if (full) return full;
+
+  const thumb =
+    typeof data.photoThumbURL === "string" && data.photoThumbURL.trim()
+      ? data.photoThumbURL.trim()
+      : null;
+  if (thumb) return thumb;
+
+  const avatar =
+    typeof data.avatar === "string" && data.avatar.trim()
+      ? data.avatar.trim()
+      : typeof data.avatarUrl === "string" && data.avatarUrl.trim()
+      ? data.avatarUrl.trim()
+      : null;
+
+  return avatar;
+}
+
 export async function cleanupLegacyProfilePhotos(storage: FirebaseStorage, uid: string) {
   const dirRef = ref(storage, `profile_pictures/${uid}`);
 

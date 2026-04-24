@@ -17,6 +17,7 @@ import {
 import { useRouter } from "next/navigation";
 import { Search, Trash2, SquarePen, Settings } from "lucide-react";
 import { onAuthStateChanged } from "firebase/auth";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import withAuth from "@/components/withAuth";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar"; // adjust path
 // optional (if you have it):
@@ -114,8 +115,7 @@ try {
   if (meSnap.exists()) {
     const me = meSnap.data() as any;
 
-    // support either photoURL or avatar field
-    const url = me.photoURL || me.avatar || null;
+    const url = resolveSmallProfilePhoto(me);
     setMyPhotoURL(url);
   } else {
     setMyPhotoURL(u.photoURL || null);
@@ -168,7 +168,7 @@ try {
                   if (playerSnap.exists()) {
                     const playerData = playerSnap.data() as any;
                     displayName = playerData.name || "Unknown";
-                    photoURL = playerData.photoURL || null;
+                    photoURL = resolveSmallProfilePhoto(playerData);
                   }
                 }
               } catch (err) {

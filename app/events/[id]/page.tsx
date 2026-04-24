@@ -42,6 +42,7 @@ import type {
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import DesktopEventDetailsPage from "@/components/events/DesktopEventDetailsPage";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
 
 function getSkill(profile?: any | null): number | null {
@@ -1125,7 +1126,7 @@ if (isDesktop) {
                     className="flex min-w-0 items-center gap-3 text-left hover:opacity-90"
                   >
                     <img
-                      src={req.profile?.photoURL || "/default-avatar.png"}
+                      src={resolveSmallProfilePhoto(req.profile) || "/default-avatar.png"}
                       alt={req.profile?.name || "Player"}
                       className="h-10 w-10 rounded-full object-cover"
                     />
@@ -1181,7 +1182,7 @@ if (isDesktop) {
   title={hostProfile?.name || "Host"}
 >
   <img
-    src={hostProfile?.photoURL || "/default-avatar.png"}
+    src={resolveSmallProfilePhoto(hostProfile) || "/default-avatar.png"}
     className="mx-auto h-14 w-14 rounded-full object-cover ring-2 ring-white"
     alt={hostProfile?.name || "Host"}
   />
@@ -1211,7 +1212,7 @@ if (isDesktop) {
   title={p?.name || "Player"}
 >
   <img
-    src={p?.photoURL || "/default-avatar.png"}
+    src={resolveSmallProfilePhoto(p) || "/default-avatar.png"}
     className="mx-auto h-14 w-14 rounded-full object-cover ring-2 ring-white"
     alt={p?.name || "Player"}
   />

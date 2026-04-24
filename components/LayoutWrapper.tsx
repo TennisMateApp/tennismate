@@ -9,7 +9,7 @@ import { collection, query, where, onSnapshot, getDoc, doc } from "firebase/fire
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import NotificationBell from "@/components/notifications/NotificationBell";
-import { resolveProfilePhoto } from "@/lib/profilePhoto";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<any>(null);
@@ -39,7 +39,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
         const playerDoc = await getDoc(doc(db, "players", u.uid));
         setPhotoURL(
           playerDoc.exists()
-            ? resolveProfilePhoto(playerDoc.data())
+            ? resolveSmallProfilePhoto(playerDoc.data())
             : u.photoURL || null
         );
 

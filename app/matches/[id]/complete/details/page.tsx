@@ -9,8 +9,15 @@ import withAuth from "@/components/withAuth";
 import { ComponentType } from "react";
 import { GiTennisBall } from "react-icons/gi";
 import ClientLayoutWrapper from "@/components/ClientLayoutWrapper";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
-type Player = { id: string; name?: string; photoURL?: string };
+type Player = {
+  id: string;
+  name?: string;
+  photoURL?: string;
+  photoThumbURL?: string;
+  avatar?: string;
+};
 
 type SetScore = {
   A: number | null;
@@ -391,7 +398,7 @@ return (
           <div className="flex flex-col items-center text-center">
             <div className="relative h-14 w-14 overflow-hidden rounded-full border-2 border-white shadow">
               <Image
-                src={playerA.photoURL || "/images/default-avatar.jpg"}
+                src={resolveSmallProfilePhoto(playerA) || "/images/default-avatar.jpg"}
                 alt={playerA.name || "Player A"}
                 fill
                 sizes="56px"
@@ -417,7 +424,7 @@ return (
           <div className="flex flex-col items-center text-center">
             <div className="relative h-14 w-14 overflow-hidden rounded-full border-2 border-white shadow">
               <Image
-                src={playerB.photoURL || "/images/default-avatar.jpg"}
+                src={resolveSmallProfilePhoto(playerB) || "/images/default-avatar.jpg"}
                 alt={playerB.name || "Player B"}
                 fill
                 sizes="56px"
@@ -497,9 +504,9 @@ return (
     </div>
 
     <div className="flex items-center justify-center gap-2 min-w-0">
-      {playerA?.photoURL ? (
+      {resolveSmallProfilePhoto(playerA) ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={playerA.photoURL} alt="" className="h-5 w-5 rounded-full" />
+        <img src={resolveSmallProfilePhoto(playerA)!} alt="" className="h-5 w-5 rounded-full object-cover" />
       ) : (
         <span className="h-5 w-5 rounded-full bg-gray-200 inline-block" />
       )}
@@ -509,9 +516,9 @@ return (
     </div>
 
     <div className="flex items-center justify-center gap-2 min-w-0">
-      {playerB?.photoURL ? (
+      {resolveSmallProfilePhoto(playerB) ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={playerB.photoURL} alt="" className="h-5 w-5 rounded-full" />
+        <img src={resolveSmallProfilePhoto(playerB)!} alt="" className="h-5 w-5 rounded-full object-cover" />
       ) : (
         <span className="h-5 w-5 rounded-full bg-gray-200 inline-block" />
       )}

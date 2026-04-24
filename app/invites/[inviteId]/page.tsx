@@ -20,6 +20,7 @@ import {
   where,       // ✅ ADD
 } from "firebase/firestore";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
 const TM = {
   ink: "#0B3D2E",
@@ -394,7 +395,7 @@ await addDoc(
   }
 
   const otherProfile = isSender ? toProfile : fromProfile;
-  const otherPhoto = otherProfile?.photoURL || otherProfile?.photoThumbURL || otherProfile?.avatar || null;
+  const otherPhoto = resolveSmallProfilePhoto(otherProfile);
 
   function handleBack() {
   if (typeof window !== "undefined" && window.history.length > 1) {

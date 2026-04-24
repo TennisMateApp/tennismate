@@ -19,7 +19,7 @@ import { auth } from "@/lib/firebaseConfig";
 import { CalendarDays, CheckCircle2, Trophy } from "lucide-react";
 import type { SkillBand } from "@/lib/skills";
 import { SKILL_OPTIONS, skillFromUTR } from "@/lib/skills";
-import { resolveProfilePhoto } from "@/lib/profilePhoto";
+import { resolveLargeProfilePhoto, resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
 const TM = {
   forest: "#0B3D2E",
@@ -87,6 +87,8 @@ type Player = {
   availability: string[];
   bio: string;
   photoURL?: string;
+  photoThumbURL?: string;
+  avatar?: string;
   birthYear?: number | null;
   gender?: string | null;
   skillRating?: number | null;
@@ -157,7 +159,9 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
             skillLevel: computedSkillLabel,
             availability: d.availability || [],
             bio: d.bio || "",
-            photoURL: resolveProfilePhoto(d) || undefined,
+            photoURL: typeof d.photoURL === "string" ? d.photoURL : undefined,
+            photoThumbURL: typeof d.photoThumbURL === "string" ? d.photoThumbURL : undefined,
+            avatar: typeof d.avatar === "string" ? d.avatar : undefined,
             gender: typeof d.gender === "string" ? d.gender : null,
             skillRating: ratingNumber,
             utr: d.utr ?? null,
@@ -385,11 +389,7 @@ const handleInviteToPlay = async () => {
     const fromPostcode =
       typeof myProfileData?.postcode === "string" ? myProfileData.postcode : null;
 
-    const fromPhotoURL =
-      myProfileData?.photoThumbURL ||
-      myProfileData?.photoURL ||
-      myProfileData?.avatar ||
-      null;
+    const fromPhotoURL = resolveSmallProfilePhoto(myProfileData);
 
     const ref = await addDoc(collection(db, "match_requests"), {
       fromUserId: currentUid,
@@ -403,7 +403,7 @@ const handleInviteToPlay = async () => {
 
       toName: player.name ?? null,
       toPostcode: player.postcode ?? null,
-      toPhotoURL: player.photoURL ?? null,
+      toPhotoURL: resolveLargeProfilePhoto(player) ?? null,
     });
 
     console.log("[PlayerProfileView] ✅ match_requests created:", ref.id, {
@@ -544,13 +544,13 @@ const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
         background: "rgba(0,0,0,0.25)",
       }}
     >
-      {player.photoURL ? (
+      {resolveLargeProfilePhoto(player) ? (
         <Image
-          src={player.photoURL}
+          src={resolveLargeProfilePhoto(player)!}
           alt={`${player.name} avatar`}
           fill
           sizes="560px"
-          className="object-contain object-center"
+          className="object-cover object-center"
           priority
         />
       ) : (

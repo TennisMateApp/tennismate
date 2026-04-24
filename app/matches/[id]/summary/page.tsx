@@ -17,6 +17,7 @@ import {
 import { onAuthStateChanged } from "firebase/auth";
 import { Trophy } from "lucide-react";
 import { GiTennisBall } from "react-icons/gi";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
 export default function MatchSummaryPage() {
   const { id: matchId } = useParams();
@@ -224,7 +225,7 @@ const handleComplete = async () => {
             <div className="text-center scale-105">
               <div className="mx-auto h-16 w-16 rounded-full ring-2 ring-yellow-400 ring-offset-2">
                 <img
-                  src={winner.photoURL || "/default-avatar.png"}
+                  src={resolveSmallProfilePhoto(winner) || "/default-avatar.png"}
                   alt={winner.name}
                   className="h-16 w-16 rounded-full object-cover"
                 />
@@ -241,7 +242,7 @@ const handleComplete = async () => {
             <div className="text-center">
               <div className="mx-auto h-16 w-16 rounded-full ring-2 ring-gray-200 ring-offset-2">
                 <img
-                  src={loser.photoURL || "/default-avatar.png"}
+                  src={resolveSmallProfilePhoto(loser) || "/default-avatar.png"}
                   alt={loser.name}
                   className="h-16 w-16 rounded-full object-cover"
                 />

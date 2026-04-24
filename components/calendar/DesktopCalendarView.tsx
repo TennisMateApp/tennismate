@@ -4,8 +4,14 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
-type MiniProfile = { name?: string; photoURL?: string };
+type MiniProfile = {
+  name?: string;
+  photoURL?: string;
+  photoThumbURL?: string;
+  avatar?: string;
+};
 
 export default function DesktopCalendarView(props: {
   // data
@@ -309,7 +315,7 @@ const mapsEmbedSrc = locText
                       <div className="flex -space-x-2">
                         {avatarIds.map((uid) => {
                           const p = profiles[uid] || {};
-                          const src = p.photoURL || "/default-avatar.png";
+                          const src = resolveSmallProfilePhoto(p) || "/default-avatar.png";
                           return (
                             <div
                               key={uid}

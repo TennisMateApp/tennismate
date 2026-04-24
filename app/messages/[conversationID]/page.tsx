@@ -7,6 +7,7 @@ import { ArrowLeft, CalendarPlus, Info, Send } from "lucide-react";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { getSuggestedCourtsForInvite } from "@/lib/suggestedCourtsClient";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
 import { db, auth } from "@/lib/firebaseConfig";
 import {
@@ -464,7 +465,9 @@ function ChatPage() {
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
 
   const [participants, setParticipants] = useState<string[]>([]);
-  const [profiles, setProfiles] = useState<Record<string, { name?: string; photoURL?: string }>>({});
+  const [profiles, setProfiles] = useState<
+    Record<string, { name?: string; photoURL?: string; photoThumbURL?: string; avatar?: string }>
+  >({});
     const nameByUid = useMemo(() => {
     const out: Record<string, string> = {};
     Object.entries(profiles || {}).forEach(([uid, p]) => {
@@ -1053,7 +1056,7 @@ await clearMessageNotifsForConversation(u.uid, String(conversationID));
       // load my avatar
       const meRef = doc(db, "players", u.uid);
       const meSnap = await getDoc(meRef);
-      if (meSnap.exists()) setUserAvatar(meSnap.data().photoURL || null);
+      if (meSnap.exists()) setUserAvatar(resolveSmallProfilePhoto(meSnap.data()) || null);
 
       // conversation snapshot (context/participants/typing/lastRead)
 unsubscribeTyping = onSnapshot(convoRef, (snap) => {
@@ -1177,13 +1180,21 @@ setShowMatchPrompt(
 
     let cancelled = false;
     (async () => {
-      const out: Record<string, { name?: string; photoURL?: string }> = {};
+      const out: Record<
+        string,
+        { name?: string; photoURL?: string; photoThumbURL?: string; avatar?: string }
+      > = {};
       for (const uid of participants) {
         try {
           const pSnap = await getDoc(doc(db, "players", uid));
           if (pSnap.exists()) {
             const d = pSnap.data() as any;
-            out[uid] = { name: d.name, photoURL: d.photoURL };
+            out[uid] = {
+              name: d.name,
+              photoURL: d.photoURL,
+              photoThumbURL: d.photoThumbURL,
+              avatar: d.avatar,
+            };
           } else {
             out[uid] = {};
           }
@@ -1618,7 +1629,7 @@ useEffect(() => {
   {(() => {
     const others = participants.filter((p) => p !== user?.uid);
     const first = others[0];
-    const photo = first ? profiles[first]?.photoURL : null;
+    const photo = first ? resolveSmallProfilePhoto(profiles[first]) : null;
 
     return (
       <div className="relative shrink-0">
@@ -1859,7 +1870,7 @@ const d = msg.timestamp?.toDate ? msg.timestamp.toDate() : new Date();
 const avatarURL = system
   ? DEFAULT_SYSTEM_AVATAR
   : isOther
-    ? (senderProfile.photoURL || DEFAULT_SYSTEM_AVATAR)
+    ? (resolveSmallProfilePhoto(senderProfile) || DEFAULT_SYSTEM_AVATAR)
     : (userAvatar || DEFAULT_SYSTEM_AVATAR);
 
         return (

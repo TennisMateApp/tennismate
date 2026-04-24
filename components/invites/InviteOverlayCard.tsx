@@ -18,6 +18,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
 const TM = {
   ink: "#0B3D2E",
@@ -397,8 +398,7 @@ const mapsEmbedSrc = mapQuery
 
   const otherProfile = isSender ? toProfile : fromProfile;
   const otherName = otherProfile?.name || "Opponent";
-  const otherPhoto =
-    otherProfile?.photoURL || otherProfile?.photoThumbURL || otherProfile?.avatar || null;
+  const otherPhoto = resolveSmallProfilePhoto(otherProfile);
 
   if (loading) {
     return <div className="p-4 text-sm text-slate-600">Loading invite…</div>;

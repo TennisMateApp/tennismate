@@ -27,6 +27,7 @@ import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import DesktopCalendarView from "@/components/calendar/DesktopCalendarView";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import ClientLayoutWrapper from "@/components/ClientLayoutWrapper";
+import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
 /* ---------------------------- Helper Functions ---------------------------- */
 function toISODate(d: Date) {
@@ -66,7 +67,12 @@ function formatTimeParts(iso?: string) {
 }
 
 /* --------------------------- Types for mini-profs -------------------------- */
-type MiniProfile = { name?: string; photoURL?: string };
+type MiniProfile = {
+  name?: string;
+  photoURL?: string;
+  photoThumbURL?: string;
+  avatar?: string;
+};
 
 /* -------------------------------- Component ------------------------------- */
 export default function CalendarPage() {
@@ -481,7 +487,7 @@ return (
                   <div className="flex items-center -space-x-2">
                     {avatarIds.map((uid) => {
                       const p = profiles[uid] || {};
-                      const src = p.photoURL || "/default-avatar.png";
+                      const src = resolveSmallProfilePhoto(p) || "/default-avatar.png";
                       return (
                         <Link
                           key={uid}
