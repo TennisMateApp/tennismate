@@ -91,6 +91,18 @@ const arraysEqualUnordered = (a: string[], b: string[]) => {
   return as.every((v, i) => v === bs[i]);
 };
 
+async function logFirestoreCall<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  console.info(`[DesktopProfilePage][Firestore] START ${label}`);
+  try {
+    const result = await operation();
+    console.info(`[DesktopProfilePage][Firestore] OK ${label}`);
+    return result;
+  } catch (error) {
+    console.error(`[DesktopProfilePage][Firestore] FAIL ${label}`, error);
+    throw error;
+  }
+}
+
 type MatchStats = { matches: number; completed: number; wins: number };
 
 type ProfileData = {
@@ -263,8 +275,10 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
 
       // players/{uid} + players_private/{uid}
       const [playerSnap, privateSnap] = await Promise.all([
-        getDoc(doc(db, "players", u.uid)),
-        getDoc(doc(db, "players_private", u.uid)),
+        logFirestoreCall(`getDoc players/${u.uid}`, () => getDoc(doc(db, "players", u.uid))),
+        logFirestoreCall(`getDoc players_private/${u.uid}`, () =>
+          getDoc(doc(db, "players_private", u.uid))
+        ),
       ]);
       const data = playerSnap.exists() ? (playerSnap.data() as any) : {};
       const privateData = privateSnap.exists() ? (privateSnap.data() as any) : {};
@@ -301,18 +315,22 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
 
       const requestSnaps = await Promise.all(
         requestStatusesToCount.flatMap((status) => [
-          getDocs(
-            query(
-              collection(db, "match_requests"),
-              where("fromUserId", "==", u.uid),
-              where("status", "==", status)
+          logFirestoreCall(`getDocs match_requests fromUserId=${u.uid} status=${status}`, () =>
+            getDocs(
+              query(
+                collection(db, "match_requests"),
+                where("fromUserId", "==", u.uid),
+                where("status", "==", status)
+              )
             )
           ),
-          getDocs(
-            query(
-              collection(db, "match_requests"),
-              where("toUserId", "==", u.uid),
-              where("status", "==", status)
+          logFirestoreCall(`getDocs match_requests toUserId=${u.uid} status=${status}`, () =>
+            getDocs(
+              query(
+                collection(db, "match_requests"),
+                where("toUserId", "==", u.uid),
+                where("status", "==", status)
+              )
             )
           ),
         ])
@@ -330,7 +348,10 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
         collection(db, "match_history"),
         where("players", "array-contains", u.uid)
       );
-      const historySnap = await getDocs(historyQ);
+      const historySnap = await logFirestoreCall(
+        `getDocs match_history players array-contains ${u.uid}`,
+        () => getDocs(historyQ)
+      );
 
       let completed = 0;
       let wins = 0;
@@ -388,10 +409,8 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
       const mergedBadges = Array.from(new Set([...existingBadges, ...earnedBadges]));
 
       if (!arraysEqualUnordered(existingBadges, mergedBadges)) {
-        await setDoc(
-          doc(db, "players", u.uid),
-          { badges: mergedBadges },
-          { merge: true }
+        await logFirestoreCall(`setDoc players/${u.uid} badges merge`, () =>
+          setDoc(doc(db, "players", u.uid), { badges: mergedBadges }, { merge: true })
         );
       }
 

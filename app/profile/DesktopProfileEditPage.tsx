@@ -83,6 +83,18 @@ function normalizeAvailability(raw: any): AvailabilityKey[] {
   return AVAILABILITY_OPTIONS.filter((k) => set.has(k));
 }
 
+async function logFirestoreCall<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  console.info(`[DesktopProfileEditPage][Firestore] START ${label}`);
+  try {
+    const result = await operation();
+    console.info(`[DesktopProfileEditPage][Firestore] OK ${label}`);
+    return result;
+  } catch (error) {
+    console.error(`[DesktopProfileEditPage][Firestore] FAIL ${label}`, error);
+    throw error;
+  }
+}
+
 export default function DesktopProfileEditPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -140,8 +152,8 @@ const [formData, setFormData] = useState({
       const playerRef = doc(db, "players", u.uid);
       const privatePlayerRef = doc(db, "players_private", u.uid);
       const [snap, privateSnap] = await Promise.all([
-        getDoc(playerRef),
-        getDoc(privatePlayerRef),
+        logFirestoreCall(`getDoc players/${u.uid}`, () => getDoc(playerRef)),
+        logFirestoreCall(`getDoc players_private/${u.uid}`, () => getDoc(privatePlayerRef)),
       ]);
       const data = snap.exists() ? (snap.data() as any) : {};
       const privateData = privateSnap.exists() ? (privateSnap.data() as any) : {};
@@ -260,7 +272,9 @@ const handleRemovePhoto = async () => {
 
   const getLatLngForPostcode = async (postcode: string): Promise<{ lat: number; lng: number }> => {
     const pcRef = doc(db, "postcodes", postcode.trim());
-    const pcSnap = await getDoc(pcRef);
+    const pcSnap = await logFirestoreCall(`getDoc postcodes/${postcode.trim()}`, () =>
+      getDoc(pcRef)
+    );
     if (!pcSnap.exists()) throw new Error("POSTCODE_NOT_FOUND");
     const data = pcSnap.data() as any;
     if (typeof data.lat !== "number" || typeof data.lng !== "number") throw new Error("POSTCODE_BAD_COORDS");
@@ -397,17 +411,23 @@ const userPayload = {
 };
 
 await Promise.all([
-  setDoc(
-    doc(db, "players", user.uid),
-    {
-      ...playerPayload,
-      avatar: photoThumbURL || photoURL || null,
-      photoUpdatedAt: serverTimestamp(),
-    },
-    { merge: true }
+  logFirestoreCall(`setDoc players/${user.uid} profile merge`, () =>
+    setDoc(
+      doc(db, "players", user.uid),
+      {
+        ...playerPayload,
+        avatar: photoThumbURL || photoURL || null,
+        photoUpdatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    )
   ),
-  setDoc(doc(db, "players_private", user.uid), privatePlayerPayload, { merge: true }),
-  setDoc(doc(db, "users", user.uid), userPayload, { merge: true }),
+  logFirestoreCall(`setDoc players_private/${user.uid} profile merge`, () =>
+    setDoc(doc(db, "players_private", user.uid), privatePlayerPayload, { merge: true })
+  ),
+  logFirestoreCall(`setDoc users/${user.uid} profile merge`, () =>
+    setDoc(doc(db, "users", user.uid), userPayload, { merge: true })
+  ),
 ]);
 
 if (auth.currentUser) {

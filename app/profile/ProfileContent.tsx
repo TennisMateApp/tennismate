@@ -111,6 +111,18 @@ const arraysEqualUnordered = (a: string[], b: string[]) => {
   return as.every((v, i) => v === bs[i]);
 };
 
+async function logFirestoreCall<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  console.info(`[ProfileContent][Firestore] START ${label}`);
+  try {
+    const result = await operation();
+    console.info(`[ProfileContent][Firestore] OK ${label}`);
+    return result;
+  } catch (error) {
+    console.error(`[ProfileContent][Firestore] FAIL ${label}`, error);
+    throw error;
+  }
+}
+
 const legacyToBand = (level?: string): SkillBand | "" => {
   if (!level) return "";
   const norm = level.toLowerCase();
@@ -188,7 +200,9 @@ const safeBadges = Array.isArray(formData.badges) ? formData.badges : [];
     setUser(currentUser);
 
     const userRef = doc(db, "users", currentUser.uid);
-    const userSnap = await getDoc(userRef);
+    const userSnap = await logFirestoreCall(`getDoc users/${currentUser.uid}`, () =>
+      getDoc(userRef)
+    );
     const u = userSnap.exists() ? (userSnap.data() as any) : {};
 
     setUserRole(typeof u.role === "string" ? u.role : "");
@@ -198,8 +212,10 @@ const safeBadges = Array.isArray(formData.badges) ? formData.badges : [];
     const playerRef = doc(db, "players", currentUser.uid);
     const privatePlayerRef = doc(db, "players_private", currentUser.uid);
     const [snap, privateSnap] = await Promise.all([
-      getDoc(playerRef),
-      getDoc(privatePlayerRef),
+      logFirestoreCall(`getDoc players/${currentUser.uid}`, () => getDoc(playerRef)),
+      logFirestoreCall(`getDoc players_private/${currentUser.uid}`, () =>
+        getDoc(privatePlayerRef)
+      ),
     ]);
     const data = snap.data() || {};
     const privateData = privateSnap.data() || {};
@@ -242,19 +258,27 @@ originalPostcodeRef.current = String(privateData.postcode || data.postcode || ""
 
     const requestSnaps = await Promise.all(
       requestStatusesToCount.flatMap((status) => [
-        getDocs(
-          query(
-            collection(db, "match_requests"),
-            where("fromUserId", "==", currentUser.uid),
-            where("status", "==", status)
-          )
+        logFirestoreCall(
+          `getDocs match_requests fromUserId=${currentUser.uid} status=${status}`,
+          () =>
+            getDocs(
+              query(
+                collection(db, "match_requests"),
+                where("fromUserId", "==", currentUser.uid),
+                where("status", "==", status)
+              )
+            )
         ),
-        getDocs(
-          query(
-            collection(db, "match_requests"),
-            where("toUserId", "==", currentUser.uid),
-            where("status", "==", status)
-          )
+        logFirestoreCall(
+          `getDocs match_requests toUserId=${currentUser.uid} status=${status}`,
+          () =>
+            getDocs(
+              query(
+                collection(db, "match_requests"),
+                where("toUserId", "==", currentUser.uid),
+                where("status", "==", status)
+              )
+            )
         ),
       ])
     );
@@ -273,7 +297,10 @@ originalPostcodeRef.current = String(privateData.postcode || data.postcode || ""
       where("players", "array-contains", currentUser.uid)
     );
 
-    const historySnap = await getDocs(historyQ);
+    const historySnap = await logFirestoreCall(
+      `getDocs match_history players array-contains ${currentUser.uid}`,
+      () => getDocs(historyQ)
+    );
 
     let completed = 0;
     let wins = 0;
@@ -334,10 +361,8 @@ originalPostcodeRef.current = String(privateData.postcode || data.postcode || ""
 
     // If badges were in old object format, or any new ones were earned, normalize/write back
     if (!arraysEqualUnordered(existingBadges, mergedBadges)) {
-      await setDoc(
-        doc(db, "players", currentUser.uid),
-        { badges: mergedBadges },
-        { merge: true }
+      await logFirestoreCall(`setDoc players/${currentUser.uid} badges merge`, () =>
+        setDoc(doc(db, "players", currentUser.uid), { badges: mergedBadges }, { merge: true })
       );
     }
 
@@ -455,43 +480,49 @@ const handleActivateCoachProfile = async () => {
     const uid = user.uid;
 
     // If they already have a player profile, make them BOTH so Match Me still works
-    const playerSnap = await getDoc(doc(db, "players", uid));
+    const playerSnap = await logFirestoreCall(`getDoc players/${uid} (coach activation)`, () =>
+      getDoc(doc(db, "players", uid))
+    );
     const nextRole = playerSnap.exists() ? "both" : "coach";
 
     // 1) Update users doc to grant coach access
-    await setDoc(
-      doc(db, "users", uid),
-      {
-        role: nextRole,
-        coachInvited: false, // consume invite
-        coachActivatedAt: serverTimestamp(),
-      },
-      { merge: true }
+    await logFirestoreCall(`setDoc users/${uid} coach activation merge`, () =>
+      setDoc(
+        doc(db, "users", uid),
+        {
+          role: nextRole,
+          coachInvited: false, // consume invite
+          coachActivatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      )
     );
 
     // 2) Ensure coaches/{uid} exists (create starter doc if missing)
     const coachRef = doc(db, "coaches", uid);
-    const coachSnap = await getDoc(coachRef);
+    const coachSnap = await logFirestoreCall(`getDoc coaches/${uid}`, () => getDoc(coachRef));
 
     if (!coachSnap.exists()) {
-      await setDoc(
-        coachRef,
-        {
-          userId: uid,
-          name: formData.name || "",
-avatar: formData.photoURL || null,
-          mobile: "",
-          contactFirstForRate: true,
-          coachingExperience: "",
-          bio: "",
-          playingBackground: "",
-          courtAddress: "",
-          coachingSkillLevels: [],
-          galleryPhotos: [],
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
+      await logFirestoreCall(`setDoc coaches/${uid} bootstrap merge`, () =>
+        setDoc(
+          coachRef,
+          {
+            userId: uid,
+            name: formData.name || "",
+            avatar: formData.photoURL || null,
+            mobile: "",
+            contactFirstForRate: true,
+            coachingExperience: "",
+            bio: "",
+            playingBackground: "",
+            courtAddress: "",
+            coachingSkillLevels: [],
+            galleryPhotos: [],
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        )
       );
     }
 
@@ -512,7 +543,7 @@ avatar: formData.photoURL || null,
 const getLatLngForPostcode = async (postcode: string): Promise<{ lat: number; lng: number }> => {
   const pc = postcode.trim();
   const pcRef = doc(db, "postcodes", pc);
-  const pcSnap = await getDoc(pcRef);
+  const pcSnap = await logFirestoreCall(`getDoc postcodes/${pc}`, () => getDoc(pcRef));
 
   if (!pcSnap.exists()) {
     throw new Error("POSTCODE_NOT_FOUND");
@@ -673,17 +704,23 @@ const userPayload = {
 };
 
 await Promise.all([
-  setDoc(
-    doc(db, "players", user.uid),
-    {
-      ...playerPayload,
-      avatar: photoThumbURL || photoURL || null,
-      photoUpdatedAt: serverTimestamp(),
-    },
-    { merge: true }
+  logFirestoreCall(`setDoc players/${user.uid} profile merge`, () =>
+    setDoc(
+      doc(db, "players", user.uid),
+      {
+        ...playerPayload,
+        avatar: photoThumbURL || photoURL || null,
+        photoUpdatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    )
   ),
-  setDoc(doc(db, "players_private", user.uid), privatePlayerPayload, { merge: true }),
-  setDoc(doc(db, "users", user.uid), userPayload, { merge: true }),
+  logFirestoreCall(`setDoc players_private/${user.uid} profile merge`, () =>
+    setDoc(doc(db, "players_private", user.uid), privatePlayerPayload, { merge: true })
+  ),
+  logFirestoreCall(`setDoc users/${user.uid} profile merge`, () =>
+    setDoc(doc(db, "users", user.uid), userPayload, { merge: true })
+  ),
 ]);
 
 if (auth.currentUser) {
