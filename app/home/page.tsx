@@ -341,6 +341,9 @@ type CalendarEvent = {
   source?: string | null;       // optional: "invite"
   conversationId?: string | null; // optional: if you stored it
   messageId?: string | null;      // optional: if you stored it
+  participants?: string[] | null;
+  inviteType?: string | null;
+  previousInviteId?: string | null;
 };
 
 function isoToMs(iso?: string | null): number {
@@ -429,6 +432,101 @@ function formatStartLikeCard(iso?: string | null) {
 
   const day = d.toLocaleDateString(undefined, { weekday: "short" });
   return `${day}, ${time}`;
+}
+
+function getInviteStartISO(data: any): string | null {
+  if (typeof data?.startISO === "string" && data.startISO) return data.startISO;
+  if (typeof data?.invite?.startISO === "string" && data.invite.startISO) return data.invite.startISO;
+  if (typeof data?.inviteStart === "string" && data.inviteStart) return data.inviteStart;
+  return null;
+}
+
+function normalizeAcceptedInviteEvent(inviteId: string, data: any, uid: string): CalendarEvent | null {
+  const status = String(data?.inviteStatus ?? data?.status ?? "").toLowerCase();
+  if (status !== "accepted") return null;
+
+  const start = getInviteStartISO(data);
+  if (!start || isoToMs(start) < Date.now()) return null;
+
+  const fromUserId = typeof data?.fromUserId === "string" ? data.fromUserId : null;
+  const toUserId = typeof data?.toUserId === "string" ? data.toUserId : null;
+  const participants = Array.from(new Set([fromUserId, toUserId].filter(Boolean))) as string[];
+
+  if (!participants.includes(uid)) return null;
+
+  return {
+    id: `invite_fallback_${inviteId}`,
+    title:
+      (typeof data?.invite?.title === "string" && data.invite.title) ||
+      "Match Invite",
+    start,
+    end:
+      (typeof data?.invite?.endISO === "string" && data.invite.endISO) ||
+      null,
+    location:
+      (typeof data?.location === "string" && data.location) ||
+      (typeof data?.invite?.location === "string" && data.invite.location) ||
+      null,
+    courtName:
+      (typeof data?.courtName === "string" && data.courtName) ||
+      (typeof data?.invite?.court?.name === "string" ? data.invite.court.name : null) ||
+      null,
+    status: "accepted",
+    type: "invite",
+    inviteId,
+    source:
+      (typeof data?.source === "string" && data.source) ||
+      "match_invites_fallback",
+    conversationId:
+      typeof data?.conversationId === "string" ? data.conversationId : null,
+    messageId:
+      typeof data?.messageId === "string" && data.messageId
+        ? data.messageId
+        : inviteId,
+    participants,
+    inviteType:
+      (typeof data?.type === "string" && data.type) ||
+      (typeof data?.inviteType === "string" && data.inviteType) ||
+      null,
+    previousInviteId:
+      typeof data?.previousInviteId === "string" ? data.previousInviteId : null,
+  };
+}
+
+function getCalendarEventDedupeKey(e: CalendarEvent): string {
+  const inviteKey =
+    (typeof e.inviteId === "string" && e.inviteId) ||
+    (typeof e.messageId === "string" && e.messageId) ||
+    null;
+
+  if (inviteKey) return `invite:${inviteKey}`;
+  if (typeof e.eventId === "string" && e.eventId) return `event:${e.eventId}`;
+  return `doc:${e.id}`;
+}
+
+function mergeUpcomingEvents(calendarEvents: CalendarEvent[], inviteEvents: CalendarEvent[]) {
+  const merged = new Map<string, CalendarEvent>();
+
+  [...calendarEvents, ...inviteEvents].forEach((event) => {
+    const key = getCalendarEventDedupeKey(event);
+    const existing = merged.get(key);
+
+    if (!existing) {
+      merged.set(key, event);
+      return;
+    }
+
+    const existingIsCalendar = existing.source === "cf:syncCalendarOnInviteAccepted";
+    const nextIsCalendar = event.source === "cf:syncCalendarOnInviteAccepted";
+
+    if (!existingIsCalendar && nextIsCalendar) {
+      merged.set(key, event);
+    }
+  });
+
+  return Array.from(merged.values())
+    .filter((event) => isoToMs(event.start) >= Date.now())
+    .sort((a, b) => isoToMs(a.start) - isoToMs(b.start));
 }
 
 type ActivePlayer = {
@@ -551,6 +649,8 @@ const [myMatches, setMyMatches] = useState<any[]>([]);
 const [myMatchesLoading, setMyMatchesLoading] = useState(true);
 const [myCalendarEvents, setMyCalendarEvents] = useState<CalendarEvent[]>([]);
 const [myCalendarEventsLoading, setMyCalendarEventsLoading] = useState(true);
+const [acceptedInviteEvents, setAcceptedInviteEvents] = useState<CalendarEvent[]>([]);
+const [acceptedInviteEventsLoading, setAcceptedInviteEventsLoading] = useState(true);
 const [oppByUid, setOppByUid] = useState<Record<string, OpponentProfile>>(() => loadOpponentProfileCache());
 const fetchingNamesRef = useRef<Set<string>>(new Set());
 
@@ -798,12 +898,13 @@ setOppByUid((prev) => {
 
 useEffect(() => {
   if (!uid) return;
-  if (!myCalendarEvents.length) return;
+  const nextUpcomingEvents = mergeUpcomingEvents(myCalendarEvents, acceptedInviteEvents);
+  if (!nextUpcomingEvents.length) return;
 
   // collect opponent ids from calendar events
   const opponentIds = Array.from(
     new Set(
-      myCalendarEvents
+      nextUpcomingEvents
         .map((ev: any) => getOpponentUidFromParticipants(ev, uid))
         .filter(Boolean)
     )
@@ -873,13 +974,15 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [uid, myCalendarEvents]);
+}, [uid, myCalendarEvents, acceptedInviteEvents]);
 
 useEffect(() => {
   if (!uid) return;
 
   let alive = true;
   let offCalendar: (() => void) | null = null;
+  let offIncomingInvites: (() => void) | null = null;
+  let offOutgoingInvites: (() => void) | null = null;
 
   setHomeBootstrapping(true);
 
@@ -906,6 +1009,9 @@ useEffect(() => {
     setMyCalendarEvents([]);
     setMyCalendarEventsLoading(true);
   }
+
+  setAcceptedInviteEvents([]);
+  setAcceptedInviteEventsLoading(true);
 
   // -----------------------
   // Start real-time calendar immediately
@@ -941,6 +1047,52 @@ useEffect(() => {
     }
   );
 
+  let incomingInviteDocs: any[] = [];
+  let outgoingInviteDocs: any[] = [];
+
+  const syncAcceptedInviteEvents = () => {
+    if (!alive) return;
+
+    const map = new Map<string, CalendarEvent>();
+
+    [...incomingInviteDocs, ...outgoingInviteDocs].forEach((docSnap: any) => {
+      const normalized = normalizeAcceptedInviteEvent(docSnap.id, docSnap.data(), uid);
+      if (!normalized) return;
+      map.set(docSnap.id, normalized);
+    });
+
+    setAcceptedInviteEvents(
+      Array.from(map.values()).sort((a, b) => isoToMs(a.start) - isoToMs(b.start))
+    );
+    setAcceptedInviteEventsLoading(false);
+  };
+
+  offIncomingInvites = onSnapshot(
+    query(collection(db, "match_invites"), where("toUserId", "==", uid)),
+    (snap) => {
+      incomingInviteDocs = snap.docs;
+      syncAcceptedInviteEvents();
+    },
+    (err) => {
+      console.warn("[Home] incoming invite snapshot failed:", err);
+      if (!alive) return;
+      setAcceptedInviteEventsLoading(false);
+    }
+  );
+
+  offOutgoingInvites = onSnapshot(
+    query(collection(db, "match_invites"), where("fromUserId", "==", uid)),
+    (snap) => {
+      outgoingInviteDocs = snap.docs;
+      syncAcceptedInviteEvents();
+    },
+    (err) => {
+      console.warn("[Home] outgoing invite snapshot failed:", err);
+      if (!alive) return;
+      setAcceptedInviteEventsLoading(false);
+    }
+  );
+
   // -----------------------
   // Fetch nearby active fresh in background
   // -----------------------
@@ -969,8 +1121,12 @@ useEffect(() => {
   return () => {
     alive = false;
     if (offCalendar) offCalendar();
+    if (offIncomingInvites) offIncomingInvites();
+    if (offOutgoingInvites) offOutgoingInvites();
   };
 }, [uid]);
+
+const nextUpcomingEvents = mergeUpcomingEvents(myCalendarEvents, acceptedInviteEvents);
 
 function openConversationWithPlayer(otherUid: string) {
   if (!uid || !otherUid) return;
@@ -991,14 +1147,14 @@ function closeDidPlayOverlay() {
   router.replace(next);
 }
 
-const nextEvent = myCalendarEvents?.[0] ?? null;
+const nextEvent = nextUpcomingEvents?.[0] ?? null;
 
 // ✅ DESKTOP WEB (not app) layout
 if (showDesktopWeb) {
   console.log("[HOME -> DESKTOP PROPS]", {
     myCalendarEventsLoading,
-    myCalendarEventsCount: myCalendarEvents?.length ?? 0,
-    firstEvent: myCalendarEvents?.[0] ?? null,
+    myCalendarEventsCount: nextUpcomingEvents?.length ?? 0,
+    firstEvent: nextUpcomingEvents?.[0] ?? null,
   });
 
   return (
@@ -1013,8 +1169,8 @@ if (showDesktopWeb) {
       router={router}
       nearbyActive={nearbyActive}
       nearbyActiveLoading={nearbyActiveLoading}
-      myCalendarEvents={myCalendarEvents}
-      myCalendarEventsLoading={myCalendarEventsLoading}
+      myCalendarEvents={nextUpcomingEvents}
+      myCalendarEventsLoading={myCalendarEventsLoading || acceptedInviteEventsLoading}
       homeBootstrapping={homeBootstrapping}
     />
   );
@@ -1154,7 +1310,7 @@ if (showDesktopWeb) {
     </button>
   </div>
 
-  {myCalendarEventsLoading ? (
+  {myCalendarEventsLoading || acceptedInviteEventsLoading ? (
     <div className="h-[124px] w-full rounded-3xl bg-black/5 animate-pulse" />
   ) : nextEvent ? (
     (() => {
@@ -1169,6 +1325,8 @@ if (showDesktopWeb) {
       const href = getNextMatchHref(nextEvent as any);
       const inviteId = getInviteIdFromCalendarEvent(nextEvent as any);
 const isInvite = !!inviteId;
+const isRematch =
+  nextEvent.inviteType === "rematch" || !!nextEvent.previousInviteId;
 
       return (
         <div
@@ -1187,15 +1345,22 @@ const isInvite = !!inviteId;
 
           <div className="relative flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div
-                className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-widest"
-                style={{
-                  background: "rgba(22,163,74,0.12)",
-                  color: matchAccent,
-                  border: "1px solid rgba(22,163,74,0.25)",
-                }}
-              >
-                UPCOMING
+              <div className="flex items-center gap-2">
+                <div
+                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-widest"
+                  style={{
+                    background: "rgba(22,163,74,0.12)",
+                    color: matchAccent,
+                    border: "1px solid rgba(22,163,74,0.25)",
+                  }}
+                >
+                  UPCOMING
+                </div>
+                {isRematch && (
+                  <div className="inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[10px] font-extrabold tracking-widest text-black/60">
+                    REMATCH
+                  </div>
+                )}
               </div>
 
               <div className="mt-2 text-[18px] font-extrabold truncate">

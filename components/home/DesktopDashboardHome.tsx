@@ -31,6 +31,8 @@ type CalendarEvent = {
   messageId?: string | null;
   inviteId?: string | null;
   type?: string | null;
+  inviteType?: string | null;
+  previousInviteId?: string | null;
 
   participants?: string[] | null;
 };
@@ -407,6 +409,8 @@ const whereLabel = nextEvent.courtName || nextEvent.location || "Court TBA";
 const href = getNextMatchHref(nextEvent);
 const inviteId = getInviteIdFromCalendarEvent(nextEvent);
 const isInvite = !!inviteId;
+const isRematch =
+  nextEvent.inviteType === "rematch" || !!nextEvent.previousInviteId;
 
                       return (
                         <div
@@ -415,15 +419,22 @@ const isInvite = !!inviteId;
                         >
                           <div className="flex items-start justify-between gap-4">
                             <div className="min-w-0">
-                              <div
-                                className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-widest"
-                                style={{
-                                  background: "rgba(22,163,74,0.12)",
-                                  color: matchAccent,
-                                  border: "1px solid rgba(22,163,74,0.25)",
-                                }}
-                              >
-                                UPCOMING
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-widest"
+                                  style={{
+                                    background: "rgba(22,163,74,0.12)",
+                                    color: matchAccent,
+                                    border: "1px solid rgba(22,163,74,0.25)",
+                                  }}
+                                >
+                                  UPCOMING
+                                </div>
+                                {isRematch && (
+                                  <div className="inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[10px] font-extrabold tracking-widest text-black/60">
+                                    REMATCH
+                                  </div>
+                                )}
                               </div>
 
                               <div className="mt-2 text-[18px] font-extrabold text-black/90 truncate">
