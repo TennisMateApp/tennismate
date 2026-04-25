@@ -1,14 +1,9 @@
-// app/page.tsx
 "use client";
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 export default function HomeRedirect() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.replace("/home"); // 👈 default route if app loads at "/"
-  }, [router]);
-
-  return null;
+  return (
+    <div className="flex h-dvh items-center justify-center">
+      <div className="text-sm opacity-70">Loading...</div>
+    </div>
+  );
 }

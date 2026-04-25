@@ -210,6 +210,16 @@ const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
 const [showAgeGate, setShowAgeGate] = useState(false);
 const [ageGateChecked, setAgeGateChecked] = useState(false);
 const [profileGateReady, setProfileGateReady] = useState(false);
+const pathnameRef = useRef(pathname);
+const showVerifyRef = useRef(showVerify);
+
+useEffect(() => {
+  pathnameRef.current = pathname;
+}, [pathname]);
+
+useEffect(() => {
+  showVerifyRef.current = showVerify;
+}, [showVerify]);
 
 // --- Update players/{uid}.lastActiveAt (throttled) ---
 useEffect(() => {
@@ -285,6 +295,7 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
   if (u) {
     setAgeGateChecked(false);
     setShowAgeGate(false);
+    setUser(u);
 
     profileTrackedRef.current = false;
     void trackSetUserId(u.uid);
@@ -300,8 +311,6 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
     sessionStorage.setItem(loginKey, "1");
   }
  
-  await u.reload();
-  setUser(auth.currentUser);
 
           // ✅ Initialize native push for Android app runtime
 
@@ -309,13 +318,19 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
       const userDocSnap = await getDoc(doc(db, "users", u.uid));
       const requireVerification =
         userDocSnap.exists() && userDocSnap.data()?.requireVerification === true;
-      setShowVerify(requireVerification && !u.emailVerified);
+      const needsVerify = requireVerification && !u.emailVerified;
+      showVerifyRef.current = needsVerify;
+      setShowVerify(needsVerify);
 
 const playerRef = doc(db, "players", u.uid);
 const privatePlayerRef = doc(db, "players_private", u.uid);
 
 unsubPlayer = onSnapshot(playerRef, async (docSnap) => {
-  const canShowGate = !PUBLIC_ROUTES.has(pathname || "") && !showVerify;
+  const currentPathname = pathnameRef.current || "";
+  const canShowGate =
+    !PUBLIC_ROUTES.has(currentPathname) &&
+    !currentPathname.startsWith("/verify-email") &&
+    !showVerifyRef.current;
 
   if (docSnap.exists()) {
     const data = docSnap.data() as any;
@@ -447,8 +462,6 @@ useEffect(() => {
   (async () => {
     const u = auth.currentUser;
     if (!u) return;
-
-    await u.reload();
 
     const snap = await getDoc(doc(db, "users", u.uid));
     const requireVerification = snap.exists() && snap.data()?.requireVerification === true;

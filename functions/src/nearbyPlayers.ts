@@ -30,9 +30,9 @@ type NearbyPlayerResult = {
 
 const DEFAULT_RADIUS_KM = 50;
 const DEFAULT_LIMIT = 100;
-const MAX_LIMIT = 200;
+const MAX_LIMIT = 600;
 const QUERY_LIMIT_MULTIPLIER = 5;
-const MAX_QUERY_LIMIT_PER_BOUND = 400;
+const MAX_QUERY_LIMIT_PER_BOUND = 1200;
 
 function toFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -95,6 +95,9 @@ export async function fetchNearbyPlayersForUser(
   uid: string,
   requestData: NearbyPlayersRequest
 ): Promise<{ players: NearbyPlayerResult[] }> {
+  const requestedRadiusKm = requestData.radiusKm;
+  const requestedActiveWithinHours = requestData.activeWithinHours;
+  const requestedLimit = requestData.limit;
   const radiusKm = clampRadiusKm(requestData.radiusKm);
   const activeWithinHours = normalizeActiveWithinHours(requestData.activeWithinHours);
   const limit = clampLimit(requestData.limit);
@@ -118,6 +121,7 @@ export async function fetchNearbyPlayersForUser(
 
   const bounds = geohashQueryBounds([callerLat, callerLng], radiusKm * 1000);
   const candidatePrivateByUid = new Map<string, FirebaseFirestore.DocumentData>();
+  let totalPrivateCandidatesScanned = 0;
 
   await Promise.all(
     bounds.map(async ([start, end]) => {
@@ -129,6 +133,7 @@ export async function fetchNearbyPlayersForUser(
         .limit(perBoundLimit)
         .get();
 
+      totalPrivateCandidatesScanned += snap.size;
       snap.forEach((docSnap) => {
         if (docSnap.id === uid) return;
         if (!candidatePrivateByUid.has(docSnap.id)) {
@@ -148,9 +153,19 @@ export async function fetchNearbyPlayersForUser(
   const nowMs = Date.now();
 
   const players: NearbyPlayerResult[] = [];
+  let skippedMissingPublicProfile = 0;
+  let skippedIncompleteProfile = 0;
+  let skippedIsMatchableFalse = 0;
+  let skippedMissingLocation = 0;
+  let skippedOutsideRadius = 0;
+  let skippedMissingLastActive = 0;
+  let skippedOutsideActiveWindow = 0;
 
   for (const publicSnap of publicSnaps) {
-    if (!publicSnap.exists) continue;
+    if (!publicSnap.exists) {
+      skippedMissingPublicProfile += 1;
+      continue;
+    }
 
     const publicData = publicSnap.data() || {};
     const privateData = candidatePrivateByUid.get(publicSnap.id) || {};
@@ -158,22 +173,40 @@ export async function fetchNearbyPlayersForUser(
     const lat = toFiniteNumber(privateData.lat);
     const lng = toFiniteNumber(privateData.lng);
     const geohash = typeof privateData.geohash === "string" ? privateData.geohash : null;
-    if (lat == null || lng == null || !geohash) continue;
+    if (lat == null || lng == null || !geohash) {
+      skippedMissingLocation += 1;
+      continue;
+    }
 
-    if (publicData.profileComplete !== true) continue;
-    if (publicData.isMatchable === false) continue;
+    if (publicData.profileComplete !== true) {
+      skippedIncompleteProfile += 1;
+      continue;
+    }
+    if (publicData.isMatchable === false) {
+      skippedIsMatchableFalse += 1;
+      continue;
+    }
 
     const lastActiveAt = toTimestampMillis(publicData.lastActiveAt);
     if (activeWithinHours != null) {
-      if (lastActiveAt == null) continue;
-      if (nowMs - lastActiveAt > activeWithinHours * 60 * 60 * 1000) continue;
+      if (lastActiveAt == null) {
+        skippedMissingLastActive += 1;
+        continue;
+      }
+      if (nowMs - lastActiveAt > activeWithinHours * 60 * 60 * 1000) {
+        skippedOutsideActiveWindow += 1;
+        continue;
+      }
     }
 
     const distanceKm = calculateDistanceKm(
       {lat: callerLat, lng: callerLng},
       {lat, lng}
     );
-    if (distanceKm > radiusKm) continue;
+    if (distanceKm > radiusKm) {
+      skippedOutsideRadius += 1;
+      continue;
+    }
 
     const skillRating =
       toFiniteNumber(publicData.skillRating) ?? toFiniteNumber(publicData.utr) ?? undefined;
@@ -200,6 +233,30 @@ export async function fetchNearbyPlayersForUser(
   }
 
   players.sort((a, b) => a.distanceKm - b.distanceKm);
+
+  console.log("[getNearbyPlayers] diagnostics", {
+    uid,
+    requestedRadiusKm,
+    normalizedRadiusKm: radiusKm,
+    requestedActiveWithinHours,
+    normalizedActiveWithinHours: activeWithinHours,
+    requestedLimit,
+    normalizedLimit: limit,
+    perBoundLimit,
+    boundsCount: bounds.length,
+    totalPrivateCandidatesScanned,
+    uniquePrivateCandidates: candidateIds.length,
+    publicProfilesFetched: publicSnaps.length,
+    skippedMissingPublicProfile,
+    skippedIncompleteProfile,
+    skippedIsMatchableFalse,
+    skippedMissingLocation,
+    skippedMissingLastActive,
+    skippedOutsideActiveWindow,
+    skippedOutsideRadius,
+    returnedCount: players.length,
+    slicedCount: Math.min(players.length, limit),
+  });
 
   return {players: players.slice(0, limit)};
 }

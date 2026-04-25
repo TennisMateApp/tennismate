@@ -1,20 +1,28 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebaseConfig";
 import { onAuthStateChanged } from "firebase/auth";
 
 export function useAuthRedirect() {
   const router = useRouter();
+  const [authReady, setAuthReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, user => {
-      if (!user) {
-        router.push("/login");
-      }
+      setIsAuthenticated(!!user);
+      setAuthReady(true);
     });
 
     return () => unsubscribe();
-  }, [router]);
+  }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!isAuthenticated) {
+      router.replace("/login");
+    }
+  }, [authReady, isAuthenticated, router]);
 }

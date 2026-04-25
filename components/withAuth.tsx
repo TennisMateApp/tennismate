@@ -10,23 +10,30 @@ import type { ComponentType } from "react";
 export default function withAuth<T extends object>(WrappedComponent: ComponentType<T>) {
   const ProtectedComponent = (props: T) => {
     const router = useRouter();
-    const [loading, setLoading] = useState(true);
+    const [authReady, setAuthReady] = useState(false);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
 
     useEffect(() => {
       const unsubscribe = onAuthStateChanged(auth, (user) => {
         if (user) {
           setIsAuthenticated(true);
-          setLoading(false);
         } else {
-          router.push("/login");
+          setIsAuthenticated(false);
         }
+        setAuthReady(true);
       });
 
       return () => unsubscribe();
-    }, [router]);
+    }, []);
 
-    if (loading) {
+    useEffect(() => {
+      if (!authReady) return;
+      if (!isAuthenticated) {
+        router.replace("/login");
+      }
+    }, [authReady, isAuthenticated, router]);
+
+    if (!authReady) {
       return <p>Loading...</p>; // You can replace this with a spinner later
     }
 
