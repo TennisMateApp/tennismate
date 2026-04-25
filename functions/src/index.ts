@@ -262,7 +262,19 @@ export const deleteMyAccount = onCall(async (request) => {
     });
   }
 
-  // ---- STEP 3: delete main Firestore docs ----
+  // ---- STEP 3: delete related Firestore docs involving this uid ----
+  try {
+    await cleanupUserRelatedData(uid, runId);
+  } catch (e: any) {
+    console.error("[DeleteAccount][%s] STEP related cleanup FAILED", runId, e?.message || String(e));
+    throw new HttpsError("internal", "Failed deleting related account data.", {
+      step: "delete_related_data",
+      runId,
+      message: e?.message || String(e),
+    });
+  }
+
+  // ---- STEP 4: delete main Firestore docs ----
   try {
     const batch = db.batch();
     batch.delete(usersRef);
@@ -278,7 +290,7 @@ export const deleteMyAccount = onCall(async (request) => {
     });
   }
 
-  // ---- STEP 4: delete Auth user ----
+  // ---- STEP 5: delete Auth user ----
   try {
     await admin.auth().deleteUser(uid);
     console.log("[DeleteAccount][%s] auth user deleted", runId, { uid });
@@ -1295,7 +1307,18 @@ const requesterNameFromPlayers = await getPlayerName(requesterId);
 async function deleteConversationDeep(conversationId: string) {
   const convoRef = db.collection("conversations").doc(conversationId);
 
-  // 1) delete messages in batches
+  if (typeof (db as any).recursiveDelete === "function") {
+    await (db as any).recursiveDelete(convoRef);
+    return;
+  }
+
+  console.warn(
+    `[DeleteConversation] recursiveDelete unavailable; falling back to direct messages-only cleanup for ${conversationId}`
+  );
+
+  // Fallback only removes the known messages subcollection. If deeper nested
+  // subcollections are added under conversation docs/messages later, this should
+  // be upgraded to a true recursive delete in Admin.
   const messagesRef = convoRef.collection("messages");
   while (true) {
     const batchSnap = await messagesRef.limit(400).get();
@@ -1306,8 +1329,236 @@ async function deleteConversationDeep(conversationId: string) {
     await batch.commit();
   }
 
-  // 2) delete conversation doc
   await convoRef.delete().catch(() => {});
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
+        .filter(Boolean)
+    )
+  ) as string[];
+}
+
+function chunkStrings(values: string[], size = 10): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < values.length; i += size) {
+    chunks.push(values.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function collectRefsForQueries(
+  queries: admin.firestore.Query[]
+): Promise<admin.firestore.DocumentReference[]> {
+  if (!queries.length) return [];
+
+  const snaps = await Promise.all(queries.map((queryRef) => queryRef.get()));
+  const refMap = new Map<string, admin.firestore.DocumentReference>();
+
+  for (const snap of snaps) {
+    snap.docs.forEach((docSnap) => refMap.set(docSnap.ref.path, docSnap.ref));
+  }
+
+  return Array.from(refMap.values());
+}
+
+async function deleteRefsInBatches(
+  refs: admin.firestore.DocumentReference[],
+  runId: string,
+  label: string
+): Promise<string[]> {
+  if (!refs.length) {
+    console.log(`[DeleteAccount][${runId}] ${label}: nothing to delete`);
+    return [];
+  }
+
+  const uniqueRefs = Array.from(new Map(refs.map((ref) => [ref.path, ref])).values());
+
+  for (let i = 0; i < uniqueRefs.length; i += 400) {
+    const batch = db.batch();
+    uniqueRefs.slice(i, i + 400).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+
+  console.log(`[DeleteAccount][${runId}] ${label}: deleted`, {
+    count: uniqueRefs.length,
+  });
+  return uniqueRefs.map((ref) => ref.id);
+}
+
+async function cleanupUserRelatedData(uid: string, runId: string) {
+  const summary = {
+    conversations: 0,
+    matchInvites: 0,
+    matchRequests: 0,
+    matchHistory: 0,
+    matchScores: 0,
+    completedMatches: 0,
+    matchFeedback: 0,
+    notifications: 0,
+  };
+
+  const conversationSnap = await db
+    .collection("conversations")
+    .where("participants", "array-contains", uid)
+    .get();
+  const conversationIds: string[] = [];
+
+  for (const docSnap of conversationSnap.docs) {
+    const data = (docSnap.data() || {}) as { participants?: unknown };
+    const participants = Array.isArray(data.participants)
+      ? data.participants.filter(
+          (value): value is string => typeof value === "string" && !!value
+        )
+      : [];
+
+    if (participants.length !== 2) {
+      console.log(`[DeleteAccount][${runId}] skipping shared conversation`, {
+        conversationId: docSnap.id,
+        participants,
+      });
+      continue;
+    }
+
+    conversationIds.push(docSnap.id);
+  }
+
+  for (const conversationId of conversationIds) {
+    await deleteConversationDeep(conversationId);
+  }
+  summary.conversations = conversationIds.length;
+  console.log(`[DeleteAccount][${runId}] conversations deleted`, {
+    count: summary.conversations,
+  });
+
+  const conversationIdChunks = chunkStrings(conversationIds);
+
+  const matchInviteQueries: admin.firestore.Query[] = [
+    db.collection("match_invites").where("fromUserId", "==", uid),
+    db.collection("match_invites").where("toUserId", "==", uid),
+    db.collection("match_invites").where("opponentId", "==", uid),
+  ];
+  conversationIdChunks.forEach((chunk) => {
+    matchInviteQueries.push(
+      db.collection("match_invites").where("conversationId", "in", chunk)
+    );
+  });
+  summary.matchInvites = (
+    await deleteRefsInBatches(
+      await collectRefsForQueries(matchInviteQueries),
+      runId,
+      "match_invites"
+    )
+  ).length;
+
+  const matchRequestQueries: admin.firestore.Query[] = [
+    db.collection("match_requests").where("fromUserId", "==", uid),
+    db.collection("match_requests").where("toUserId", "==", uid),
+  ];
+  conversationIdChunks.forEach((chunk) => {
+    matchRequestQueries.push(
+      db.collection("match_requests").where("conversationId", "in", chunk)
+    );
+  });
+  const deletedMatchRequestIds = await deleteRefsInBatches(
+    await collectRefsForQueries(matchRequestQueries),
+    runId,
+    "match_requests"
+  );
+  summary.matchRequests = deletedMatchRequestIds.length;
+
+  const matchHistoryQueries: admin.firestore.Query[] = [
+    db.collection("match_history").where("players", "array-contains", uid),
+    db.collection("match_history").where("fromUserId", "==", uid),
+    db.collection("match_history").where("toUserId", "==", uid),
+  ];
+  conversationIdChunks.forEach((chunk) => {
+    matchHistoryQueries.push(
+      db.collection("match_history").where("conversationId", "in", chunk)
+    );
+  });
+  summary.matchHistory = (
+    await deleteRefsInBatches(
+      await collectRefsForQueries(matchHistoryQueries),
+      runId,
+      "match_history"
+    )
+  ).length;
+
+  const deletedMatchScoreIds = await deleteRefsInBatches(
+    await collectRefsForQueries([
+      db.collection("match_scores").where("players", "array-contains", uid),
+    ]),
+    runId,
+    "match_scores"
+  );
+  summary.matchScores = deletedMatchScoreIds.length;
+
+  const completedMatchQueries: admin.firestore.Query[] = [
+    db.collection("completed_matches").where("fromUserId", "==", uid),
+    db.collection("completed_matches").where("toUserId", "==", uid),
+  ];
+  chunkStrings(deletedMatchScoreIds).forEach((chunk) => {
+    completedMatchQueries.push(
+      db.collection("completed_matches").where("matchId", "in", chunk)
+    );
+  });
+  summary.completedMatches = (
+    await deleteRefsInBatches(
+      await collectRefsForQueries(completedMatchQueries),
+      runId,
+      "completed_matches"
+    )
+  ).length;
+
+  const matchFeedbackQueries: admin.firestore.Query[] = [
+    db.collection("match_feedback").where("userId", "==", uid),
+  ];
+  // match_feedback.matchId is created from the original match request id in
+  // app/matches/[id]/summary/page.tsx and app/matches/[id]/feedback/page.tsx,
+  // so deleted match request ids are the correct secondary cleanup target.
+  chunkStrings(deletedMatchRequestIds).forEach((chunk) => {
+    matchFeedbackQueries.push(
+      db.collection("match_feedback").where("matchId", "in", chunk)
+    );
+  });
+  summary.matchFeedback = (
+    await deleteRefsInBatches(
+      await collectRefsForQueries(matchFeedbackQueries),
+      runId,
+      "match_feedback"
+    )
+  ).length;
+
+  const notificationQueries: admin.firestore.Query[] = [
+    db.collection("notifications").where("recipientId", "==", uid),
+    db.collection("notifications").where("fromUserId", "==", uid),
+  ];
+  conversationIdChunks.forEach((chunk) => {
+    notificationQueries.push(
+      db.collection("notifications").where("conversationId", "in", chunk)
+    );
+  });
+  chunkStrings(uniqueStrings([...deletedMatchRequestIds, ...deletedMatchScoreIds])).forEach(
+    (chunk) => {
+      notificationQueries.push(
+        db.collection("notifications").where("matchId", "in", chunk)
+      );
+    }
+  );
+  summary.notifications = (
+    await deleteRefsInBatches(
+      await collectRefsForQueries(notificationQueries),
+      runId,
+      "notifications"
+    )
+  ).length;
+
+  console.log(`[DeleteAccount][${runId}] related data cleanup complete`, summary);
+  return summary;
 }
 
 // 1) Join request CREATED -> notify host (bell + push)
