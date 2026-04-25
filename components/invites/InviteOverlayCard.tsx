@@ -19,6 +19,8 @@ import {
   where,
 } from "firebase/firestore";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
+import { trackEvent } from "@/lib/mixpanel";
+import { shouldTrackRematchInviteAccepted } from "@/lib/rematchAnalytics";
 
 const TM = {
   ink: "#0B3D2E",
@@ -171,6 +173,10 @@ const [scoreError, setScoreError] = useState<string | null>(null);
     // ✅ Derived statuses + permissions
   const status = inviteDoc?.inviteStatus || "pending";
   const bookingStatus = inviteDoc?.inviteBookingStatus || "not_confirmed";
+  const isRematch =
+    inviteDoc?.type === "rematch" ||
+    inviteDoc?.source === "post_match_prompt" ||
+    !!inviteDoc?.previousInviteId;
 
   const isRecipient = !!me && inviteDoc?.toUserId === me;
   const isSender = !!me && inviteDoc?.fromUserId === me;
@@ -224,6 +230,27 @@ const canRecordScore =
           }
         : {}),
     });
+
+    const acceptedInviteId = String(inviteId);
+
+    if (
+      next === "accepted" &&
+      isRematch &&
+      shouldTrackRematchInviteAccepted(acceptedInviteId)
+    ) {
+      trackEvent("rematch_invite_accepted", {
+        inviteId: acceptedInviteId,
+        previousInviteId: inviteDoc?.previousInviteId || null,
+        conversationId: inviteDoc?.conversationId || null,
+        accepterId: me || null,
+        senderId: inviteDoc?.fromUserId || null,
+        startISO:
+          (typeof inviteDoc?.invite?.startISO === "string" ? inviteDoc.invite.startISO : null) ||
+          null,
+        source: inviteDoc?.source || null,
+        type: inviteDoc?.type || "invite",
+      });
+    }
   }
 
   async function confirmBooked() {
@@ -470,6 +497,16 @@ const mapsEmbedSrc = mapQuery
 
           <div className="min-w-0 flex-1">
             <div className="text-sm font-extrabold text-slate-900 truncate">{otherName}</div>
+            {isRematch && (
+              <div className="mt-1">
+                <div className="inline-flex items-center rounded-full bg-[#39FF14]/20 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-[#0B3D2E]">
+                  Rematch
+                </div>
+                <div className="mt-1 text-[11px] font-medium text-slate-500">
+                  You played recently - same again?
+                </div>
+              </div>
+            )}
             <div className="text-[12px] font-semibold text-slate-500 truncate">
               {duration}
               {duration && location ? " • " : ""}

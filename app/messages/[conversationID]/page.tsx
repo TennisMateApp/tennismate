@@ -8,6 +8,15 @@ import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { getSuggestedCourtsForInvite } from "@/lib/suggestedCourtsClient";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
+import { trackEvent } from "@/lib/mixpanel";
+import { shouldTrackRematchInviteAccepted } from "@/lib/rematchAnalytics";
+import {
+  createRematchInviteFromPrevious,
+  dismissRematchPrompt,
+  findEligibleRematchInvite,
+  markRematchPromptShown,
+  type RematchPrefill,
+} from "@/lib/rematchInvites";
 
 import { db, auth } from "@/lib/firebaseConfig";
 import {
@@ -146,6 +155,11 @@ function InviteCard({
   const location = inv?.location || "";
   const note = inv?.note || "";
   const status = msg?.inviteStatus || "pending";
+  const isRematch =
+    msg?.inviteType === "rematch" ||
+    msg?.type === "rematch" ||
+    msg?.source === "post_match_prompt" ||
+    !!msg?.previousInviteId;
 
   // ✅ NEW: render court map + booking link from stored invite.court
 const court = inv?.court || null;
@@ -183,8 +197,19 @@ const mapsEmbedUrl = court
         className="text-[12px] font-extrabold mb-2"
         style={{ color: isOther ? "#111827" : "white" }}
       >
-        🎾 Match Invite
+        {isRematch ? "🎾 Rematch Invite" : "🎾 Match Invite"}
       </div>
+
+      {isRematch && (
+        <div
+          className="text-[11px] font-semibold mb-2"
+          style={{
+            color: isOther ? "rgba(17,24,39,0.68)" : "rgba(255,255,255,0.78)",
+          }}
+        >
+          You played recently - same again?
+        </div>
+      )}
 
       <div
         className="text-[13px] font-semibold"
@@ -494,6 +519,9 @@ const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
 const [inviteOverlayId, setInviteOverlayId] = useState<string | null>(null);
 
 const [showMatchPrompt, setShowMatchPrompt] = useState(false);
+const [rematchPromptInvite, setRematchPromptInvite] = useState<RematchPrefill | null>(null);
+const [rematchPromptBusy, setRematchPromptBusy] = useState(false);
+const rematchViewedRef = useRef<Set<string>>(new Set());
 
 const profileTargetId = useMemo(() => {
   if (isEventChat) return null;
@@ -759,6 +787,8 @@ useEffect(() => {
   const [inviteDuration, setInviteDuration] = useState<number>(60);
   const [inviteLocation, setInviteLocation] = useState<string>("");
   const [inviteNote, setInviteNote] = useState<string>("");
+  const [inviteFlow, setInviteFlow] = useState<"standard" | "rematch">("standard");
+  const [rematchContext, setRematchContext] = useState<RematchPrefill | null>(null);
 
     // ===== COURT SUGGESTION STATE =====
   const [courtLoading, setCourtLoading] = useState(false);
@@ -812,7 +842,45 @@ const scrollToBottom = (smooth = false) => {
   }
 };
 
-    const openInviteModal = () => {
+    const setInviteDateTimeFromISO = (startISO: string) => {
+    const d = new Date(startISO);
+    if (Number.isNaN(d.getTime())) return;
+
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+
+    setInviteDate(`${yyyy}-${mm}-${dd}`);
+    setInviteTime(`${hh}:${min}`);
+  };
+
+    const openInviteModal = (opts?: {
+    flow?: "standard" | "rematch";
+    rematch?: RematchPrefill | null;
+  }) => {
+    const flow = opts?.flow || "standard";
+    const rematch = opts?.rematch || null;
+
+    setInviteFlow(flow);
+    setRematchContext(rematch);
+
+    if (flow === "rematch" && rematch) {
+      setInviteDateTimeFromISO(rematch.startISO);
+      setInviteDuration(rematch.durationMins || 60);
+      setInviteLocation(rematch.location || rematch.courtName || "");
+      setInviteNote(rematch.note || "");
+      setSuggestedCourt(null);
+      setCourtError(null);
+      setCourtLoading(false);
+      setCourtQuery(rematch.courtName || rematch.location || "");
+      setCourtMatches([]);
+      setSelectedCourt(rematch.court || null);
+      setShowInvite(true);
+      return;
+    }
+
     const now = new Date();
     const yyyy = now.getFullYear();
     const mm = String(now.getMonth() + 1).padStart(2, "0");
@@ -834,11 +902,17 @@ setInviteNote("");
 setCourtQuery("");
 setCourtMatches([]);
 setSelectedCourt(null);
+setSuggestedCourt(null);
+setCourtError(null);
 
 setShowInvite(true);
   };
 
-  const closeInviteModal = () => setShowInvite(false);
+  const closeInviteModal = () => {
+    setShowInvite(false);
+    setInviteFlow("standard");
+    setRematchContext(null);
+  };
 
   const combineDateTimeISO = (dateStr: string, timeStr: string) => {
     const [y, m, d] = dateStr.split("-").map(Number);
@@ -992,6 +1066,81 @@ const clearMessageNotifsForConversation = async (uid: string, convoId: string) =
     console.error("Failed to clear message notifications for conversation", e);
   }
 };
+
+  useEffect(() => {
+    if (!user?.uid || !conversationID || isEventChat || rematchPromptInvite) return;
+
+    let cancelled = false;
+
+    const checkEligibleRematch = async () => {
+      try {
+        const eligible = await findEligibleRematchInvite({
+          conversationId: String(conversationID),
+          currentUserId: user.uid,
+        });
+
+        if (!eligible || cancelled) return;
+
+        await markRematchPromptShown(eligible.previousInviteId, user.uid);
+        if (cancelled) return;
+
+        setRematchPromptInvite(eligible);
+        trackEvent("rematch_prompt_shown", {
+          conversationId: String(conversationID),
+          previousInviteId: eligible.previousInviteId,
+          opponentId: eligible.opponentId,
+        });
+      } catch (e) {
+        console.error("Failed to check rematch prompt eligibility:", e);
+      }
+    };
+
+    void checkEligibleRematch();
+    const timer = window.setInterval(() => {
+      void checkEligibleRematch();
+    }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [conversationID, isEventChat, rematchPromptInvite, user?.uid]);
+
+  useEffect(() => {
+    if (!messages.length) return;
+
+    for (const msg of messages) {
+      const inviteId = typeof msg?.inviteId === "string" ? msg.inviteId : typeof msg?.id === "string" ? msg.id : null;
+      const isRematch =
+        msg?.inviteType === "rematch" ||
+        msg?.type === "rematch" ||
+        msg?.source === "post_match_prompt" ||
+        !!msg?.previousInviteId;
+
+      if (!inviteId || !isRematch) continue;
+      if (rematchViewedRef.current.has(inviteId)) continue;
+
+      const sessionKey = `tm_rematch_invite_viewed_${inviteId}`;
+      if (typeof window !== "undefined" && sessionStorage.getItem(sessionKey)) {
+        rematchViewedRef.current.add(inviteId);
+        continue;
+      }
+
+      rematchViewedRef.current.add(inviteId);
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(sessionKey, "1");
+      }
+
+      trackEvent("rematch_invite_viewed", {
+        inviteId,
+        previousInviteId: msg?.previousInviteId || null,
+        conversationId: String(conversationID),
+        startISO: msg?.invite?.startISO || null,
+        source: msg?.source || null,
+        type: msg?.inviteType || msg?.type || "invite",
+      });
+    }
+  }, [conversationID, messages]);
 
   // ===== AUTH / CONVO SNAPSHOT =====
   useEffect(() => {
@@ -1316,6 +1465,40 @@ return () => unsub();
 
   };
 
+  const handleDismissRematchPrompt = async () => {
+    if (!user || !rematchPromptInvite) return;
+
+    try {
+      setRematchPromptBusy(true);
+      await dismissRematchPrompt(rematchPromptInvite.previousInviteId, user.uid);
+      trackEvent("rematch_prompt_dismissed", {
+        conversationId: String(conversationID),
+        previousInviteId: rematchPromptInvite.previousInviteId,
+        opponentId: rematchPromptInvite.opponentId,
+      });
+      setRematchPromptInvite(null);
+    } catch (error) {
+      console.error("Failed to dismiss rematch prompt:", error);
+    } finally {
+      setRematchPromptBusy(false);
+    }
+  };
+
+  const handlePlayedRematchPrompt = () => {
+    if (!rematchPromptInvite) return;
+
+    trackEvent("rematch_prompt_yes_played", {
+      conversationId: String(conversationID),
+      previousInviteId: rematchPromptInvite.previousInviteId,
+      opponentId: rematchPromptInvite.opponentId,
+    });
+
+    openInviteModal({
+      flow: "rematch",
+      rematch: rematchPromptInvite,
+    });
+  };
+
     // ===== SEND INVITE (1:1 chats only) =====
   const sendInvite = async () => {
     if (!user) return;
@@ -1327,6 +1510,38 @@ return () => unsub();
     if (!recipientId) return;
 
     const startISO = combineDateTimeISO(inviteDate, inviteTime);
+
+    if (inviteFlow === "rematch" && rematchContext) {
+      try {
+        const inviteId = await createRematchInviteFromPrevious({
+          currentUserId: user.uid,
+          previousInviteId: rematchContext.previousInviteId,
+          conversationId: String(conversationID),
+          startISO,
+          durationMins: inviteDuration,
+          location: inviteLocation.trim(),
+          note: inviteNote.trim() || rematchContext.note,
+          court: activeCourt || rematchContext.court || null,
+        });
+
+        trackEvent("rematch_invite_created", {
+          conversationId: String(conversationID),
+          previousInviteId: rematchContext.previousInviteId,
+          inviteId,
+          opponentId: rematchContext.opponentId,
+        });
+
+        setShowInvite(false);
+        setInviteFlow("standard");
+        setRematchContext(null);
+        setRematchPromptInvite(null);
+        return;
+      } catch (error: any) {
+        console.error("Failed to create rematch invite:", error);
+        alert(error?.message || "Could not create rematch invite right now.");
+        return;
+      }
+    }
 
     const newMessage: any = {
       senderId: user.uid,
@@ -1445,6 +1660,11 @@ const respondToInvite = async (messageId: string, status: "accepted" | "declined
   // Pull invite details from the message (needed for accepted helper fields)
   const msg = messages.find((m) => m.id === messageId);
   const inv = msg?.invite || {};
+  const isRematchInvite =
+    msg?.inviteType === "rematch" ||
+    msg?.type === "rematch" ||
+    msg?.source === "post_match_prompt" ||
+    !!msg?.previousInviteId;
 
   await updateInviteEverywhere(messageId, {
     inviteStatus: status,
@@ -1481,6 +1701,25 @@ const respondToInvite = async (messageId: string, status: "accepted" | "declined
     },
     updatedAt: serverTimestamp(),
   });
+
+  const acceptedInviteId = String(msg?.inviteId || messageId);
+
+  if (
+    status === "accepted" &&
+    isRematchInvite &&
+    shouldTrackRematchInviteAccepted(acceptedInviteId)
+  ) {
+    trackEvent("rematch_invite_accepted", {
+      inviteId: acceptedInviteId,
+      previousInviteId: msg?.previousInviteId || null,
+      conversationId: String(conversationID),
+      accepterId: user.uid,
+      senderId: msg?.senderId || null,
+      startISO: inv?.startISO || null,
+      source: msg?.source || null,
+      type: msg?.inviteType || msg?.type || "invite",
+    });
+  }
 };
 
     // ✅ CONFIRM COURT BOOKING (one-click)
@@ -1815,6 +2054,105 @@ onClick={async () => {
   </div>
 )}
 
+{rematchPromptInvite && !isEventChat && (
+  <div className="relative z-20 bg-white px-3 pt-2 pb-1">
+    <div className="relative ml-auto w-[320px] max-w-[calc(100%-16px)]">
+      <div
+        className="absolute -top-2 right-14 h-4 w-4 rotate-45"
+        style={{
+          background: "white",
+          borderLeft: "1px solid rgba(15,23,42,0.10)",
+          borderTop: "1px solid rgba(15,23,42,0.10)",
+        }}
+      />
+
+      <div
+        className="relative rounded-2xl border bg-white px-4 py-4 shadow-lg overflow-hidden"
+        style={{
+          borderColor: "rgba(57,255,20,0.28)",
+          boxShadow: "0 10px 28px rgba(57,255,20,0.16), 0 6px 18px rgba(15,23,42,0.08)",
+        }}
+      >
+        <div
+          className="absolute left-0 top-0 h-full w-1.5"
+          style={{ background: TM.neon }}
+        />
+
+        <div className="pl-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div
+                  className="h-6 w-6 rounded-full grid place-items-center text-[12px] font-black"
+                  style={{
+                    background: "rgba(57,255,20,0.18)",
+                    color: TM.ink,
+                  }}
+                >
+                  🎾
+                </div>
+
+                <div className="text-[14px] font-black" style={{ color: TM.ink }}>
+                  {otherUserId && profiles[otherUserId]?.name
+                    ? `Lock in your next game with ${profiles[otherUserId]?.name}?`
+                    : "Lock in your next game?"}
+                </div>
+              </div>
+
+              <div
+                className="mt-1 text-[12px] leading-snug"
+                style={{ color: "rgba(17,24,39,0.78)" }}
+              >
+                Same time and place next week?
+              </div>
+
+              <div className="mt-2 text-[11px] text-gray-500">
+                {formatInviteWhenSafe(rematchPromptInvite.startISO)}{" "}
+                {rematchPromptInvite.courtName || rematchPromptInvite.location
+                  ? `• ${rematchPromptInvite.courtName || rematchPromptInvite.location}`
+                  : ""}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleDismissRematchPrompt}
+              disabled={rematchPromptBusy}
+              className="shrink-0 rounded-full px-2 py-1 text-[12px] font-bold hover:bg-black/5 disabled:opacity-50"
+              style={{ color: "rgba(17,24,39,0.55)" }}
+              aria-label="Dismiss rematch prompt"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handleDismissRematchPrompt}
+              disabled={rematchPromptBusy}
+              className="rounded-xl border px-3 py-2 text-[12px] font-extrabold disabled:opacity-50"
+              style={{ borderColor: "rgba(15,23,42,0.12)", color: TM.ink }}
+            >
+              Not now
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePlayedRematchPrompt}
+              disabled={rematchPromptBusy}
+              className="rounded-xl px-3 py-2 text-[12px] font-extrabold disabled:opacity-50"
+              style={{ background: TM.neon, color: TM.ink }}
+            >
+              Yes, send rematch
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
 {/* Messages */}
 <div
   ref={listRef}
@@ -2054,7 +2392,9 @@ style={{
         >
           ✕
         </button>
-        <div className="font-extrabold text-[16px] text-gray-900">Invite to Play</div>
+        <div className="font-extrabold text-[16px] text-gray-900">
+          {inviteFlow === "rematch" ? "Send Rematch Invite" : "Invite to Play"}
+        </div>
         <div className="h-9 w-9" />
       </div>
 
@@ -2066,7 +2406,23 @@ style={{
     paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
   }}
 >
-        <div className="text-[12px] font-bold text-gray-700 mb-2">Match Details</div>
+        <div className="text-[12px] font-bold text-gray-700 mb-2">
+          {inviteFlow === "rematch" ? "Rematch Details" : "Match Details"}
+        </div>
+
+        {inviteFlow === "rematch" && rematchContext && (
+          <div
+            className="mb-4 rounded-2xl border px-4 py-3 text-[12px]"
+            style={{
+              borderColor: "rgba(57,255,20,0.28)",
+              background: "rgba(57,255,20,0.08)",
+              color: TM.ink,
+            }}
+          >
+            Linked to your previous accepted invite. We prefilled the same location and
+            the same time next week.
+          </div>
+        )}
 
                 {/* Suggested court */}
         {!isEventChat && (
@@ -2321,7 +2677,7 @@ style={{
           className="w-full rounded-xl py-3 text-[14px] font-extrabold disabled:opacity-40"
           style={{ background: TM.neon, color: TM.ink }}
         >
-          Send Invite →
+          {inviteFlow === "rematch" ? "Send Rematch Invite →" : "Send Invite →"}
         </button>
 
         <button

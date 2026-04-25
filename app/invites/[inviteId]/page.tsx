@@ -21,6 +21,8 @@ import {
 } from "firebase/firestore";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
+import { trackEvent } from "@/lib/mixpanel";
+import { shouldTrackRematchInviteAccepted } from "@/lib/rematchAnalytics";
 
 const TM = {
   ink: "#0B3D2E",
@@ -197,6 +199,11 @@ useEffect(() => {
   async function respond(status: "accepted" | "declined") {
     if (!isRecipient) return;
 
+    const isRematch =
+      inviteDoc?.type === "rematch" ||
+      inviteDoc?.source === "post_match_prompt" ||
+      !!inviteDoc?.previousInviteId;
+
     await updateInviteEverywhere({
       inviteStatus: status,
       inviteRespondedAt: serverTimestamp(),
@@ -209,6 +216,27 @@ useEffect(() => {
           }
         : {}),
     });
+
+    const acceptedInviteId = String(inviteId);
+
+    if (
+      status === "accepted" &&
+      isRematch &&
+      shouldTrackRematchInviteAccepted(acceptedInviteId)
+    ) {
+      trackEvent("rematch_invite_accepted", {
+        inviteId: acceptedInviteId,
+        previousInviteId: inviteDoc?.previousInviteId || null,
+        conversationId: inviteDoc?.conversationId || null,
+        accepterId: me || null,
+        senderId: inviteDoc?.fromUserId || null,
+        startISO:
+          (typeof inviteDoc?.invite?.startISO === "string" ? inviteDoc.invite.startISO : null) ||
+          null,
+        source: inviteDoc?.source || null,
+        type: inviteDoc?.type || "invite",
+      });
+    }
   }
 
   async function confirmBooked() {
