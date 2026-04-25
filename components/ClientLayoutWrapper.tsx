@@ -45,7 +45,6 @@ import { SafeAreaTop, SafeAreaBottom } from "@/components/SafeArea";
 import BackButtonHandler from "@/components/BackButtonHandler";
 import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { track, trackSetUserId } from "@/lib/track";
-import AgeGateModal from "@/components/AgeGateModal";
 import Image from "next/image";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { cn } from "@/lib/utils";
@@ -207,15 +206,8 @@ const isActive = (href: string) =>
 
 const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
 
-const [showAgeGate, setShowAgeGate] = useState(false);
-const [ageGateChecked, setAgeGateChecked] = useState(false);
 const [profileGateReady, setProfileGateReady] = useState(false);
-const pathnameRef = useRef(pathname);
 const showVerifyRef = useRef(showVerify);
-
-useEffect(() => {
-  pathnameRef.current = pathname;
-}, [pathname]);
 
 useEffect(() => {
   showVerifyRef.current = showVerify;
@@ -230,9 +222,6 @@ useEffect(() => {
   if (PUBLIC_ROUTES.has(pathname || "")) return;
   if (pathname?.startsWith("/verify-email")) return;
 
-  // Optional: don't write while age gate modal is blocking
-  if (showAgeGate) return;
-
   // Throttle writes to avoid cost + spam
   if (!shouldPingLastActive(user.uid)) return;
 
@@ -242,7 +231,7 @@ useEffect(() => {
     { lastActiveAt: serverTimestamp() },
     { merge: true }
   ).catch(() => {});
-}, [user?.uid, pathname, showAgeGate]);
+}, [user?.uid, pathname]);
 
 
 // Show "Matches" instead of "Events" when the user is in the match flow
@@ -293,8 +282,6 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
   setProfileGateReady(false);
 
   if (u) {
-    setAgeGateChecked(false);
-    setShowAgeGate(false);
     setUser(u);
 
     profileTrackedRef.current = false;
@@ -323,52 +310,19 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
       setShowVerify(needsVerify);
 
 const playerRef = doc(db, "players", u.uid);
-const privatePlayerRef = doc(db, "players_private", u.uid);
 
 unsubPlayer = onSnapshot(playerRef, async (docSnap) => {
-  const currentPathname = pathnameRef.current || "";
-  const canShowGate =
-    !PUBLIC_ROUTES.has(currentPathname) &&
-    !currentPathname.startsWith("/verify-email") &&
-    !showVerifyRef.current;
-
   if (docSnap.exists()) {
     const data = docSnap.data() as any;
-    const privateSnap = await getDoc(privatePlayerRef);
-    const privateData = privateSnap.exists() ? (privateSnap.data() as any) : null;
 
     setPhotoURL(typeof data.photoURL === "string" ? data.photoURL : null);
     setPhotoThumbURL(typeof data.photoThumbURL === "string" ? data.photoThumbURL : null);
     setProfileComplete(data.profileComplete === true);
-
-    const birthYear =
-      typeof privateData?.birthYear === "number" && Number.isFinite(privateData.birthYear)
-        ? privateData.birthYear
-        : typeof data.birthYear === "number" && Number.isFinite(data.birthYear)
-        ? data.birthYear
-        : null;
-
-    const currentYear = new Date().getFullYear();
-    const computedAge = birthYear ? currentYear - birthYear : null;
-
-    const needsBirthYear =
-      !birthYear ||
-      birthYear < 1900 ||
-      birthYear > currentYear ||
-      computedAge === null ||
-      computedAge < 18 ||
-      computedAge > 110;
-
-    setShowAgeGate(canShowGate ? needsBirthYear : false);
-    setAgeGateChecked(true);
     setProfileGateReady(true);
   } else {
     setPhotoURL(null);
     setPhotoThumbURL(null);
     setProfileComplete(false);
-
-    setShowAgeGate(canShowGate);
-    setAgeGateChecked(true);
     setProfileGateReady(true);
   }
 });
@@ -429,8 +383,6 @@ if (hasNewer && inbound) {
   setPhotoURL(null);
   setPhotoThumbURL(null);
   setProfileComplete(null);
-  setShowAgeGate(false);
-  setAgeGateChecked(false);
   setProfileGateReady(true);
 }
   });
@@ -485,11 +437,9 @@ useEffect(() => {
 useEffect(() => {
   if (!user) return;
   if (profileComplete === null) return;
-  if (!ageGateChecked) return;
 
   // don't fight email verification gate
   if (showVerify) return;
-  if (showAgeGate) return;
 
 
   // routes we allow even when profile is incomplete
@@ -511,12 +461,10 @@ useEffect(() => {
       uid: user.uid,
       profileComplete,
       showVerify,
-      showAgeGate,
-      ageGateChecked,
     });
     router.replace("/profile?edit=true");
   }
-}, [user, profileComplete, showVerify, showAgeGate, ageGateChecked, pathname, router]);
+}, [user, profileComplete, showVerify, pathname, router]);
 
 useEffect(() => {
   function handleClickOutside(event: MouseEvent) {
@@ -594,8 +542,6 @@ console.log("[LayoutWrapper] gate state", {
   hasUser: !!user,
   profileComplete,
   showVerify,
-  showAgeGate,
-  ageGateChecked,
   profileGateReady,
   shouldGateToVerify,
   shouldHoldProtectedRender,
@@ -616,14 +562,12 @@ if (shouldGateToVerify) {
 
 if (shouldHoldProtectedRender) {
   console.log("[LayoutWrapper] holding protected render before children mount", {
-    pathname,
-    hasUser: !!user,
-    profileGateReady,
-    profileComplete,
-    showVerify,
-    showAgeGate,
-    ageGateChecked,
-  });
+      pathname,
+      hasUser: !!user,
+      profileGateReady,
+      profileComplete,
+      showVerify,
+    });
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-white">
       <BackButtonHandler />
@@ -645,39 +589,6 @@ return (
       <BackButtonHandler />
 
     <PushClientOnly />
-
-{profileGateReady && (
-  <AgeGateModal
-    isOpen={
-      !!user &&
-      ageGateChecked &&
-      showAgeGate &&
-      !PUBLIC_ROUTES.has(pathname || "") &&
-      !showVerify
-    }
-    onSave={async (birthYear) => {
-      const u = auth.currentUser;
-      if (!u) return;
-
-      await setDoc(
-        doc(db, "players_private", u.uid),
-        {
-          birthYear,
-          birthYearUpdatedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      setShowAgeGate(false);
-    }}
-    onSignOut={async () => {
-      await signOut(auth);
-      router.push("/login");
-    }}
-  />
-)}
-
 
 <main
     className={cn(

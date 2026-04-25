@@ -21,7 +21,7 @@ import {
   onSnapshot,
 } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
-import { onAuthStateChanged, applyActionCode } from "firebase/auth";
+import { applyActionCode, signOut } from "firebase/auth";
 import Link from "next/link";
 import { CheckCircle2, SlidersHorizontal, CalendarDays, MapPin, ArrowLeft, X } from "lucide-react";
 import Image from "next/image";
@@ -32,6 +32,8 @@ import DesktopMatchPage from "@/components/match/DesktopMatchPage";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import { trackEvent } from "@/lib/mixpanel";
 import { getNearbyPlayers } from "@/lib/nearbyPlayersClient";
+import AgeGateModal from "@/components/AgeGateModal";
+import { useRequireBirthYear } from "@/lib/useRequireBirthYear";
 
 
 
@@ -482,7 +484,12 @@ const normalizeAvailabilityRecord = (id: string, data: any): AvailabilityRecord 
 
 
 export default function MatchPage() {
-  const [user, setUser] = useState<any>(null);
+  const {
+    user,
+    isCheckingBirthYear,
+    needsBirthYear,
+    saveBirthYear,
+  } = useRequireBirthYear(true);
   const [myProfile, setMyProfile] = useState<Player | null>(null);
   const [rawMatches, setRawMatches] = useState<Player[]>([]);
   const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
@@ -1285,47 +1292,73 @@ useEffect(() => {
 }, [params, router]);
 
 useEffect(() => {
-if (!justVerified) return;
-const { overflow } = document.body.style;
-document.body.style.overflow = "hidden";
-return () => { document.body.style.overflow = overflow; };
+  if (!justVerified) return;
+  const { overflow } = document.body.style;
+  document.body.style.overflow = "hidden";
+  return () => {
+    document.body.style.overflow = overflow;
+  };
 }, [justVerified]);
 
 useEffect(() => {
-  const unsub = onAuthStateChanged(auth, async (currentUser) => {
+  if (isCheckingBirthYear) return;
+
+  if (!user) {
+    router.push("/login");
+    return;
+  }
+
+  if (needsBirthYear) {
+    setLoading(false);
+    return;
+  }
+
+  let cancelled = false;
+
+  const load = async () => {
+    setLoading(true);
+
     const isVerifyAction = params.get("mode") === "verifyEmail" && !!params.get("oobCode");
 
-    if (!currentUser) {
-      router.push("/login");
-      return;
-    }
-    setUser(currentUser);
-
     // redirect unverified-but-required users (skip if we're consuming a verify action)
-    const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    if (cancelled) return;
+
     const requireFlag = userDoc.exists() && (userDoc.data() as any)?.requireVerification === true;
-    if (requireFlag && !currentUser.emailVerified && !isVerifyAction) {
+    if (requireFlag && !user.emailVerified && !isVerifyAction) {
       router.replace("/verify-email");
       return;
     }
 
     // ensure profile exists
-    const myRef = doc(db, "players", currentUser.uid);
+    const myRef = doc(db, "players", user.uid);
     const mySnap = await getDoc(myRef);
+    if (cancelled) return;
+
     if (!mySnap.exists()) {
       alert("Please complete your profile first.");
       router.push("/profile");
       return;
     }
 
-    // one single compute path
-    await refreshMatches();
-    setLoading(false);
-    window.dispatchEvent(new CustomEvent("tm:matchMeReady"));
-  });
+    try {
+      await refreshMatches();
+      if (cancelled) return;
+      setLoading(false);
+      window.dispatchEvent(new CustomEvent("tm:matchMeReady"));
+    } catch (error) {
+      if (cancelled) return;
+      console.error("[MatchPage] failed to load match page", error);
+      setLoading(false);
+    }
+  };
 
-  return () => unsub();
-}, [router, params, refreshMatches]);
+  void load();
+
+  return () => {
+    cancelled = true;
+  };
+}, [user, isCheckingBirthYear, needsBirthYear, router, params, refreshMatches]);
 
 useEffect(() => {
   matchPageTrackedRef.current = false;
@@ -1802,22 +1835,40 @@ const optionStyle: React.CSSProperties = {
 };
 
 
-if (loading) {
+const showBirthYearGate = !!user && !isCheckingBirthYear && needsBirthYear;
+
+if (loading || isCheckingBirthYear || showBirthYearGate) {
   return (
-    <div className="w-full min-h-screen px-4 pb-28 pt-6 space-y-3 bg-white">
-      {[...Array(4)].map((_, i) => (
-        <div key={i} className="rounded-xl bg-white ring-1 ring-black/5 p-4 animate-pulse">
-          <div className="flex items-start gap-3">
-            <div className="w-14 h-14 rounded-full bg-gray-200" />
-            <div className="flex-1 space-y-2">
-              <div className="h-4 bg-gray-200 rounded w-1/3" />
-              <div className="h-3 bg-gray-200 rounded w-2/3" />
-              <div className="h-3 bg-gray-200 rounded w-1/2" />
+    <>
+      <AgeGateModal
+        isOpen={showBirthYearGate}
+        onSave={async (birthYear) => {
+          setLoading(true);
+          await saveBirthYear(birthYear);
+          await refreshMatches();
+          setLoading(false);
+        }}
+        onSignOut={async () => {
+          await signOut(auth);
+          router.push("/login");
+        }}
+      />
+
+      <div className="w-full min-h-screen px-4 pb-28 pt-6 space-y-3 bg-white">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="rounded-xl bg-white ring-1 ring-black/5 p-4 animate-pulse">
+            <div className="flex items-start gap-3">
+              <div className="w-14 h-14 rounded-full bg-gray-200" />
+              <div className="flex-1 space-y-2">
+                <div className="h-4 bg-gray-200 rounded w-1/3" />
+                <div className="h-3 bg-gray-200 rounded w-2/3" />
+                <div className="h-3 bg-gray-200 rounded w-1/2" />
+              </div>
             </div>
           </div>
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   );
 }
 
