@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
-import { CalendarDays, MapPin } from "lucide-react";
+import { CalendarDays, MapPin, X } from "lucide-react";
 
 const TM = {
   forest: "#0B3D2E",
@@ -157,6 +157,7 @@ setActivityFilter: (v: ActivityFilter) => void;
 
   onLoadMore: () => void;
   onInvite: (match: any) => void;
+  onDismiss: (match: any) => void;
   onViewProfile: (id: string) => void;
   onOpenAvailabilityRequest: () => void;
   onOpenAvailabilityActions: () => void;
@@ -197,6 +198,7 @@ setActivityFilter: (v: ActivityFilter) => void;
 
     onLoadMore,
     onInvite,
+    onDismiss,
     onViewProfile,
     onOpenAvailabilityRequest,
     onOpenAvailabilityActions,
@@ -537,12 +539,27 @@ const handleInvite = useCallback(
   return (
     <div
       key={p.id}
-      className="rounded-2xl p-4 shadow-sm"
+      className="relative rounded-2xl p-4 shadow-sm"
       style={{
         background: "#F6F7F8",
         border: "1px solid rgba(15,23,42,0.08)",
       }}
     >
+      <button
+        type="button"
+        onClick={() => onDismiss(p)}
+        className="absolute right-3 top-3 rounded-full p-2"
+        style={{
+          background: "rgba(15,23,42,0.06)",
+          border: "1px solid rgba(15,23,42,0.10)",
+          color: "rgba(15,23,42,0.65)",
+        }}
+        aria-label={`Hide ${p.name} from recommendations`}
+        title="Hide this Player"
+      >
+        <X size={14} />
+      </button>
+
       <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-black/5">
 
         {p.photoURL ? (

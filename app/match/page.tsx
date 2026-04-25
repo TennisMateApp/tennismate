@@ -542,6 +542,7 @@ const [hideContacted, setHideContacted] = useState(true);
 
 const [refreshing, setRefreshing] = useState(false);
 const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+const [dismissedPlayerIds, setDismissedPlayerIds] = useState<Set<string>>(new Set());
 
 
 const REFRESH_MIN_MS = 2 * 60 * 1000; // 2 minutes
@@ -735,6 +736,30 @@ useEffect(() => {
     unsubActive();
     unsubBrowse();
   };
+}, [user?.uid]);
+
+useEffect(() => {
+  if (!user?.uid) {
+    setDismissedPlayerIds(new Set());
+    return;
+  }
+
+  const dismissedRef = collection(db, "users", user.uid, "dismissedPlayers");
+  const unsubDismissed = onSnapshot(
+    dismissedRef,
+    (snap) => {
+      const next = new Set<string>();
+      snap.docs.forEach((docSnap) => {
+        next.add(docSnap.id);
+      });
+      setDismissedPlayerIds(next);
+    },
+    (error) => {
+      console.error("[MatchPage] failed to subscribe to dismissed players", error);
+    }
+  );
+
+  return () => unsubDismissed();
 }, [user?.uid]);
 
 useEffect(() => {
@@ -1527,6 +1552,38 @@ setBlockedMatchUserIds((prev) => {
   }
 };
 
+const handleDismissPlayer = useCallback(
+  async (target: Player | string) => {
+    if (!user?.uid) return;
+
+    const dismissedPlayerId = resolveRecipientUid(target);
+    if (!dismissedPlayerId || dismissedPlayerId === user.uid) return;
+
+    setDismissedPlayerIds((prev) => {
+      const next = new Set(prev);
+      next.add(dismissedPlayerId);
+      return next;
+    });
+
+    try {
+      await setDoc(doc(db, "users", user.uid, "dismissedPlayers", dismissedPlayerId), {
+        dismissedPlayerId,
+        dismissedAt: serverTimestamp(),
+        source: "match_page",
+      });
+    } catch (error) {
+      console.error("[MatchPage] failed to dismiss player", error);
+      setDismissedPlayerIds((prev) => {
+        const next = new Set(prev);
+        next.delete(dismissedPlayerId);
+        return next;
+      });
+      alert("Could not hide this player right now. Please try again.");
+    }
+  },
+  [user?.uid]
+);
+
   // Sort matches based on user choice
 const filteredMatches = useMemo(() => {
   if (!myProfile || !user) return rawMatches;
@@ -1540,6 +1597,9 @@ const filteredMatches = useMemo(() => {
 
     // Never show players where there is already a pending / confirmed / accepted match relationship
     if (blockedMatchUserIds.has(toUid)) return false;
+
+    // Hide players dismissed from Match page
+    if (dismissedPlayerIds.has(toUid)) return false;
 
     // Hide already contacted?
     if (hideContacted && sentRequests.has(toUid)) return false;
@@ -1565,6 +1625,7 @@ const filteredMatches = useMemo(() => {
   user,
   sentRequests,
   blockedMatchUserIds,
+  dismissedPlayerIds,
   ageBand,
   genderFilter,
   activityFilter,
@@ -1847,6 +1908,7 @@ if (isDesktop) {
   setHideContacted={setHideContacted}
   onLoadMore={() => setVisibleCount((c) => c + PAGE_SIZE)}
   onInvite={(match) => handleMatchRequest(match)}
+  onDismiss={(match) => void handleDismissPlayer(match)}
   onViewProfile={(id) => setProfileOpenId(id)}
   onOpenAvailabilityRequest={() => setAvailabilityRequestOpen(true)}
   onOpenAvailabilityActions={() => setAvailabilityActionsOpen(true)}
@@ -2921,6 +2983,23 @@ style={{
   boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
 }}
 >
+
+  <button
+    type="button"
+    onClick={() => {
+      void handleDismissPlayer(match);
+    }}
+    className="absolute right-4 top-4 z-[1] rounded-full p-2"
+    style={{
+      background: "rgba(15,23,42,0.06)",
+      border: "1px solid rgba(15,23,42,0.10)",
+      color: "rgba(15,23,42,0.65)",
+    }}
+    aria-label={`Hide ${match.name} from recommendations`}
+    title="Hide this Player"
+  >
+    <X size={14} />
+  </button>
 
   {/* Avatar top-right */}
 <div
