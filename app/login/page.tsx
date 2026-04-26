@@ -150,6 +150,15 @@ useEffect(() => {
         { merge: true }
       );
 
+      console.log("[PROFILE REDIRECT DEBUG]", {
+        source: "LoginPage",
+        reason: "google sign-in created or merged player shell with profileComplete false",
+        pathname: "/login",
+        uid: u.uid,
+        playerExists: true,
+        profileComplete: false,
+        birthYear: null,
+      });
       router.replace("/profile?edit=true");
     } catch (err: any) {
       console.error("Google sign-in failed:", err);

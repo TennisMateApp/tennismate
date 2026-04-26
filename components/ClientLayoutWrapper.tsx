@@ -88,6 +88,16 @@ function shouldPingLastActive(uid: string) {
   return true;
 }
 
+function isPlayerProfileUsable(playerData: any) {
+  return Boolean(
+    playerData &&
+    typeof playerData.name === "string" &&
+    playerData.name.trim().length > 0 &&
+    typeof playerData.postcode === "string" &&
+    playerData.postcode.trim().length > 0
+  );
+}
+
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
 
 useEffect(() => {
@@ -151,6 +161,9 @@ const [user, setUser] = useState<any>(null);
 const [photoURL, setPhotoURL] = useState<string | null>(null);
 const [photoThumbURL, setPhotoThumbURL] = useState<string | null>(null);
 const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
+const [playerExists, setPlayerExists] = useState<boolean | null>(null);
+const [playerData, setPlayerData] = useState<any>(null);
+const [playerBirthYear, setPlayerBirthYear] = useState<number | null>(null);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
   const [unreadMessages, setUnreadMessages] = useState<any[]>([]);
   const [showSettings, setShowSettings] = useState(false);
@@ -280,6 +293,9 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
   unsubPlayer();
 
   setProfileGateReady(false);
+  setPlayerExists(null);
+  setPlayerData(null);
+  setPlayerBirthYear(null);
 
   if (u) {
     setUser(u);
@@ -317,12 +333,18 @@ unsubPlayer = onSnapshot(playerRef, async (docSnap) => {
 
     setPhotoURL(typeof data.photoURL === "string" ? data.photoURL : null);
     setPhotoThumbURL(typeof data.photoThumbURL === "string" ? data.photoThumbURL : null);
+    setPlayerExists(true);
+    setPlayerData(data);
+    setPlayerBirthYear(typeof data.birthYear === "number" ? data.birthYear : null);
     setProfileComplete(data.profileComplete === true);
     setProfileGateReady(true);
   } else {
     setPhotoURL(null);
     setPhotoThumbURL(null);
-    setProfileComplete(false);
+    setPlayerExists(false);
+    setPlayerData(null);
+    setPlayerBirthYear(null);
+    setProfileComplete(null);
     setProfileGateReady(true);
   }
 });
@@ -383,6 +405,9 @@ if (hasNewer && inbound) {
   setPhotoURL(null);
   setPhotoThumbURL(null);
   setProfileComplete(null);
+  setPlayerExists(null);
+  setPlayerData(null);
+  setPlayerBirthYear(null);
   setProfileGateReady(true);
 }
   });
@@ -436,7 +461,7 @@ useEffect(() => {
 
 useEffect(() => {
   if (!user) return;
-  if (profileComplete === null) return;
+  if (!profileGateReady) return;
 
   // don't fight email verification gate
   if (showVerify) return;
@@ -453,18 +478,25 @@ useEffect(() => {
 
   const isAllowed = allowedPrefixes.some((p) => pathname.startsWith(p));
   if (isAllowed) return;
+  if (playerExists !== true) return;
+  const usableProfile = isPlayerProfileUsable(playerData);
+  if (profileComplete === true || usableProfile === true) return;
 
   // 🔒 If incomplete, force them to complete profile before doing anything else
-  if (profileComplete === false) {
-    console.log("[LayoutWrapper] redirecting incomplete profile to /profile?edit=true", {
+    console.log("[PROFILE REDIRECT DEBUG]", {
+      source: "ClientLayoutWrapper",
+      reason: "player exists on protected route but profile is not marked complete or schema-usable",
       pathname,
       uid: user.uid,
+      playerExists,
       profileComplete,
+      usableProfile,
+      hasBirthYear: typeof playerBirthYear === "number",
+      profileGateReady,
       showVerify,
     });
-    router.replace("/profile?edit=true");
-  }
-}, [user, profileComplete, showVerify, pathname, router]);
+  router.replace("/profile?edit=true");
+}, [user, profileComplete, playerExists, playerData, playerBirthYear, profileGateReady, showVerify, pathname, router]);
 
 useEffect(() => {
   function handleClickOutside(event: MouseEvent) {
@@ -540,7 +572,9 @@ const shouldHoldProtectedRender =
 console.log("[LayoutWrapper] gate state", {
   pathname,
   hasUser: !!user,
+  playerExists,
   profileComplete,
+  playerBirthYear,
   showVerify,
   profileGateReady,
   shouldGateToVerify,
@@ -564,8 +598,10 @@ if (shouldHoldProtectedRender) {
   console.log("[LayoutWrapper] holding protected render before children mount", {
       pathname,
       hasUser: !!user,
+      playerExists,
       profileGateReady,
       profileComplete,
+      playerBirthYear,
       showVerify,
     });
   return (

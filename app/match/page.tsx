@@ -1336,6 +1336,15 @@ useEffect(() => {
     if (cancelled) return;
 
     if (!mySnap.exists()) {
+      console.log("[PROFILE REDIRECT DEBUG]", {
+        source: "MatchPage",
+        reason: "missing players/{uid} document",
+        pathname: "/match",
+        uid: user.uid,
+        playerExists: false,
+        profileComplete: null,
+        birthYear: null,
+      });
       alert("Please complete your profile first.");
       router.push("/profile");
       return;

@@ -124,12 +124,28 @@ const onCropComplete = (_: any, croppedPixels: any) => {
 
       // ✅ Hard block: if they aren't allowed, bounce them out
       if (!allowed) {
+        console.log("[PROFILE REDIRECT DEBUG]", {
+          source: "CoachProfilePage",
+          reason: "user role is not coach or both",
+          pathname: "/coach/profile",
+          uid: user.uid,
+          role,
+          target: "/profile?coach=forbidden",
+        });
         router.replace("/profile?coach=forbidden");
         return;
       }
     } catch (e: any) {
       setError(e?.message ?? "Auth check failed");
       // safest fallback: send them back
+      console.log("[PROFILE REDIRECT DEBUG]", {
+        source: "CoachProfilePage",
+        reason: "auth check failed",
+        pathname: "/coach/profile",
+        uid: user?.uid ?? null,
+        target: "/profile",
+        error: e?.message ?? "Auth check failed",
+      });
       router.replace("/profile");
     } finally {
       setLoading(false);
@@ -265,6 +281,13 @@ if ((!data.name || !data.name.trim()) || !data.avatar) {
     // e.g. set role back to "player" or remove "coach"
 
     alert("✅ Coach profile deleted.");
+    console.log("[PROFILE REDIRECT DEBUG]", {
+      source: "CoachProfilePage",
+      reason: "coach profile deleted",
+      pathname: "/coach/profile",
+      uid,
+      target: "/profile",
+    });
     router.replace("/profile"); // or /home
   } catch (e: any) {
     setError(e?.message ?? "Failed to delete coach profile.");
@@ -331,7 +354,16 @@ async function lookupPostcodeLatLng(pc: string): Promise<{ lat: number; lng: num
       } as any);
 
       setSuccess("✅ Coach profile saved successfully!");
-      setTimeout(() => router.push("/profile"), 900);
+      setTimeout(() => {
+        console.log("[PROFILE REDIRECT DEBUG]", {
+          source: "CoachProfilePage",
+          reason: "coach profile save success",
+          pathname: "/coach/profile",
+          uid,
+          target: "/profile",
+        });
+        router.push("/profile");
+      }, 900);
     } catch (e: any) {
       setError(e?.message ?? "Failed to save profile");
     } finally {
