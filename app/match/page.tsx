@@ -1345,6 +1345,20 @@ useEffect(() => {
         profileComplete: null,
         birthYear: null,
       });
+      console.trace("[PROFILE REDIRECT TRACE]", {
+        source: "MatchPage",
+        pathname: "/match",
+        target: "/profile",
+        uid: user.uid,
+        profileGateReady: null,
+        playerExists: false,
+        profileComplete: null,
+        usableProfile: false,
+        playerData: null,
+        authReady: true,
+        loadingState: "missing-player-document",
+        timestamp: new Date().toISOString(),
+      });
       alert("Please complete your profile first.");
       router.push("/profile");
       return;

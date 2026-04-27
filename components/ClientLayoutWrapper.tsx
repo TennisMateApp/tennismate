@@ -164,6 +164,8 @@ const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
 const [playerExists, setPlayerExists] = useState<boolean | null>(null);
 const [playerData, setPlayerData] = useState<any>(null);
 const [playerBirthYear, setPlayerBirthYear] = useState<number | null>(null);
+const [authReady, setAuthReady] = useState(false);
+const [showProfilePrompt, setShowProfilePrompt] = useState(false);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
   const [unreadMessages, setUnreadMessages] = useState<any[]>([]);
   const [showSettings, setShowSettings] = useState(false);
@@ -218,13 +220,41 @@ const isActive = (href: string) =>
   pathname === href || pathname.startsWith(href + "/");  
 
 const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
+const PROFILE_PROMPT_SESSION_KEY = "tm_dismiss_profile_prompt";
 
 const [profileGateReady, setProfileGateReady] = useState(false);
 const showVerifyRef = useRef(showVerify);
+const usableProfile = isPlayerProfileUsable(playerData);
+const loadingState = !bootDone
+  ? "booting"
+  : !authReady
+  ? "awaiting-auth"
+  : !profileGateReady
+  ? "awaiting-profile-gate"
+  : "ready";
 
 useEffect(() => {
   showVerifyRef.current = showVerify;
 }, [showVerify]);
+
+useEffect(() => {
+  console.log("[ROUTE DEBUG]", {
+    pathname,
+    user: user?.uid ?? null,
+    profileGateReady,
+    playerExists,
+    profileComplete,
+    usableProfile,
+    authReady,
+    loadingState,
+    timestamp: new Date().toISOString(),
+  });
+}, [pathname, user, profileGateReady, playerExists, profileComplete, usableProfile, authReady, loadingState]);
+
+useEffect(() => {
+  if (typeof window === "undefined") return;
+  setShowProfilePrompt(sessionStorage.getItem(PROFILE_PROMPT_SESSION_KEY) !== "1");
+}, [user?.uid]);
 
 // --- Update players/{uid}.lastActiveAt (throttled) ---
 useEffect(() => {
@@ -298,6 +328,7 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
   setPlayerBirthYear(null);
 
   if (u) {
+    setAuthReady(true);
     setUser(u);
 
     profileTrackedRef.current = false;
@@ -397,6 +428,7 @@ if (hasNewer && inbound) {
         }
       );
 } else {
+  setAuthReady(true);
   profileTrackedRef.current = false;
   void trackSetUserId(null);
   void track("logout");
@@ -477,13 +509,17 @@ useEffect(() => {
   ];
 
   const isAllowed = allowedPrefixes.some((p) => pathname.startsWith(p));
-  if (isAllowed) return;
-  if (playerExists !== true) return;
-  const usableProfile = isPlayerProfileUsable(playerData);
-  if (profileComplete === true || usableProfile === true) return;
+  if (isAllowed || playerExists !== true || profileComplete === true || usableProfile === true) {
+    setShowProfilePrompt(false);
+    return;
+  }
 
   // 🔒 If incomplete, force them to complete profile before doing anything else
-    console.log("[PROFILE REDIRECT DEBUG]", {
+  const dismissedForSession =
+    typeof window !== "undefined" &&
+    sessionStorage.getItem(PROFILE_PROMPT_SESSION_KEY) === "1";
+
+  console.log("[PROFILE REDIRECT DEBUG]", {
       source: "ClientLayoutWrapper",
       reason: "player exists on protected route but profile is not marked complete or schema-usable",
       pathname,
@@ -494,9 +530,26 @@ useEffect(() => {
       hasBirthYear: typeof playerBirthYear === "number",
       profileGateReady,
       showVerify,
+      dismissedForSession,
+      action: dismissedForSession ? "prompt-suppressed" : "show-profile-prompt",
     });
-  router.replace("/profile?edit=true");
-}, [user, profileComplete, playerExists, playerData, playerBirthYear, profileGateReady, showVerify, pathname, router]);
+  console.trace("[PROFILE PROMPT TRACE]", {
+    source: "ClientLayoutWrapper",
+    pathname,
+    target: "/profile?edit=true",
+    uid: user?.uid ?? null,
+    profileGateReady,
+    playerExists,
+    profileComplete,
+    usableProfile,
+    playerData,
+    authReady,
+    loadingState,
+    dismissedForSession,
+    timestamp: new Date().toISOString(),
+  });
+  setShowProfilePrompt(!dismissedForSession);
+}, [user, profileComplete, playerExists, playerData, playerBirthYear, profileGateReady, showVerify, pathname, usableProfile, authReady, loadingState]);
 
 useEffect(() => {
   function handleClickOutside(event: MouseEvent) {
@@ -532,6 +585,17 @@ useEffect(() => {
   };
 
 const totalMessages = unreadMessages.length; // ✅ separate count for messages
+
+  const handleDismissProfilePrompt = () => {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(PROFILE_PROMPT_SESSION_KEY, "1");
+    }
+    setShowProfilePrompt(false);
+  };
+
+  const handleOpenProfilePrompt = () => {
+    router.push("/profile?edit=true");
+  };
 
     // Floating feedback button component
   function FloatingFeedbackButton() {
@@ -645,6 +709,35 @@ return (
         }
   }
 >
+  {user &&
+    showProfilePrompt &&
+    !PUBLIC_ROUTES.has(pathname || "") &&
+    !pathname.startsWith("/profile") &&
+    !pathname.startsWith("/verify-email") && (
+      <div className="mx-4 mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="font-medium">
+            Complete your profile to get better match recommendations.
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleOpenProfilePrompt}
+              className="rounded-full bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-800"
+            >
+              Complete profile
+            </button>
+            <button
+              type="button"
+              onClick={handleDismissProfilePrompt}
+              className="rounded-full border border-emerald-300 px-4 py-2 text-xs font-semibold text-emerald-900 transition-colors hover:bg-emerald-100"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   {children}
 </main>
 

@@ -159,6 +159,20 @@ useEffect(() => {
         profileComplete: false,
         birthYear: null,
       });
+      console.trace("[PROFILE REDIRECT TRACE]", {
+        source: "LoginPage",
+        pathname: "/login",
+        target: "/profile?edit=true",
+        uid: u.uid,
+        profileGateReady: null,
+        playerExists: true,
+        profileComplete: false,
+        usableProfile: false,
+        playerData: null,
+        authReady: true,
+        loadingState: "google-sign-in-onboarding",
+        timestamp: new Date().toISOString(),
+      });
       router.replace("/profile?edit=true");
     } catch (err: any) {
       console.error("Google sign-in failed:", err);

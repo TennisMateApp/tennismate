@@ -132,6 +132,20 @@ const onCropComplete = (_: any, croppedPixels: any) => {
           role,
           target: "/profile?coach=forbidden",
         });
+        console.trace("[PROFILE REDIRECT TRACE]", {
+          source: "CoachProfilePage",
+          pathname: "/coach/profile",
+          target: "/profile?coach=forbidden",
+          uid: user.uid,
+          profileGateReady: null,
+          playerExists: null,
+          profileComplete: null,
+          usableProfile: null,
+          playerData: null,
+          authReady: true,
+          loadingState: "coach-role-forbidden",
+          timestamp: new Date().toISOString(),
+        });
         router.replace("/profile?coach=forbidden");
         return;
       }
@@ -145,6 +159,20 @@ const onCropComplete = (_: any, croppedPixels: any) => {
         uid: user?.uid ?? null,
         target: "/profile",
         error: e?.message ?? "Auth check failed",
+      });
+      console.trace("[PROFILE REDIRECT TRACE]", {
+        source: "CoachProfilePage",
+        pathname: "/coach/profile",
+        target: "/profile",
+        uid: user?.uid ?? null,
+        profileGateReady: null,
+        playerExists: null,
+        profileComplete: null,
+        usableProfile: null,
+        playerData: null,
+        authReady: true,
+        loadingState: "coach-auth-check-failed",
+        timestamp: new Date().toISOString(),
       });
       router.replace("/profile");
     } finally {
@@ -287,6 +315,20 @@ if ((!data.name || !data.name.trim()) || !data.avatar) {
       pathname: "/coach/profile",
       uid,
       target: "/profile",
+    });
+    console.trace("[PROFILE REDIRECT TRACE]", {
+      source: "CoachProfilePage",
+      pathname: "/coach/profile",
+      target: "/profile",
+      uid: uid ?? null,
+      profileGateReady: null,
+      playerExists: null,
+      profileComplete: null,
+      usableProfile: null,
+      playerData: null,
+      authReady: true,
+      loadingState: "coach-profile-deleted",
+      timestamp: new Date().toISOString(),
     });
     router.replace("/profile"); // or /home
   } catch (e: any) {
