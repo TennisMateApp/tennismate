@@ -448,14 +448,14 @@ function normalizeAcceptedInviteEvent(inviteId: string, data: any, uid: string):
   const start = getInviteStartISO(data);
   if (!start || isoToMs(start) < Date.now()) return null;
 
-  const storedParticipants = Array.isArray(data?.participants)
+  const storedParticipants: string[] = Array.isArray(data?.participants)
     ? data.participants.filter((value: unknown): value is string => typeof value === "string" && value.length > 0)
     : [];
   const fromUserId = typeof data?.fromUserId === "string" ? data.fromUserId : null;
   const toUserId = typeof data?.toUserId === "string" ? data.toUserId : null;
-  const participants = storedParticipants.length
-    ? Array.from(new Set(storedParticipants))
-    : Array.from(new Set([fromUserId, toUserId].filter(Boolean))) as string[];
+  const participants: string[] = storedParticipants.length
+    ? [...new Set(storedParticipants)]
+    : [...new Set([fromUserId, toUserId].filter((value): value is string => !!value))];
 
   if (!participants.includes(uid)) return null;
 
@@ -987,7 +987,6 @@ useEffect(() => {
   let alive = true;
   let offCalendar: (() => void) | null = null;
   let offIncomingInvites: (() => void) | null = null;
-  let offOutgoingInvites: (() => void) | null = null;
 
   setHomeBootstrapping(true);
 
@@ -1084,8 +1083,6 @@ useEffect(() => {
     }
   );
 
-  offOutgoingInvites = null;
-
   // -----------------------
   // Fetch nearby active fresh in background
   // -----------------------
@@ -1115,7 +1112,6 @@ useEffect(() => {
     alive = false;
     if (offCalendar) offCalendar();
     if (offIncomingInvites) offIncomingInvites();
-    if (offOutgoingInvites) offOutgoingInvites();
   };
 }, [uid]);
 

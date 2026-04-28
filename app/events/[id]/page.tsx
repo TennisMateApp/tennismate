@@ -443,7 +443,7 @@ async function handleJoinRequest() {
         toUserId: event.hostId,
         type: "event_join_request",
         eventId: id,
-        fromUserId: u.uid,
+        fromUserId: uid,
         message: "A player has requested to join your event.",
         read: false,
         createdAt: serverTimestamp(),

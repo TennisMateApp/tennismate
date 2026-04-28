@@ -29,6 +29,7 @@ type InviteCourt = {
 
 type InvitePayload = {
   startISO?: string | null;
+  endISO?: string | null;
   durationMins?: number | null;
   location?: string | null;
   note?: string | null;
