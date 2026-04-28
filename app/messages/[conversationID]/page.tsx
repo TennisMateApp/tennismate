@@ -1187,7 +1187,20 @@ heartbeatTimer = setInterval(async () => {
 
 
       const convoRef = doc(db, "conversations", String(conversationID));
+      console.log("[ChatPage] reading conversation", {
+        uid: auth.currentUser?.uid ?? null,
+        conversationID: String(conversationID),
+      });
       let convoSnap = await getDoc(convoRef);
+      console.log("[ChatPage] conversation read success", {
+        conversationID: String(conversationID),
+        exists: convoSnap.exists(),
+        participants: convoSnap.exists()
+          ? Array.isArray(convoSnap.data()?.participants)
+            ? convoSnap.data()?.participants
+            : []
+          : [],
+      });
 
       // Only auto-create 1:1 conversations (IDs that look like "<uid>_<uid>")
       const parts = String(conversationID || "").split("_");
@@ -1220,6 +1233,15 @@ await clearMessageNotifsForConversation(u.uid, String(conversationID));
 
       // refresh after potential creation/update
       convoSnap = await getDoc(convoRef);
+      console.log("[ChatPage] conversation refresh success", {
+        conversationID: String(conversationID),
+        exists: convoSnap.exists(),
+        participants: convoSnap.exists()
+          ? Array.isArray(convoSnap.data()?.participants)
+            ? convoSnap.data()?.participants
+            : []
+          : [],
+      });
 
       // load my avatar
       const meRef = doc(db, "players", u.uid);
@@ -1472,15 +1494,33 @@ return () => unsub();
     };
     if (!isEventChat) newMessage.read = false;
 
+    console.log("[ChatPage] sending message payload", {
+      conversationID: String(conversationID),
+      payload: newMessage,
+    });
     await addDoc(collection(db, "conversations", String(conversationID), "messages"), newMessage);
+    console.log("[ChatPage] message addDoc success", {
+      conversationID: String(conversationID),
+    });
     setInput("");
 
-    await updateDoc(doc(db, "conversations", String(conversationID)), {
-      [`lastRead.${user.uid}`]: serverTimestamp(),
-      [`typing.${user.uid}`]: false,
-      latestMessage: { text: newMessage.text, senderId: user.uid, timestamp: serverTimestamp() },
-      updatedAt: serverTimestamp(),
-    });
+    try {
+      await updateDoc(doc(db, "conversations", String(conversationID)), {
+        [`lastRead.${user.uid}`]: serverTimestamp(),
+        [`typing.${user.uid}`]: false,
+        latestMessage: { text: newMessage.text, senderId: user.uid, timestamp: serverTimestamp() },
+        updatedAt: serverTimestamp(),
+      });
+      console.log("[ChatPage] parent conversation update success", {
+        conversationID: String(conversationID),
+      });
+    } catch (error) {
+      console.error("[ChatPage] parent conversation update failed", {
+        conversationID: String(conversationID),
+        error,
+      });
+      throw error;
+    }
 
   };
 

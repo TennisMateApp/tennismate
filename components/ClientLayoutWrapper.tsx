@@ -415,10 +415,10 @@ const inbound = latestSender && latestSender !== u.uid;
 
 if (hasNewer && inbound) {
   const otherUserId = data.participants.find((id: string) => id !== u.uid);
-  const userDoc = await getDoc(doc(db, "users", otherUserId));
+  const playerDoc = await getDoc(doc(db, "players", otherUserId));
   unreadList.push({
     id: docSnap.id,
-    name: userDoc.exists() ? userDoc.data().name : "Unknown",
+    name: playerDoc.exists() ? playerDoc.data().name : "Unknown",
     text: data.latestMessage?.text || ""
   });
 }
