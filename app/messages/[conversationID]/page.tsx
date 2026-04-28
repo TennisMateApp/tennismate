@@ -1282,6 +1282,8 @@ setShowMatchPrompt(
   !isResolved &&
   !isSuppressed
 );
+}, (err) => {
+  console.error("[CHAT SNAPSHOT ERROR] conversation doc listener", err);
 });
     });
 
@@ -1413,7 +1415,10 @@ setShowMatchPrompt(
         const data = snap.data() as any;
         setIsOtherOnline(isOnlineFrom(data?.lastActiveAt ?? null));
       },
-      () => setIsOtherOnline(false)
+      (err) => {
+        console.error("[CHAT SNAPSHOT ERROR] other player profile listener", err);
+        setIsOtherOnline(false);
+      }
     );
 
     return () => unsub();
@@ -1469,6 +1474,8 @@ const unsub = onSnapshot(q, async (snap) => {
 
   // ✅ Also clear "message" notifications tied to this convo (desktop sidebar)
   await clearMessageNotifsForConversation(user.uid, String(conversationID));
+}, (err) => {
+  console.error("[CHAT SNAPSHOT ERROR] messages listener", err);
 });
 
 return () => unsub();
