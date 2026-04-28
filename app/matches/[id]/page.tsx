@@ -25,17 +25,18 @@ export default function MatchPage() {
   }, [uid]);
 
   useEffect(() => {
-    if (!matchId) return;
+    if (!matchId || !uid) return;
     const q = query(
       collection(db, "match_events"),
       where("matchId", "==", matchId),
+      where("participants", "array-contains", uid),
       orderBy("start", "asc")
     );
     const unsub = onSnapshot(q, (snap) => {
       setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return () => unsub();
-  }, [matchId]);
+  }, [matchId, uid]);
 
   if (!uid) return null;
 

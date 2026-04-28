@@ -250,18 +250,18 @@ useEffect(() => {
   }
 
   async function deleteRelatedCalendarEvents(conversationId: string, messageId: string) {
-  // Find all calendar events created for this invite (both owners)
-  const qRef = query(
-    collection(db, "calendar_events"),
-    where("conversationId", "==", conversationId),
-    where("messageId", "==", messageId)
-  );
+    if (!me) return;
 
-  const snap = await getDocs(qRef);
+    const qRef = query(
+      collection(db, "calendar_events"),
+      where("ownerId", "==", me),
+      where("conversationId", "==", conversationId),
+      where("messageId", "==", messageId)
+    );
 
-  // Delete them all
-  await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
-}
+    const snap = await getDocs(qRef);
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+  }
 
 async function resolveMatchIdForInvite(): Promise<string | null> {
   if (!inviteDoc) return null;
@@ -278,23 +278,28 @@ async function resolveMatchIdForInvite(): Promise<string | null> {
 
   // Try by conversation first
   if (conversationId) {
-    const byConversationQ = query(
-      collection(db, "match_requests"),
-      where("conversationId", "==", conversationId)
-    );
+    const [sentSnap, receivedSnap] = await Promise.all([
+      getDocs(
+        query(
+          collection(db, "match_requests"),
+          where("conversationId", "==", conversationId),
+          where("fromUserId", "==", fromUserId),
+          where("toUserId", "==", toUserId)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, "match_requests"),
+          where("conversationId", "==", conversationId),
+          where("fromUserId", "==", toUserId),
+          where("toUserId", "==", fromUserId)
+        )
+      ),
+    ]);
 
-    const byConversationSnap = await getDocs(byConversationQ);
-
-    const candidates = byConversationSnap.docs
+    const candidates = [...sentSnap.docs, ...receivedSnap.docs]
       .map((d) => ({ id: d.id, ...d.data() } as any))
-      .filter((m) => {
-        const a = m.fromUserId;
-        const b = m.toUserId;
-        return (
-          (a === fromUserId && b === toUserId) ||
-          (a === toUserId && b === fromUserId)
-        );
-      });
+      .filter((m) => typeof m?.fromUserId === "string" && typeof m?.toUserId === "string");
 
     if (candidates.length > 0) {
       candidates.sort((a, b) => {

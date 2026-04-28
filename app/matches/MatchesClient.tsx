@@ -460,6 +460,9 @@ const handleStartMatch = useCallback(async (match: Match) => {
     const other = match.playerId === currentUserId ? match.opponentId : match.playerId;
     await addDoc(collection(db, "notifications"), {
       recipientId: other,
+      toUserId: other,
+      fromUserId: currentUserId,
+      type: "match_started",
       matchId: match.id,
       message: "Your match has started!",
       timestamp: serverTimestamp(),

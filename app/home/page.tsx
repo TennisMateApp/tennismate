@@ -448,9 +448,14 @@ function normalizeAcceptedInviteEvent(inviteId: string, data: any, uid: string):
   const start = getInviteStartISO(data);
   if (!start || isoToMs(start) < Date.now()) return null;
 
+  const storedParticipants = Array.isArray(data?.participants)
+    ? data.participants.filter((value: unknown): value is string => typeof value === "string" && value.length > 0)
+    : [];
   const fromUserId = typeof data?.fromUserId === "string" ? data.fromUserId : null;
   const toUserId = typeof data?.toUserId === "string" ? data.toUserId : null;
-  const participants = Array.from(new Set([fromUserId, toUserId].filter(Boolean))) as string[];
+  const participants = storedParticipants.length
+    ? Array.from(new Set(storedParticipants))
+    : Array.from(new Set([fromUserId, toUserId].filter(Boolean))) as string[];
 
   if (!participants.includes(uid)) return null;
 
@@ -1047,15 +1052,14 @@ useEffect(() => {
     }
   );
 
-  let incomingInviteDocs: any[] = [];
-  let outgoingInviteDocs: any[] = [];
+  let inviteDocs: any[] = [];
 
   const syncAcceptedInviteEvents = () => {
     if (!alive) return;
 
     const map = new Map<string, CalendarEvent>();
 
-    [...incomingInviteDocs, ...outgoingInviteDocs].forEach((docSnap: any) => {
+    inviteDocs.forEach((docSnap: any) => {
       const normalized = normalizeAcceptedInviteEvent(docSnap.id, docSnap.data(), uid);
       if (!normalized) return;
       map.set(docSnap.id, normalized);
@@ -1068,30 +1072,19 @@ useEffect(() => {
   };
 
   offIncomingInvites = onSnapshot(
-    query(collection(db, "match_invites"), where("toUserId", "==", uid)),
+    query(collection(db, "match_invites"), where("participants", "array-contains", uid)),
     (snap) => {
-      incomingInviteDocs = snap.docs;
+      inviteDocs = snap.docs;
       syncAcceptedInviteEvents();
     },
     (err) => {
-      console.warn("[Home] incoming invite snapshot failed:", err);
+      console.warn("[Home] invite snapshot failed:", err);
       if (!alive) return;
       setAcceptedInviteEventsLoading(false);
     }
   );
 
-  offOutgoingInvites = onSnapshot(
-    query(collection(db, "match_invites"), where("fromUserId", "==", uid)),
-    (snap) => {
-      outgoingInviteDocs = snap.docs;
-      syncAcceptedInviteEvents();
-    },
-    (err) => {
-      console.warn("[Home] outgoing invite snapshot failed:", err);
-      if (!alive) return;
-      setAcceptedInviteEventsLoading(false);
-    }
-  );
+  offOutgoingInvites = null;
 
   // -----------------------
   // Fetch nearby active fresh in background

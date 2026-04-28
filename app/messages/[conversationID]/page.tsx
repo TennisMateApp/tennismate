@@ -604,10 +604,13 @@ const getLastRealMessageMs = (msgs: any[]) => {
 };
 
 const hasMatchHistory = async () => {
+  if (!user?.uid) return false;
+
   const snap = await getDocs(
     query(
       collection(db, "match_history"),
       where("conversationId", "==", String(conversationID)),
+      where("players", "array-contains", user.uid),
       limit(1)
     )
   );
@@ -617,19 +620,27 @@ const hasMatchHistory = async () => {
 
 
 const hasUpcomingAcceptedInvite = async () => {
+  if (!user?.uid || !otherUserId) return false;
+
   const snap = await getDocs(
     query(
       collection(db, "match_invites"),
       where("conversationId", "==", String(conversationID)),
+      where("participants", "array-contains", user.uid),
       where("inviteStatus", "==", "accepted")
     )
   );
 
-  if (snap.empty) return false;
+  const docs = snap.docs.filter((d) => {
+    const data = d.data() as any;
+    return data?.fromUserId === otherUserId || data?.toUserId === otherUserId;
+  });
+
+  if (!docs.length) return false;
 
   const now = Date.now();
 
-  return snap.docs.some((d) => {
+  return docs.some((d) => {
     const data = d.data() as any;
     const startISO = data?.invite?.startISO || data?.inviteStart || null;
     if (!startISO) return false;
@@ -642,16 +653,22 @@ const hasUpcomingAcceptedInvite = async () => {
 };
 
 const hasAnyAcceptedInvite = async () => {
+  if (!user?.uid || !otherUserId) return false;
+
   const snap = await getDocs(
     query(
       collection(db, "match_invites"),
       where("conversationId", "==", String(conversationID)),
+      where("participants", "array-contains", user.uid),
       where("inviteStatus", "==", "accepted"),
-      limit(1)
+      limit(10)
     )
   );
 
-  return !snap.empty;
+  return snap.docs.some((d) => {
+    const data = d.data() as any;
+    return data?.fromUserId === otherUserId || data?.toUserId === otherUserId;
+  });
 };
 
 const createMatchCheckInNotification = async (
@@ -663,6 +680,8 @@ const createMatchCheckInNotification = async (
 
   await addDoc(collection(db, "notifications"), {
     recipientId,
+    toUserId: recipientId,
+    fromUserId: user.uid,
     type: "match_check_in",
     read: false,
     conversationId,
@@ -1588,6 +1607,7 @@ await setDoc(doc(db, "match_invites", inviteId), {
   messageId: inviteId, // same as msg id
   fromUserId: user.uid,
   toUserId: recipientId,
+  participants: [user.uid, recipientId],
 
   // copy the invite payload so the details page is stable
   invite: newMessage.invite,

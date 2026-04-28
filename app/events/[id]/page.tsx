@@ -440,9 +440,10 @@ async function handleJoinRequest() {
     if (event.hostId) {
       await addDoc(collection(db, "notifications"), {
         recipientId: event.hostId,
+        toUserId: event.hostId,
         type: "event_join_request",
         eventId: id,
-        fromUserId: uid,
+        fromUserId: u.uid,
         message: "A player has requested to join your event.",
         read: false,
         createdAt: serverTimestamp(),
@@ -504,9 +505,10 @@ tx.update(eventRef, {
 
     await addDoc(collection(db, "notifications"), {
       recipientId: request.userId,
+      toUserId: request.userId,
       type: "event_join_accepted",
       eventId: id,
-      fromUserId: event.hostId,
+      fromUserId: u.uid,
       message: "Your request to join an event was accepted!",
       read: false,
       createdAt: serverTimestamp(),
@@ -541,9 +543,10 @@ async function handleDecline(request: JoinRequest) {
     // notify requester
     await addDoc(collection(db, "notifications"), {
       recipientId: request.userId,
+      toUserId: request.userId,
       type: "event_join_declined",
       eventId: id,
-      fromUserId: event.hostId,
+      fromUserId: u.uid,
       message: "Your request to join an event was declined.",
       read: false,
       createdAt: serverTimestamp(),
@@ -609,6 +612,7 @@ async function handleLeaveEvent() {
     if (event.hostId) {
       await addDoc(collection(db, "notifications"), {
         recipientId: event.hostId,
+        toUserId: event.hostId,
         type: "event_left",
         eventId: id,
         fromUserId: uid,
@@ -672,9 +676,10 @@ async function handleCancelEvent() {
       participantIds.map((pid) =>
         addDoc(collection(db, "notifications"), {
           recipientId: pid,
+          toUserId: pid,
           type: "event_cancelled",
           eventId: id,
-          fromUserId: event.hostId,
+          fromUserId: uid,
           message: "The host cancelled the event.",
           read: false,
           createdAt: serverTimestamp(),

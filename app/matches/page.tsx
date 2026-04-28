@@ -1082,7 +1082,11 @@ if (requestContext === "availability_interest" && availabilityInstanceId) {
     staleRequests.map(async (docSnap) => {
       await deleteDoc(docSnap.ref);
 
-      const notifQ = query(collection(db, "notifications"), where("matchId", "==", docSnap.id));
+      const notifQ = query(
+        collection(db, "notifications"),
+        where("recipientId", "==", toUserId),
+        where("matchId", "==", docSnap.id)
+      );
       const notifSnap = await getDocs(notifQ);
       await Promise.all(notifSnap.docs.map((notifDoc) => deleteDoc(notifDoc.ref)));
     })
@@ -1175,6 +1179,9 @@ const handleStartMatch = useCallback(async (match: Match) => {
     const other = match.playerId === currentUserId ? match.opponentId : match.playerId;
     await addDoc(collection(db, "notifications"), {
       recipientId: other,
+      toUserId: other,
+      fromUserId: currentUserId,
+      type: "match_started",
       matchId: match.id,
       message: "Your match has started!",
       timestamp: serverTimestamp(),
@@ -1301,6 +1308,8 @@ const handleRequestRematch = useCallback(async (history: HistoryMatch) => {
 
     await addDoc(collection(db, "notifications"), {
       recipientId: opponentId,
+      toUserId: opponentId,
+      fromUserId: currentUserId,
       message: `${myName} wants a rematch!`,
       matchId: newMatchRef.id,
       timestamp: serverTimestamp(),
@@ -1351,6 +1360,8 @@ const unmatchMatch = useCallback(
       // Optional: notify the other person
       await addDoc(collection(db, "notifications"), {
         recipientId: otherUserId,
+        toUserId: otherUserId,
+        fromUserId: currentUserId,
         matchId: match.id,
         message: `${otherName ? "Match ended." : "A match was ended."}`,
         timestamp: serverTimestamp(),

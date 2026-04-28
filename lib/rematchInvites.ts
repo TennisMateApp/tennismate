@@ -39,6 +39,7 @@ type MatchInviteDoc = {
   conversationId?: string | null;
   fromUserId?: string | null;
   toUserId?: string | null;
+  participants?: string[] | null;
   inviteStatus?: string | null;
   invite?: InvitePayload | null;
   inviteStart?: string | null;
@@ -49,6 +50,7 @@ type MatchInviteDoc = {
   previousInviteId?: string | null;
   rematchPromptShownTo?: Record<string, unknown> | null;
   rematchPromptDismissedTo?: Record<string, unknown> | null;
+  debugPostMatchReminderMins?: number | null;
 };
 
 export type RematchPrefill = {
@@ -90,6 +92,36 @@ function getDurationMins(data: MatchInviteDoc): number {
     : 60;
 }
 
+function getEndISO(data: MatchInviteDoc): string | null {
+  const invite = getInvitePayload(data);
+
+  if (typeof invite.endISO === "string" && invite.endISO) {
+    return invite.endISO;
+  }
+
+  const startISO = getStartISO(data);
+  if (!startISO) return null;
+
+  const startMs = Date.parse(startISO);
+  if (!Number.isFinite(startMs)) return null;
+
+  return new Date(startMs + getDurationMins(data) * 60 * 1000).toISOString();
+}
+
+function getPostMatchDelayMs(data: MatchInviteDoc): number {
+  const overrideMins = data.debugPostMatchReminderMins;
+  if (
+    typeof overrideMins === "number" &&
+    Number.isFinite(overrideMins) &&
+    overrideMins >= 1 &&
+    overrideMins <= 15
+  ) {
+    return overrideMins * 60 * 1000;
+  }
+
+  return 30 * 60 * 1000;
+}
+
 function getLocation(data: MatchInviteDoc): string {
   const invite = getInvitePayload(data);
   if (typeof invite.location === "string" && invite.location.trim()) {
@@ -121,11 +153,12 @@ function defaultRematchNote() {
   return "Up for the same time next week?";
 }
 
-async function hasExistingRematch(previousInviteId: string) {
+async function hasExistingRematch(previousInviteId: string, currentUserId: string) {
   const snap = await getDocs(
     query(
       collection(db, "match_invites"),
       where("previousInviteId", "==", previousInviteId),
+      where("participants", "array-contains", currentUserId),
       limit(1)
     )
   );
@@ -182,6 +215,7 @@ export async function findEligibleRematchInvite(params: {
     query(
       collection(db, "match_invites"),
       where("conversationId", "==", conversationId),
+      where("participants", "array-contains", currentUserId),
       where("inviteStatus", "==", "accepted")
     )
   );
@@ -195,13 +229,14 @@ export async function findEligibleRematchInvite(params: {
     });
 
   for (const row of sorted) {
-    const startISO = getStartISO(row.data);
-    if (!startISO) continue;
+    const endISO = getEndISO(row.data);
+    if (!endISO) continue;
 
-    const startMs = Date.parse(startISO);
-    if (!Number.isFinite(startMs)) continue;
-    if (startMs > nowMs) continue;
-    if (startMs + 30 * 60 * 1000 > nowMs) continue;
+    const endMs = Date.parse(endISO);
+    if (!Number.isFinite(endMs)) continue;
+
+    const reminderDueMs = endMs + getPostMatchDelayMs(row.data);
+    if (reminderDueMs > nowMs) continue;
 
     if (
       currentUserId !== row.data.fromUserId &&
@@ -212,7 +247,7 @@ export async function findEligibleRematchInvite(params: {
 
     if (hasMapValue(row.data.rematchPromptShownTo, currentUserId)) continue;
     if (hasMapValue(row.data.rematchPromptDismissedTo, currentUserId)) continue;
-    if (await hasExistingRematch(row.id)) continue;
+    if (await hasExistingRematch(row.id, currentUserId)) continue;
 
     const prefill = buildRematchPrefill(row.id, row.data, currentUserId);
     if (!prefill) continue;
@@ -283,7 +318,7 @@ export async function createRematchInviteFromPrevious(params: {
     throw new Error("Conversation mismatch for rematch invite.");
   }
 
-  if (await hasExistingRematch(previousInviteId)) {
+  if (await hasExistingRematch(previousInviteId, currentUserId)) {
     throw new Error("A rematch already exists for this invite.");
   }
 
@@ -323,6 +358,7 @@ export async function createRematchInviteFromPrevious(params: {
     previousInviteId,
     fromUserId: currentUserId,
     toUserId: recipientId,
+    participants: [currentUserId, recipientId],
     opponentId: recipientId,
     startISO,
     location: location.trim(),

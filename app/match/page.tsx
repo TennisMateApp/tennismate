@@ -919,6 +919,7 @@ const handleCancelAvailability = useCallback(async () => {
 
         const notificationQ = query(
           collection(db, "notifications"),
+          where("recipientId", "==", user.uid),
           where("matchId", "==", requestId)
         );
         const notificationSnap = await getDocs(notificationQ);
@@ -1542,6 +1543,7 @@ const ref = await addDoc(collection(db, "match_requests"), {
 
 await addDoc(collection(db, "notifications"), {
   recipientId: toUid,
+  toUserId: toUid,
   fromUserId: user.uid,
   type: "match_request",
   matchId: ref.id,

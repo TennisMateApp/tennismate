@@ -109,6 +109,8 @@ export default function MatchSummaryPage() {
 
     await addDoc(collection(db, "notifications"), {
       recipientId: opponentId,
+      toUserId: opponentId,
+      fromUserId: currentUserId,
       message: `${myName} wants a rematch!`,
       matchId: newMatchRef.id,
       timestamp: serverTimestamp(),

@@ -6,6 +6,7 @@ import {
   onDocumentWritten,
 } from "firebase-functions/v2/firestore";
 import { sendEventRemindersV2 } from "./eventReminders";
+import { sendPostMatchRemindersV2 } from "./postMatchReminders";
 import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import * as crypto from "crypto";
 import { pubsub } from "firebase-functions/v1";
@@ -2965,4 +2966,4 @@ try {
 
 
 
-export { sendEventRemindersV2 };
+export { sendEventRemindersV2, sendPostMatchRemindersV2 };

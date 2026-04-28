@@ -875,7 +875,11 @@ const unsubTo = onSnapshot(
           staleRequests.map(async (docSnap) => {
             await deleteDoc(docSnap.ref);
 
-            const notifQ = query(collection(db, "notifications"), where("matchId", "==", docSnap.id));
+            const notifQ = query(
+              collection(db, "notifications"),
+              where("recipientId", "==", toUserId),
+              where("matchId", "==", docSnap.id)
+            );
             const notifSnap = await getDocs(notifQ);
             await Promise.all(notifSnap.docs.map((notifDoc) => deleteDoc(notifDoc.ref)));
           })
@@ -954,6 +958,8 @@ const unsubTo = onSnapshot(
       // Optional notify (same as mobile)
       await addDoc(collection(db, "notifications"), {
         recipientId: otherUserId,
+        toUserId: otherUserId,
+        fromUserId: currentUserId,
         matchId: match.id,
         message: `${otherName ? "Match ended." : "A match was ended."}`,
         timestamp: serverTimestamp(),
@@ -1002,6 +1008,8 @@ const unsubTo = onSnapshot(
 
       await addDoc(collection(db, "notifications"), {
         recipientId: opponentId,
+        toUserId: opponentId,
+        fromUserId: currentUserId,
         message: `${myName} wants a rematch!`,
         matchId: newMatchRef.id,
         timestamp: serverTimestamp(),
