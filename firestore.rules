@@ -2,13 +2,408 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
     function signedIn() {
       return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function sensitivePlayerKeys() {
+      return ["email", "birthYear", "lat", "lng", "geohash"];
+    }
+
+    function playerWriteHasNoSensitiveFields() {
+      return !request.resource.data.keys().hasAny(sensitivePlayerKeys());
+    }
+
+    function participantsOf(data) {
+      return data.participants is list ? data.participants : [];
+    }
+
+    function playersOf(data) {
+      return data.players is list ? data.players : [];
+    }
+
+    function isConversationParticipant() {
+      return signedIn()
+        && request.auth.uid in participantsOf(resource.data);
+    }
+
+    function isConversationParticipantOnCreate() {
+      return signedIn()
+        && request.auth.uid in participantsOf(request.resource.data);
+    }
+
+    function conversationParticipant(conversationId) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+    }
+
+    function identityFieldsUnchanged() {
+      return (!("participants" in resource.data) || request.resource.data.participants == resource.data.participants)
+        && (!("players" in resource.data) || request.resource.data.players == resource.data.players)
+        && (!("fromUserId" in resource.data) || request.resource.data.fromUserId == resource.data.fromUserId)
+        && (!("toUserId" in resource.data) || request.resource.data.toUserId == resource.data.toUserId)
+        && (!("senderId" in resource.data) || request.resource.data.senderId == resource.data.senderId)
+        && (!("receiverId" in resource.data) || request.resource.data.receiverId == resource.data.receiverId)
+        && (!("userId" in resource.data) || request.resource.data.userId == resource.data.userId)
+        && (!("ownerId" in resource.data) || request.resource.data.ownerId == resource.data.ownerId);
+    }
+
+    function isMatchPartyFromResource() {
+      return signedIn() && (
+        resource.data.fromUserId == request.auth.uid ||
+        resource.data.toUserId == request.auth.uid ||
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.ownerId == request.auth.uid ||
+        request.auth.uid in playersOf(resource.data) ||
+        request.auth.uid in participantsOf(resource.data)
+      );
+    }
+
+    function isMatchPartyFromRequest() {
+      return signedIn() && (
+        request.resource.data.fromUserId == request.auth.uid ||
+        request.resource.data.toUserId == request.auth.uid ||
+        request.resource.data.senderId == request.auth.uid ||
+        request.resource.data.receiverId == request.auth.uid ||
+        request.resource.data.userId == request.auth.uid ||
+        request.resource.data.ownerId == request.auth.uid ||
+        request.auth.uid in playersOf(request.resource.data) ||
+        request.auth.uid in participantsOf(request.resource.data)
+      );
+    }
+
+    function isNotificationRecipient() {
+      return signedIn() && (
+        resource.data.recipientId == request.auth.uid ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.toUserId == request.auth.uid
+      );
+    }
+
+    function isNotificationCreateAllowed() {
+      return signedIn()
+        && (
+          request.resource.data.fromUserId == request.auth.uid ||
+          request.resource.data.senderId == request.auth.uid
+        )
+        && (
+          request.resource.data.recipientId is string ||
+          request.resource.data.toUserId is string ||
+          request.resource.data.userId is string
+        );
+    }
+
+    function isEventHostFromResource() {
+      return signedIn() && (
+        resource.data.hostId == request.auth.uid ||
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.ownerId == request.auth.uid
+      );
+    }
+
+    function eventHost(eventId) {
+      let event = get(/databases/$(database)/documents/events/$(eventId)).data;
+      return signedIn() && (
+        event.hostId == request.auth.uid ||
+        event.createdBy == request.auth.uid ||
+        event.ownerId == request.auth.uid
+      );
+    }
+
+    function eventParticipant(eventId) {
+      let event = get(/databases/$(database)/documents/events/$(eventId)).data;
+      return signedIn() && (
+        event.hostId == request.auth.uid ||
+        event.createdBy == request.auth.uid ||
+        event.ownerId == request.auth.uid ||
+        (event.participants is list && request.auth.uid in event.participants)
+      );
+    }
+
+    match /mail/{docId} {
+      allow create: if signedIn()
+        && request.auth.token.email == "william.ray.bourke@gmail.com";
+      allow read, update, delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isSelf(uid);
+
+      match /devices/{token} {
+        allow read, write: if isSelf(uid);
+      }
+
+      match /dismissedPlayers/{dismissedPlayerId} {
+        allow read, create, update, delete: if isSelf(uid)
+          && dismissedPlayerId != uid;
+      }
+    }
+
+    match /players/{uid} {
+      allow read: if signedIn();
+
+      allow create, update: if isSelf(uid)
+        && playerWriteHasNoSensitiveFields();
+
+      allow delete: if false;
+    }
+
+    match /players_private/{uid} {
+      allow read, write: if isSelf(uid);
     }
 
     match /player_public_stats/{uid} {
       allow read: if signedIn();
       allow write: if false;
+    }
+
+    match /coaches/{coachId} {
+      allow read: if signedIn();
+
+      allow create, update: if isSelf(coachId)
+        || (signedIn() && request.resource.data.userId == request.auth.uid);
+
+      allow delete: if false;
+
+      match /viewers/{uid} {
+        allow read: if isSelf(coachId);
+        allow create, update: if isSelf(uid);
+        allow delete: if false;
+      }
+
+      match /uniqueClicks/{docId} {
+        allow read: if isSelf(coachId);
+        allow create: if signedIn();
+        allow update, delete: if false;
+      }
+    }
+
+    match /postcodes/{postcode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /courts/{courtId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /device_tokens/{id} {
+      allow write: if signedIn();
+      allow read, delete: if false;
+    }
+
+    match /calendar_events/{docId} {
+      allow read: if signedIn() && resource.data.ownerId == request.auth.uid;
+
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid;
+
+      allow update: if signedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId;
+
+      allow delete: if signedIn()
+        && resource.data.ownerId == request.auth.uid;
+    }
+
+match /conversations/{conversationId} {
+  allow read: if signedIn();
+
+  allow create: if isConversationParticipantOnCreate()
+    && request.resource.data.participants is list
+    && request.resource.data.participants.size() >= 2;
+
+  allow update: if isConversationParticipant()
+    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["participants"]);
+
+  allow delete: if false;
+  
+match /messages/{messageId} {
+  allow read: if signedIn();
+
+  allow create: if signedIn()
+    && (
+      request.resource.data.senderId == request.auth.uid ||
+      request.resource.data.fromUserId == request.auth.uid ||
+      request.resource.data.userId == request.auth.uid
+    );
+
+  allow update: if signedIn()
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+      "read",
+      "readAt",
+      "inviteStatus",
+      "inviteBookingStatus",
+      "inviteBookedBy",
+      "inviteBookedAt",
+      "updatedAt"
+    ]);
+
+  allow delete: if false;
+}
+}
+
+match /match_requests/{matchId} {
+  allow read: if signedIn()
+    && (
+      resource.data.fromUserId == request.auth.uid ||
+      resource.data.toUserId == request.auth.uid ||
+      resource.data.senderId == request.auth.uid ||
+      resource.data.receiverId == request.auth.uid ||
+      resource.data.userId == request.auth.uid ||
+      resource.data.ownerId == request.auth.uid ||
+      (resource.data.players is list && request.auth.uid in resource.data.players) ||
+      (resource.data.participants is list && request.auth.uid in resource.data.participants)
+    );
+
+  allow create: if isMatchPartyFromRequest();
+
+  allow update: if signedIn()
+    && (
+      resource.data.fromUserId == request.auth.uid ||
+      resource.data.toUserId == request.auth.uid ||
+      resource.data.senderId == request.auth.uid ||
+      resource.data.receiverId == request.auth.uid ||
+      resource.data.userId == request.auth.uid ||
+      resource.data.ownerId == request.auth.uid ||
+      (resource.data.players is list && request.auth.uid in resource.data.players) ||
+      (resource.data.participants is list && request.auth.uid in resource.data.participants)
+    )
+    && identityFieldsUnchanged();
+
+  allow delete: if false;
+}
+
+match /match_invites/{inviteId} {
+  allow read: if signedIn();
+
+  allow create: if signedIn()
+    && (
+      request.resource.data.fromUserId == request.auth.uid ||
+      request.resource.data.senderId == request.auth.uid ||
+      (
+        request.resource.data.participants is list &&
+        request.auth.uid in request.resource.data.participants
+      )
+    );
+
+  allow update: if signedIn()
+    && (
+      resource.data.fromUserId == request.auth.uid ||
+      resource.data.toUserId == request.auth.uid ||
+      resource.data.senderId == request.auth.uid ||
+      resource.data.receiverId == request.auth.uid ||
+      (
+        resource.data.participants is list &&
+        request.auth.uid in resource.data.participants
+      )
+    )
+    && identityFieldsUnchanged();
+
+  allow delete: if false;
+}
+
+    match /notifications/{notifId} {
+      allow read, update, delete: if isNotificationRecipient();
+
+      allow create: if isNotificationCreateAllowed();
+    }
+
+    match /match_scores/{scoreId} {
+      allow read: if isMatchPartyFromResource();
+
+      allow create: if isMatchPartyFromRequest();
+
+      allow update: if isMatchPartyFromResource()
+        && identityFieldsUnchanged();
+
+      allow delete: if false;
+    }
+
+match /match_history/{historyId} {
+  allow read: if signedIn()
+    && resource.data.players is list
+    && request.auth.uid in resource.data.players;
+
+  allow create: if signedIn()
+    && request.resource.data.players is list
+    && request.auth.uid in request.resource.data.players;
+
+  allow update: if signedIn()
+    && resource.data.players is list
+    && request.auth.uid in resource.data.players
+    && identityFieldsUnchanged();
+
+  allow delete: if false;
+}
+
+    match /completed_matches/{completedId} {
+      allow read: if isMatchPartyFromResource();
+
+      allow create: if isMatchPartyFromRequest();
+
+      allow update: if isMatchPartyFromResource()
+        && identityFieldsUnchanged();
+
+      allow delete: if false;
+    }
+
+    match /match_feedback/{feedbackId} {
+      allow read: if isMatchPartyFromResource();
+
+      allow create: if isMatchPartyFromRequest();
+
+      allow update: if isMatchPartyFromResource()
+        && identityFieldsUnchanged();
+
+      allow delete: if false;
+    }
+
+    match /availabilities/{uid} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSelf(uid);
+    }
+
+    match /events/{eventId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn() && (
+        request.resource.data.hostId == request.auth.uid ||
+        request.resource.data.createdBy == request.auth.uid ||
+        request.resource.data.ownerId == request.auth.uid
+      );
+
+      allow update, delete: if isEventHostFromResource();
+
+      match /join_requests/{reqId} {
+        allow read: if eventHost(eventId)
+          || (signedIn() && resource.data.userId == request.auth.uid);
+
+        allow create: if signedIn()
+          && request.resource.data.userId == request.auth.uid;
+
+        allow update: if eventHost(eventId)
+          || (signedIn() && resource.data.userId == request.auth.uid);
+
+        allow delete: if eventHost(eventId);
+      }
+
+      match /chat/{messageId} {
+        allow read, create: if eventParticipant(eventId);
+        allow update, delete: if false;
+      }
+    }
+
+    match /message_notification_state/{id} {
+      allow read, write: if false;
     }
 
     match /{document=**} {
