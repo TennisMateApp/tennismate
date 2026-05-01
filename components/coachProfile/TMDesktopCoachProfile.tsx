@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { MapPin, Phone, MessageSquare } from "lucide-react";
+import { MapPin, Phone, Pencil } from "lucide-react";
 
 type GalleryPhoto = { url: string; path?: string; createdAt?: number };
 
@@ -51,8 +51,19 @@ export default function TMDesktopCoachProfile(props: {
 
   // optional (for header subtext)
   totalGallery?: number;
+
+  isOwner?: boolean;
+  isProfileIncomplete?: boolean;
+  onEditProfile?: () => void;
 }) {
-  const { coach, hasPhone, phoneForLink, onCall, onText, mapsUrl } = props;
+  const {
+    coach,
+    hasPhone,
+    mapsUrl,
+    isOwner = false,
+    isProfileIncomplete = false,
+    onEditProfile,
+  } = props;
 
   const galleryUrls = Array.isArray(coach.galleryPhotos)
     ? coach.galleryPhotos.map((p) => p.url).filter(Boolean)
@@ -124,34 +135,52 @@ export default function TMDesktopCoachProfile(props: {
             </div>
           </div>
 
-          {/* contact number (replaces Contact/Text buttons) */}
-<div className="shrink-0">
-  {hasPhone ? (
-    <div
-      className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-extrabold"
-      style={{
-        background: "rgba(11,61,46,0.06)",
-        color: TM.forest,
-        border: "1px solid rgba(11,61,46,0.12)",
-      }}
-    >
-      <Phone size={16} />
-      <span className="tracking-wide">{coach.mobile}</span>
-    </div>
-  ) : (
-    <div
-      className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-extrabold"
-      style={{
-        background: "rgba(0,0,0,0.06)",
-        color: "rgba(0,0,0,0.45)",
-        border: "1px solid rgba(0,0,0,0.08)",
-      }}
-    >
-      <Phone size={16} />
-      <span>No number</span>
-    </div>
-  )}
-</div>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            {isOwner && onEditProfile && (
+              <div className="flex flex-col items-end gap-1">
+                <button
+                  type="button"
+                  onClick={onEditProfile}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white hover:bg-emerald-700"
+                >
+                  <Pencil size={16} />
+                  Edit Profile
+                </button>
+                {isProfileIncomplete && (
+                  <div className="text-xs font-semibold text-amber-700">
+                    Complete your profile
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* contact number (replaces Contact/Text buttons) */}
+            {hasPhone ? (
+              <div
+                className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-extrabold"
+                style={{
+                  background: "rgba(11,61,46,0.06)",
+                  color: TM.forest,
+                  border: "1px solid rgba(11,61,46,0.12)",
+                }}
+              >
+                <Phone size={16} />
+                <span className="tracking-wide">{coach.mobile}</span>
+              </div>
+            ) : (
+              <div
+                className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-extrabold"
+                style={{
+                  background: "rgba(0,0,0,0.06)",
+                  color: "rgba(0,0,0,0.45)",
+                  border: "1px solid rgba(0,0,0,0.08)",
+                }}
+              >
+                <Phone size={16} />
+                <span>No number</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

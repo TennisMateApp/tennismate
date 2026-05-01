@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { doc, getDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseConfig";
-import { Phone, MessageSquare, MapPin, ArrowLeft, X } from "lucide-react";
+import { Phone, MessageSquare, MapPin, ArrowLeft, X, Pencil } from "lucide-react";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import TMDesktopCoachProfile from "@/components/coachProfile/TMDesktopCoachProfile";
 import { onAuthStateChanged } from "firebase/auth";
@@ -71,6 +71,7 @@ export default function PublicCoachProfilePage() {
   const [coach, setCoach] = useState<CoachProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [authedUid, setAuthedUid] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
   const isDesktop = useIsDesktop(1024);
 
@@ -147,13 +148,15 @@ const [sidebarPlayer, setSidebarPlayer] = useState<{
 
 useEffect(() => {
   const unsub = onAuthStateChanged(auth, async (user) => {
-    setAuthedUid(user?.uid ?? null);
+    const currentUid = auth.currentUser?.uid ?? user?.uid ?? null;
+    setAuthedUid(currentUid);
+    setAuthChecked(true);
 
     // ✅ Sidebar info (desktop)
     try {
-      if (!user?.uid) return;
+      if (!currentUid) return;
 
-      const snap = await getDoc(doc(db, "players", user.uid));
+      const snap = await getDoc(doc(db, "players", currentUid));
       const p = (snap.data() as any) || {};
 
       setSidebarPlayer({
@@ -199,7 +202,18 @@ useEffect(() => {
 
 
   // Derived UI values (non-hooks)
-  const isOwner = authedUid && coachId ? authedUid === coachId : false;
+  // Coach docs are keyed by Firebase uid (/coaches/{uid}); fallback covers older docs missing userId.
+  const coachUid = coach?.userId || coachId;
+  const isOwner = authChecked && !!authedUid && !!coachUid && authedUid === coachUid;
+  const isCoachProfileIncomplete =
+    isOwner &&
+    !!coach &&
+    (!coach.name?.trim() ||
+      !coach.mobile?.trim() ||
+      !coach.bio?.trim() ||
+      !coach.courtAddress?.trim() ||
+      !Array.isArray(coach.coachingSkillLevels) ||
+      coach.coachingSkillLevels.length === 0);
   const phoneForLink = normalizePhoneForLink(coach?.mobile || "");
   const hasPhone = !!phoneForLink;
 
@@ -313,6 +327,9 @@ return (
                 await trackContactClick("text");
                 window.location.href = `sms:${phoneForLink}`;
               }}
+              isOwner={isOwner}
+              isProfileIncomplete={isCoachProfileIncomplete}
+              onEditProfile={() => router.push("/coach/profile/edit")}
             />
           </main>
         </div>
@@ -340,7 +357,24 @@ return (
 
     {/* Profile Card */}
     <div className="mt-3 rounded-2xl border bg-white p-4 shadow-sm">
-      <div className="flex flex-col items-center text-center">
+      <div className="relative flex flex-col items-center text-center">
+        {isOwner && (
+          <div className="absolute right-0 top-0 flex flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={() => router.push("/coach/profile/edit")}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-extrabold text-white hover:bg-emerald-700"
+            >
+              <Pencil size={14} />
+              Edit
+            </button>
+            {isCoachProfileIncomplete && (
+              <div className="max-w-[150px] text-right text-[11px] font-semibold text-amber-700">
+                Complete your profile
+              </div>
+            )}
+          </div>
+        )}
         {/* Avatar (rounded square like screenshot) */}
         <div
           className="relative aspect-square w-[110px] overflow-hidden rounded-2xl"

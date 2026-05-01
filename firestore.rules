@@ -168,7 +168,7 @@ service cloud.firestore {
       allow read: if signedIn();
 
       allow create, update: if isSelf(coachId)
-        || (signedIn() && request.resource.data.userId == request.auth.uid);
+        && request.resource.data.userId == request.auth.uid;
 
       allow delete: if false;
 
