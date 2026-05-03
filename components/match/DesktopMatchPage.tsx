@@ -154,6 +154,7 @@ setActivityFilter: (v: ActivityFilter) => void;
   sentRequestUserIds: Set<string>;
   sendingRequestUserIds: Set<string>;
   pendingAvailabilityInterestKeys: Set<string>;
+  postcodePrefixPlayerCount: number | null;
 
   onLoadMore: () => void;
   onInvite: (match: any) => void;
@@ -195,6 +196,7 @@ setActivityFilter: (v: ActivityFilter) => void;
     sentRequestUserIds,
     sendingRequestUserIds,
     pendingAvailabilityInterestKeys,
+    postcodePrefixPlayerCount,
 
     onLoadMore,
     onInvite,
@@ -328,7 +330,7 @@ const handleInvite = useCallback(
                       color: TM.forest,
                     }}
                   >
-                    {sortedMatches.length} partners
+                    {postcodePrefixPlayerCount ?? sortedMatches.length} partners
                   </span>
                 </div>
 

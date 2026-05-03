@@ -6,6 +6,7 @@ import { type SkillBand, SKILL_OPTIONS, skillFromUTR } from "../../lib/skills";
 import { resolveProfilePhoto } from "@/lib/profilePhoto";
 import {
   collection,
+  getCountFromServer,
   getDocs,
   doc,
   getDoc,
@@ -67,6 +68,7 @@ interface Player {
   age?: number | null;
   gender?: string | null;
   isMatchable?: boolean | null;
+  profileComplete?: boolean | null;
   timestamp?: any;
   lastActiveAt?: any;
   score?: number;
@@ -590,6 +592,7 @@ export default function MatchPage() {
   const [availabilityActionsOpen, setAvailabilityActionsOpen] = useState(false);
   const [availabilityCancelling, setAvailabilityCancelling] = useState(false);
   const [pendingAvailabilityInterestKeys, setPendingAvailabilityInterestKeys] = useState<Set<string>>(new Set());
+  const [postcodePrefixPlayerCount, setPostcodePrefixPlayerCount] = useState<number | null>(null);
   const [availabilityRequest, setAvailabilityRequest] = useState<AvailabilityFormState>({
     date: "",
     timeSlot: "evening",
@@ -723,6 +726,81 @@ useEffect(() => {
     prev.postcode ? prev : { ...prev, postcode: myProfile.postcode }
   );
 }, [myProfile?.postcode]);
+
+useEffect(() => {
+  if (!user?.uid || !myProfile?.postcode) {
+    setPostcodePrefixPlayerCount(null);
+    return;
+  }
+
+  const prefix = myProfile.postcode.trim().charAt(0);
+  if (!/^\d$/.test(prefix)) {
+    setPostcodePrefixPlayerCount(null);
+    return;
+  }
+
+  let cancelled = false;
+  const lower = prefix;
+  const upper = prefix === "9" ? ":" : String(Number(prefix) + 1);
+
+  const loadPostcodePrefixCount = async () => {
+    const playersRef = collection(db, "players");
+
+    try {
+      const countQ = query(
+        playersRef,
+        where("postcode", ">=", lower),
+        where("postcode", "<", upper),
+        where("profileComplete", "==", true),
+        where("isMatchable", "==", true)
+      );
+
+      const countSnap = await getCountFromServer(countQ);
+      let nextCount = countSnap.data().count;
+
+      if (
+        hasUsablePublicPlayerProfile(myProfile) &&
+        myProfile.profileComplete === true &&
+        myProfile.isMatchable === true
+      ) {
+        nextCount = Math.max(0, nextCount - 1);
+      }
+
+      if (!cancelled) setPostcodePrefixPlayerCount(nextCount);
+    } catch (error) {
+      console.warn("[MatchPage] postcode-prefix count aggregate failed; falling back to client count", error);
+
+      try {
+        const fallbackQ = query(
+          playersRef,
+          where("postcode", ">=", lower),
+          where("postcode", "<", upper)
+        );
+        const snap = await getDocs(fallbackQ);
+        let nextCount = 0;
+
+        snap.forEach((docSnap) => {
+          if (docSnap.id === user.uid) return;
+          const data = docSnap.data() as any;
+          if (!hasUsablePublicPlayerProfile(data)) return;
+          if (data.isMatchable === false) return;
+          nextCount += 1;
+        });
+
+        if (!cancelled) setPostcodePrefixPlayerCount(nextCount);
+      } catch (fallbackError) {
+        console.warn("[MatchPage] postcode-prefix count fallback failed", fallbackError);
+        if (!cancelled) setPostcodePrefixPlayerCount(null);
+      }
+    }
+  };
+
+  void loadPostcodePrefixCount();
+
+  return () => {
+    cancelled = true;
+  };
+}, [myProfile, user?.uid]);
 
 useEffect(() => {
   if (!availabilityDraftSaved) return;
@@ -2087,6 +2165,7 @@ if (isDesktop) {
   sentRequestUserIds={sentRequests}
   sendingRequestUserIds={sendingIds}
   pendingAvailabilityInterestKeys={pendingAvailabilityInterestKeys}
+  postcodePrefixPlayerCount={postcodePrefixPlayerCount}
   profileOpenId={profileOpenId}
   setProfileOpenId={setProfileOpenId}
 />
@@ -2330,7 +2409,7 @@ return (
         className="text-[13px] font-semibold mt-1"
         style={{ color: "rgba(11,61,46,0.70)" }}
       >
-        {sortedMatches.length} players nearby
+        {(postcodePrefixPlayerCount ?? sortedMatches.length)} players nearby
       </div>
     </div>
 
