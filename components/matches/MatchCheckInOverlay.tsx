@@ -16,6 +16,11 @@ import {
     updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
+import {
+  getPairId,
+  upsertCompletedMatchRelationship,
+  withRelationshipFields,
+} from "@/lib/playerRelationships";
 
 type MatchCheckInOverlayProps = {
   open: boolean;
@@ -271,6 +276,13 @@ const handleSaveMatch = async () => {
       ? (otherPlayerSnap.data() as any)
       : {};
 
+    let relationshipPairId: string | null = null;
+    try {
+      relationshipPairId = getPairId(currentUserId, otherPlayerId);
+    } catch {
+      relationshipPairId = null;
+    }
+
     const locationName =
       selectedCourt?.name ||
       locationInput.trim() ||
@@ -336,7 +348,31 @@ const handleSaveMatch = async () => {
       historyPayload.winnerId = null;
     }
 
-    await addDoc(collection(db, "match_history"), historyPayload);
+    const historyDoc = relationshipPairId
+      ? withRelationshipFields(currentUserId, otherPlayerId, historyPayload)
+      : historyPayload;
+    const historyRef = await addDoc(collection(db, "match_history"), historyDoc);
+
+    if (relationshipPairId) {
+      try {
+        await upsertCompletedMatchRelationship(
+          db,
+          currentUserId,
+          otherPlayerId,
+          historyRef.id,
+          currentUserId,
+          "match_history",
+          { latestHistoryId: historyRef.id }
+        );
+      } catch (error) {
+        console.error("[player_relationships:stage3] match_history relationship upsert failed", {
+          historyId: historyRef.id,
+          pairId: relationshipPairId,
+          players: [currentUserId, otherPlayerId],
+          error,
+        });
+      }
+    }
 
     await updateDoc(doc(db, "conversations", String(conversationId)), {
   matchCheckInResolved: true,
@@ -344,19 +380,83 @@ const handleSaveMatch = async () => {
 });
 
     if (hasScore) {
-      const scoreDocRef = await addDoc(collection(db, "match_scores"), {
+      const scorePayload: Record<string, any> = {
         players: [currentUserId, otherPlayerId],
         sets: enteredSets,
         updatedAt: serverTimestamp(),
-      });
+      };
+      const scoreDocRef = await addDoc(
+        collection(db, "match_scores"),
+        relationshipPairId
+          ? withRelationshipFields(currentUserId, otherPlayerId, scorePayload)
+          : scorePayload
+      );
 
-      await addDoc(collection(db, "completed_matches"), {
+      if (relationshipPairId) {
+        try {
+          await upsertCompletedMatchRelationship(
+            db,
+            currentUserId,
+            otherPlayerId,
+            scoreDocRef.id,
+            currentUserId,
+            "match_scores",
+            {
+              latestHistoryId: historyRef.id,
+              latestScoreId: scoreDocRef.id,
+            }
+          );
+        } catch (error) {
+          console.error("[player_relationships:stage3] match_scores relationship upsert failed", {
+            scoreId: scoreDocRef.id,
+            historyId: historyRef.id,
+            pairId: relationshipPairId,
+            players: [currentUserId, otherPlayerId],
+            error,
+          });
+        }
+      }
+
+      const completedMatchPayload: Record<string, any> = {
         fromUserId: currentUserId,
         toUserId: otherPlayerId,
         matchId: scoreDocRef.id,
         winnerId: derivedWinnerId || null,
         timestamp: serverTimestamp(),
-      });
+      };
+      const completedMatchRef = await addDoc(
+        collection(db, "completed_matches"),
+        relationshipPairId
+          ? withRelationshipFields(currentUserId, otherPlayerId, completedMatchPayload)
+          : completedMatchPayload
+      );
+
+      if (relationshipPairId) {
+        try {
+          await upsertCompletedMatchRelationship(
+            db,
+            currentUserId,
+            otherPlayerId,
+            completedMatchRef.id,
+            currentUserId,
+            "completed_matches",
+            {
+              latestHistoryId: historyRef.id,
+              latestScoreId: scoreDocRef.id,
+              latestCompletedMatchId: completedMatchRef.id,
+            }
+          );
+        } catch (error) {
+          console.error("[player_relationships:stage3] completed_matches relationship upsert failed", {
+            completedMatchId: completedMatchRef.id,
+            scoreId: scoreDocRef.id,
+            historyId: historyRef.id,
+            pairId: relationshipPairId,
+            players: [currentUserId, otherPlayerId],
+            error,
+          });
+        }
+      }
     }
 
     onClose();
@@ -388,6 +488,13 @@ const handleSaveNoMatch = async () => {
     const otherPlayer = otherPlayerSnap.exists()
       ? (otherPlayerSnap.data() as any)
       : {};
+
+    let relationshipPairId: string | null = null;
+    try {
+      relationshipPairId = getPairId(currentUserId, otherPlayerId);
+    } catch {
+      relationshipPairId = null;
+    }
 
     const historyPayload: Record<string, any> = {
       completed: false,
@@ -426,7 +533,31 @@ const handleSaveNoMatch = async () => {
       winnerId: null,
     };
 
-    await addDoc(collection(db, "match_history"), historyPayload);
+    const historyDoc = relationshipPairId
+      ? withRelationshipFields(currentUserId, otherPlayerId, historyPayload)
+      : historyPayload;
+    const historyRef = await addDoc(collection(db, "match_history"), historyDoc);
+
+    if (relationshipPairId) {
+      try {
+        await upsertCompletedMatchRelationship(
+          db,
+          currentUserId,
+          otherPlayerId,
+          historyRef.id,
+          currentUserId,
+          "match_history",
+          { latestHistoryId: historyRef.id }
+        );
+      } catch (error) {
+        console.error("[player_relationships:stage3] not-played match_history relationship upsert failed", {
+          historyId: historyRef.id,
+          pairId: relationshipPairId,
+          players: [currentUserId, otherPlayerId],
+          error,
+        });
+      }
+    }
 
     await updateDoc(doc(db, "conversations", String(conversationId)), {
   matchCheckInResolved: true,

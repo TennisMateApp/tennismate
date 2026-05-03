@@ -206,8 +206,8 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Stage 1 player_relationships parent/link records.
-    // Only new match_requests write these for now; stats/counters are reserved
+    // Stage 1-3 player_relationships parent/link records.
+    // New match_requests, match_invites, and completed match lifecycle docs write these; stats/counters are reserved
     // for a later Cloud Functions-backed migration.
     match /player_relationships/{pairId} {
       allow read: if relationshipParticipant(resource.data);

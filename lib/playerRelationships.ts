@@ -15,15 +15,26 @@ type PublicPlayerSnapshot = {
   photoThumbURL?: string | null;
 };
 
-type RelationshipInteractionType = "match_request" | "match_invite";
-type RelationshipInteractionCollection = "match_requests" | "match_invites";
+type RelationshipInteractionType = "match_request" | "match_invite" | "completed_match";
+type RelationshipInteractionCollection =
+  | "match_requests"
+  | "match_invites"
+  | "match_history"
+  | "completed_matches"
+  | "match_scores";
 
 type RelationshipUpsertOptions = {
   actorId: string;
   interactionId: string;
   interactionType: RelationshipInteractionType;
   interactionCollection: RelationshipInteractionCollection;
-  latestRefField: "latestMatchRequestId" | "latestMatchInviteId";
+  latestRefField:
+    | "latestMatchRequestId"
+    | "latestMatchInviteId"
+    | "latestHistoryId"
+    | "latestCompletedMatchId"
+    | "latestScoreId";
+  refs?: Record<string, string | null | undefined>;
   playerSnapshots?: Record<string, PublicPlayerSnapshot | null | undefined>;
 };
 
@@ -79,7 +90,7 @@ export function buildRelationshipUpsertPayload(
     playerBId,
     status: "active",
 
-    // Stage 1/2: client writes only link latest match_requests/match_invites.
+    // Stage 1-3: client writes only link latest interaction references.
     // Counters/stats are intentionally left for a later Cloud Functions-backed migration.
     createdAt: at,
     updatedAt: at,
@@ -93,6 +104,7 @@ export function buildRelationshipUpsertPayload(
     },
     refs: {
       [options.latestRefField]: options.interactionId,
+      ...(options.refs || {}),
     },
     ...(options.playerSnapshots ? { playerSnapshots: options.playerSnapshots } : {}),
   };
@@ -125,6 +137,35 @@ export async function upsertMatchInviteRelationship(
     interactionCollection: "match_invites",
     latestRefField: "latestMatchInviteId",
     playerSnapshots,
+  });
+}
+
+export async function upsertCompletedMatchRelationship(
+  db: Firestore,
+  uidA: string,
+  uidB: string,
+  interactionId: string,
+  actorId: string,
+  interactionCollection: Extract<
+    RelationshipInteractionCollection,
+    "match_history" | "completed_matches" | "match_scores"
+  >,
+  refs?: Record<string, string | null | undefined>
+) {
+  const latestRefField =
+    interactionCollection === "completed_matches"
+      ? "latestCompletedMatchId"
+      : interactionCollection === "match_scores"
+        ? "latestScoreId"
+        : "latestHistoryId";
+
+  await upsertPlayerRelationshipInteraction(db, uidA, uidB, {
+    actorId,
+    interactionId,
+    interactionType: "completed_match",
+    interactionCollection,
+    latestRefField,
+    refs,
   });
 }
 

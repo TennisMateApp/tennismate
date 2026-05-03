@@ -18,7 +18,12 @@ import { onAuthStateChanged } from "firebase/auth";
 import { Trophy } from "lucide-react";
 import { GiTennisBall } from "react-icons/gi";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
-import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
+import {
+  createMatchRequestWithRelationship,
+  getPairId,
+  upsertCompletedMatchRelationship,
+  withRelationshipFields,
+} from "@/lib/playerRelationships";
 
 export default function MatchSummaryPage() {
   const { id: matchId } = useParams();
@@ -172,23 +177,88 @@ const handleComplete = async () => {
 
       // Step 3: if both have completed → archive + function trigger
       if ((alreadyCompletedBy.length + 1) === 2) {
+        let relationshipPairId: string | null = null;
+        try {
+          relationshipPairId = getPairId(matchData.fromUserId, matchData.toUserId);
+        } catch {
+          relationshipPairId = null;
+        }
+
         const historyRef = doc(collection(db, "match_history"));
-        await setDoc(historyRef, {
+        const historyPayload: Record<string, any> = {
           ...matchData,
           completed: true,
           status: "completed",
           movedAt: serverTimestamp(),
-        });
+        };
+        await setDoc(
+          historyRef,
+          relationshipPairId
+            ? withRelationshipFields(matchData.fromUserId, matchData.toUserId, historyPayload)
+            : historyPayload
+        );
+
+        if (relationshipPairId) {
+          try {
+            await upsertCompletedMatchRelationship(
+              db,
+              matchData.fromUserId,
+              matchData.toUserId,
+              historyRef.id,
+              currentUserId,
+              "match_history",
+              { latestHistoryId: historyRef.id }
+            );
+          } catch (error) {
+            console.error("[player_relationships:stage3] summary match_history relationship upsert failed", {
+              historyId: historyRef.id,
+              pairId: relationshipPairId,
+              players: [matchData.fromUserId, matchData.toUserId],
+              error,
+            });
+          }
+        }
 
         await deleteDoc(matchRef);
 
-        await setDoc(doc(db, "completed_matches", cleanId), {
+        const completedMatchPayload: Record<string, any> = {
           matchId: cleanId,
           winnerId: matchData.winnerId,
           fromUserId: matchData.fromUserId,
           toUserId: matchData.toUserId,
           timestamp: serverTimestamp(),
-        });
+        };
+        await setDoc(
+          doc(db, "completed_matches", cleanId),
+          relationshipPairId
+            ? withRelationshipFields(matchData.fromUserId, matchData.toUserId, completedMatchPayload)
+            : completedMatchPayload
+        );
+
+        if (relationshipPairId) {
+          try {
+            await upsertCompletedMatchRelationship(
+              db,
+              matchData.fromUserId,
+              matchData.toUserId,
+              cleanId,
+              currentUserId,
+              "completed_matches",
+              {
+                latestHistoryId: historyRef.id,
+                latestCompletedMatchId: cleanId,
+              }
+            );
+          } catch (error) {
+            console.error("[player_relationships:stage3] summary completed_matches relationship upsert failed", {
+              completedMatchId: cleanId,
+              historyId: historyRef.id,
+              pairId: relationshipPairId,
+              players: [matchData.fromUserId, matchData.toUserId],
+              error,
+            });
+          }
+        }
       }
     }
 

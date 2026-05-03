@@ -2,7 +2,7 @@
 
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import Image from "next/image";
 import withAuth from "@/components/withAuth";
@@ -10,6 +10,11 @@ import { ComponentType } from "react";
 import { GiTennisBall } from "react-icons/gi";
 import ClientLayoutWrapper from "@/components/ClientLayoutWrapper";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
+import {
+  getPairId,
+  upsertCompletedMatchRelationship,
+  withRelationshipFields,
+} from "@/lib/playerRelationships";
 
 type Player = {
   id: string;
@@ -287,6 +292,15 @@ const [matchComments, setMatchComments] = useState("");
 
     const scoreText = formatScoreline(clean);
     const winnerId = computeWinner(clean, playerA, playerB);
+    const cleanMatchId = Array.isArray(matchId) ? matchId[0] : (matchId as string);
+    const actorId = auth.currentUser?.uid || playerA.id;
+
+    let relationshipPairId: string | null = null;
+    try {
+      relationshipPairId = getPairId(playerA.id, playerB.id);
+    } catch {
+      relationshipPairId = null;
+    }
 
 const cleanedSets = clean.map(s => ({
   A: s.A,
@@ -295,9 +309,7 @@ const cleanedSets = clean.map(s => ({
   ...(s.tieBreakB != null ? { tieBreakB: s.tieBreakB } : {}),
 }));
 
-await setDoc(
-  doc(db, "match_scores", matchId as string),
-  {
+const scorePayload: Record<string, any> = {
     players: [playerA.id, playerB.id],
     ...(fromInvite ? { inviteId: fromInvite } : {}),
     livePoints,
@@ -305,11 +317,38 @@ await setDoc(
     matchComments,
     sets: cleanedSets,
     updatedAt: serverTimestamp(),
-  },
+  };
+
+await setDoc(
+  doc(db, "match_scores", cleanMatchId),
+  relationshipPairId
+    ? withRelationshipFields(playerA.id, playerB.id, scorePayload)
+    : scorePayload,
   { merge: true }
 );
 
-await updateDoc(doc(db, "match_requests", matchId as string), {
+if (relationshipPairId) {
+  try {
+    await upsertCompletedMatchRelationship(
+      db,
+      playerA.id,
+      playerB.id,
+      cleanMatchId,
+      actorId,
+      "match_scores",
+      { latestScoreId: cleanMatchId }
+    );
+  } catch (error) {
+    console.error("[player_relationships:stage3] match_scores relationship upsert failed", {
+      scoreId: cleanMatchId,
+      pairId: relationshipPairId,
+      players: [playerA.id, playerB.id],
+      error,
+    });
+  }
+}
+
+await updateDoc(doc(db, "match_requests", cleanMatchId), {
   matchType: type,
   score: scoreText,
   completed: true,
@@ -319,10 +358,8 @@ await updateDoc(doc(db, "match_requests", matchId as string), {
 });
 
 // ✅ CREATE / UPDATE MATCH HISTORY
-await setDoc(
-  doc(db, "match_history", matchId as string),
-  {
-    matchRequestId: matchId,
+const historyPayload: Record<string, any> = {
+    matchRequestId: cleanMatchId,
     players: [playerA.id, playerB.id],
     fromUserId: playerA.id,
     toUserId: playerB.id,
@@ -342,9 +379,40 @@ await setDoc(
     completedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     ...(fromInvite ? { inviteId: fromInvite, completedFrom: "invite" } : {}),
-  },
+  };
+
+await setDoc(
+  doc(db, "match_history", cleanMatchId),
+  relationshipPairId
+    ? withRelationshipFields(playerA.id, playerB.id, historyPayload)
+    : historyPayload,
   { merge: true }
 );
+
+if (relationshipPairId) {
+  try {
+    await upsertCompletedMatchRelationship(
+      db,
+      playerA.id,
+      playerB.id,
+      cleanMatchId,
+      actorId,
+      "match_history",
+      {
+        latestHistoryId: cleanMatchId,
+        latestScoreId: cleanMatchId,
+      }
+    );
+  } catch (error) {
+    console.error("[player_relationships:stage3] match_history relationship upsert failed", {
+      historyId: cleanMatchId,
+      scoreId: cleanMatchId,
+      pairId: relationshipPairId,
+      players: [playerA.id, playerB.id],
+      error,
+    });
+  }
+}
 
     // Love-hold badge if any 6–0
     if (clean.some(s => (s.A === 6 && s.B === 0) || (s.B === 6 && s.A === 0))) {
