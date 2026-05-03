@@ -9,7 +9,6 @@ import {
   query,
   where,
   getDocs,
-  addDoc,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
@@ -20,6 +19,7 @@ import { CalendarDays, CheckCircle2, Trophy } from "lucide-react";
 import type { SkillBand } from "@/lib/skills";
 import { SKILL_OPTIONS, skillFromUTR } from "@/lib/skills";
 import { resolveLargeProfilePhoto, resolveSmallProfilePhoto } from "@/lib/profilePhoto";
+import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
 
 const TM = {
   forest: "#0B3D2E",
@@ -391,7 +391,9 @@ const handleInviteToPlay = async () => {
 
     const fromPhotoURL = resolveSmallProfilePhoto(myProfileData);
 
-    const ref = await addDoc(collection(db, "match_requests"), {
+    // Stage 1 player_relationships: link new match_requests to
+    // player_relationships/{pairId}. Other collections migrate later.
+    const ref = await createMatchRequestWithRelationship(db, currentUid, toUid, {
       fromUserId: currentUid,
       toUserId: toUid,
       status: "pending",
@@ -404,6 +406,21 @@ const handleInviteToPlay = async () => {
       toName: player.name ?? null,
       toPostcode: player.postcode ?? null,
       toPhotoURL: resolveLargeProfilePhoto(player) ?? null,
+    }, {
+      actorId: currentUid,
+      playerSnapshots: {
+        [currentUid]: {
+          name: fromName,
+          photoURL: fromPhotoURL,
+          photoThumbURL:
+            typeof myProfileData?.photoThumbURL === "string" ? myProfileData.photoThumbURL : null,
+        },
+        [toUid]: {
+          name: player.name ?? null,
+          photoURL: resolveLargeProfilePhoto(player) ?? null,
+          photoThumbURL: resolveSmallProfilePhoto(player) ?? null,
+        },
+      },
     });
 
     console.log("[PlayerProfileView] ✅ match_requests created:", ref.id, {

@@ -33,6 +33,7 @@ import {
   Loader2,
   ExternalLink,
   ArrowLeft,
+  ChevronDown,
 } from "lucide-react";
 
 import Image from "next/image";
@@ -42,6 +43,7 @@ import { track } from "@/lib/track";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import DesktopMatches from "@/components/matches/DesktopMatches";
 import { trackEvent } from "@/lib/mixpanel";
+import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
 
 
 // --- Helpers ---
@@ -118,6 +120,7 @@ type Match = {
 type HistoryMatch = {
   id: string;
   matchRequestId?: string | null;
+  players?: string[];
   fromUserId?: string | null;
   toUserId?: string | null;
   fromName?: string | null;
@@ -133,6 +136,19 @@ type HistoryMatch = {
   playedDate?: string | null;
   matchType?: string | null;
   location?: string | null;
+};
+
+type HistoryOpponentGroup = {
+  opponentId: string;
+  opponentName: string;
+  avatarSrc: string;
+  initials: string;
+  matches: HistoryMatch[];
+  latestMatch: HistoryMatch;
+  latestDateMs: number;
+  wins: number;
+  losses: number;
+  latestScore: string;
 };
 
 type PCMap = Record<string, { lat: number; lng: number }>;
@@ -204,6 +220,21 @@ const formatHistoryDate = (completedAt?: any, playedDate?: string | null) => {
 const formatMatchType = (value?: string | null) => {
   if (!value) return "Match";
   return value.charAt(0).toUpperCase() + value.slice(1);
+};
+
+const historyMatchTime = (history: HistoryMatch) =>
+  toDateOrNull(history.completedAt)?.getTime() ??
+  toDateOrNull(history.playedDate)?.getTime() ??
+  toDateOrNull(history.updatedAt)?.getTime() ??
+  0;
+
+const getHistoryOpponentId = (history: HistoryMatch, currentUserId: string) => {
+  const fromPlayers = Array.isArray(history.players)
+    ? history.players.find((uid) => typeof uid === "string" && uid && uid !== currentUserId)
+    : null;
+  if (fromPlayers) return fromPlayers;
+
+  return history.fromUserId === currentUserId ? history.toUserId ?? null : history.fromUserId ?? null;
 };
 
 
@@ -411,6 +442,7 @@ const [direction, setDirection] = useState<"all" | "received" | "sent">(initialD
 
 const [matches, setMatches] = useState<Match[]>([]);
 const [historyMatches, setHistoryMatches] = useState<HistoryMatch[]>([]);
+const [expandedHistoryOpponentIds, setExpandedHistoryOpponentIds] = useState<Set<string>>(new Set());
 const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
 const [queryText, setQueryText] = useState(searchParams.get("q") || "");
@@ -905,6 +937,9 @@ useEffect(() => {
               typeof d.matchRequestId === "string" && d.matchRequestId.trim()
                 ? d.matchRequestId
                 : null,
+            players: Array.isArray(d.players)
+              ? d.players.filter((uid: unknown): uid is string => typeof uid === "string" && !!uid)
+              : [],
             fromUserId: d.fromUserId ?? null,
             toUserId: d.toUserId ?? null,
             fromName: d.fromName ?? null,
@@ -958,7 +993,7 @@ useEffect(() => {
     new Set([
       ...matches.map((m) => (m.playerId === currentUserId ? m.opponentId : m.playerId)),
       ...historyMatches
-        .map((m) => (m.fromUserId === currentUserId ? m.toUserId : m.fromUserId))
+        .map((m) => getHistoryOpponentId(m, currentUserId))
         .filter((id): id is string => !!id),
     ])
   );
@@ -1278,8 +1313,7 @@ const handleCompleteGame = useCallback((match: Match) => {
 const handleRequestRematch = useCallback(async (history: HistoryMatch) => {
   if (!currentUserId) return;
 
-  const opponentId =
-    history.fromUserId === currentUserId ? history.toUserId : history.fromUserId;
+  const opponentId = getHistoryOpponentId(history, currentUserId);
   if (!opponentId) return;
 
   const myName =
@@ -1287,14 +1321,17 @@ const handleRequestRematch = useCallback(async (history: HistoryMatch) => {
       ? history.fromName || myPlayer?.name || "Player"
       : history.toName || myPlayer?.name || "Player";
   const opponentName =
-    history.fromUserId === currentUserId
+    oppCache[opponentId]?.name ||
+    (history.fromUserId === currentUserId
       ? history.toName || "Opponent"
-      : history.fromName || "Opponent";
+      : history.fromName || "Opponent");
 
   try {
     setRematchingId(history.id);
 
-    const newMatchRef = await addDoc(collection(db, "match_requests"), {
+    // Stage 1 player_relationships: link new match_requests to
+    // player_relationships/{pairId}. Other collections migrate later.
+    const newMatchRef = await createMatchRequestWithRelationship(db, currentUserId, opponentId, {
       fromUserId: currentUserId,
       toUserId: opponentId,
       fromName: myName,
@@ -1304,6 +1341,16 @@ const handleRequestRematch = useCallback(async (history: HistoryMatch) => {
       winnerId: "",
       completed: false,
       createdAt: serverTimestamp(),
+    }, {
+      actorId: currentUserId,
+      playerSnapshots: {
+        [currentUserId]: { name: myName },
+        [opponentId]: {
+          name: opponentName,
+          photoURL: oppCache[opponentId]?.photoURL ?? null,
+          photoThumbURL: oppCache[opponentId]?.photoThumbURL ?? null,
+        },
+      },
     });
 
     await addDoc(collection(db, "notifications"), {
@@ -1324,7 +1371,7 @@ const handleRequestRematch = useCallback(async (history: HistoryMatch) => {
   } finally {
     setRematchingId(null);
   }
-}, [currentUserId, myPlayer?.name]);
+}, [currentUserId, myPlayer?.name, oppCache]);
 
 const deleteMatch = useCallback(async (id: string) => {
   if (!confirm("Are you sure you want to delete this request?")) return;
@@ -1384,8 +1431,7 @@ const unmatchMatch = useCallback(
 const renderHistoryMatch = useCallback((history: HistoryMatch) => {
   if (!currentUserId) return null;
 
-  const otherId =
-    history.fromUserId === currentUserId ? history.toUserId : history.fromUserId;
+  const otherId = getHistoryOpponentId(history, currentUserId);
   if (!otherId) return null;
 
   const other = oppCache[otherId];
@@ -1475,6 +1521,79 @@ const renderHistoryMatch = useCallback((history: HistoryMatch) => {
     </li>
   );
 }, [currentUserId, handleRequestRematch, oppCache, rematchingId, requestedRematches, router]);
+
+const toggleHistoryOpponent = useCallback((opponentId: string) => {
+  setExpandedHistoryOpponentIds((prev) => {
+    const next = new Set(prev);
+    if (next.has(opponentId)) next.delete(opponentId);
+    else next.add(opponentId);
+    return next;
+  });
+}, []);
+
+const renderHistoryGroup = useCallback((group: HistoryOpponentGroup) => {
+  const expanded = expandedHistoryOpponentIds.has(group.opponentId);
+  const matchWord = group.matches.length === 1 ? "match" : "matches";
+  const hasResultSummary = group.wins > 0 || group.losses > 0;
+
+  return (
+    <li key={group.opponentId} className="rounded-3xl bg-white shadow-sm ring-1 ring-black/5 p-5">
+      <button
+        type="button"
+        onClick={() => toggleHistoryOpponent(group.opponentId)}
+        className="flex w-full items-start gap-3 text-left"
+        aria-expanded={expanded}
+      >
+        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full bg-gray-100">
+          {group.avatarSrc ? (
+            <Image
+              src={group.avatarSrc}
+              alt={group.opponentName}
+              fill
+              sizes="48px"
+              className="object-cover"
+            />
+          ) : (
+            <div className="grid h-full w-full place-items-center text-sm text-gray-600">
+              {group.initials}
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-[15px] font-extrabold text-gray-900">
+                {group.opponentName}
+              </div>
+              <div className="mt-1 text-[12px] text-gray-500">
+                {group.matches.length} {matchWord} | Latest {formatHistoryDate(group.latestMatch.completedAt, group.latestMatch.playedDate)}
+              </div>
+              <div className="mt-1 text-[12px] text-gray-400">
+                {hasResultSummary ? `${group.wins}W ${group.losses}L | ` : ""}Latest score: {group.latestScore}
+              </div>
+            </div>
+
+            <div className="shrink-0 text-right">
+              <ChevronDown
+                className={`mt-1 h-5 w-5 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}
+              />
+              <div className="mt-2 text-[11px] font-bold text-gray-400">
+                {expanded ? "Hide games" : "View games"}
+              </div>
+            </div>
+          </div>
+        </div>
+      </button>
+
+      {expanded ? (
+        <ul className="mt-4 space-y-3 border-t border-gray-100 pt-4">
+          {group.matches.map((match) => renderHistoryMatch(match))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}, [expandedHistoryOpponentIds, renderHistoryMatch, toggleHistoryOpponent]);
 
 const renderMatch = useCallback((match: Match) => {
   const isMine = match.playerId === currentUserId;
@@ -1871,7 +1990,9 @@ const visibleHistoryMatches = useMemo(() => {
     : historyMatches.filter((m) => {
         const a = (m.fromName || "").toLowerCase();
         const b = (m.toName || "").toLowerCase();
-        return a.includes(q) || b.includes(q);
+        const opponentId = currentUserId ? getHistoryOpponentId(m, currentUserId) : null;
+        const cached = opponentId ? (oppCache[opponentId]?.name || "").toLowerCase() : "";
+        return a.includes(q) || b.includes(q) || cached.includes(q);
       });
 
   const enriched = searched.map((m) => {
@@ -1888,7 +2009,68 @@ const visibleHistoryMatches = useMemo(() => {
   );
 
   return enriched.map((e) => e.m);
-}, [historyMatches, queryText, sortBy]);
+}, [currentUserId, historyMatches, oppCache, queryText, sortBy]);
+
+const visibleHistoryGroups = useMemo(() => {
+  if (!currentUserId) return [];
+
+  const groups = new Map<string, HistoryMatch[]>();
+
+  visibleHistoryMatches.forEach((history) => {
+    const opponentId = getHistoryOpponentId(history, currentUserId);
+    if (!opponentId) return;
+
+    const current = groups.get(opponentId) ?? [];
+    current.push(history);
+    groups.set(opponentId, current);
+  });
+
+  const next: HistoryOpponentGroup[] = [];
+
+  groups.forEach((matchesForOpponent, opponentId) => {
+    const matches = [...matchesForOpponent].sort((a, b) => historyMatchTime(b) - historyMatchTime(a));
+    const latestMatch = matches[0];
+    if (!latestMatch) return;
+
+    const other = oppCache[opponentId];
+    const opponentName =
+      other?.name ||
+      (latestMatch.fromUserId === currentUserId ? latestMatch.toName : latestMatch.fromName) ||
+      "Player";
+    const avatarSrc =
+      other?.photoThumbURL ||
+      other?.photoURL ||
+      (latestMatch.fromUserId === currentUserId ? latestMatch.toPhotoURL : latestMatch.fromPhotoURL) ||
+      "";
+
+    let wins = 0;
+    let losses = 0;
+    matches.forEach((match) => {
+      if (!match.winnerId) return;
+      if (match.winnerId === currentUserId) wins += 1;
+      else losses += 1;
+    });
+
+    next.push({
+      opponentId,
+      opponentName,
+      avatarSrc,
+      initials: (opponentName || "?").trim().charAt(0).toUpperCase(),
+      matches,
+      latestMatch,
+      latestDateMs: historyMatchTime(latestMatch),
+      wins,
+      losses,
+      latestScore: latestMatch.score?.trim() || "No score",
+    });
+  });
+
+  next.sort((a, b) =>
+    sortBy === "oldest" ? a.latestDateMs - b.latestDateMs : b.latestDateMs - a.latestDateMs
+  );
+
+  return next;
+}, [currentUserId, oppCache, sortBy, visibleHistoryMatches]);
 
 const isTabLoading = tab === "history" ? historyLoading : loading;
 
@@ -2021,7 +2203,7 @@ return (
           ))}
         </div>
       ) : tab === "history" ? (
-        visibleHistoryMatches.length === 0 ? (
+        visibleHistoryGroups.length === 0 ? (
           <div className="rounded-3xl bg-white ring-1 ring-black/5 p-6 text-center text-sm text-gray-600">
             No past matches yet.
           </div>
@@ -2031,7 +2213,7 @@ return (
               Past Matches
             </div>
             <ul className="space-y-3">
-              {visibleHistoryMatches.map((m) => renderHistoryMatch(m))}
+              {visibleHistoryGroups.map((group) => renderHistoryGroup(group))}
             </ul>
           </>
         )

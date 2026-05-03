@@ -35,6 +35,7 @@ import { trackEvent } from "@/lib/mixpanel";
 import { getNearbyPlayers } from "@/lib/nearbyPlayersClient";
 import AgeGateModal from "@/components/AgeGateModal";
 import { useRequireBirthYear } from "@/lib/useRequireBirthYear";
+import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
 
 
 
@@ -1684,7 +1685,14 @@ const handleMatchRequest = async (target: Player | string) => {
         : null;
 
     // ✅ Create match request doc
-const ref = await addDoc(collection(db, "match_requests"), {
+// Stage 1 player_relationships: create the match request and link it to
+// player_relationships/{pairId}. Other interaction collections migrate later.
+console.debug("[MatchPage] before createMatchRequestWithRelationship", {
+  fromUserId: user.uid,
+  toUserId: toUid,
+});
+
+const ref = await createMatchRequestWithRelationship(db, user.uid, toUid, {
   fromUserId: user.uid,
   toUserId: toUid,
   status: "pending",
@@ -1709,27 +1717,68 @@ const ref = await addDoc(collection(db, "match_requests"), {
     matchPlayer?.photoThumbURL || matchPlayer?.photoURL || matchPlayer?.avatar || null,
   requestContext: isAvailabilityInterest ? "availability_interest" : "player_match",
   availabilityInstanceId,
+}, {
+  actorId: user.uid,
+  playerSnapshots: {
+    [user.uid]: {
+      name: myProfile?.name ?? null,
+      photoURL: myProfile?.photoURL || myProfile?.avatar || null,
+      photoThumbURL: myProfile?.photoThumbURL ?? null,
+    },
+    [toUid]: matchPlayer
+      ? {
+          name: matchPlayer.name ?? null,
+          photoURL: matchPlayer.photoURL || matchPlayer.avatar || null,
+          photoThumbURL: matchPlayer.photoThumbURL ?? null,
+        }
+      : null,
+  },
 });
 
-await addDoc(collection(db, "notifications"), {
-  recipientId: toUid,
-  toUserId: toUid,
+console.debug("[MatchPage] after createMatchRequestWithRelationship", {
+  matchRequestId: ref.id,
   fromUserId: user.uid,
-  type: "match_request",
-  matchId: ref.id,
-  title: isAvailabilityInterest ? "New availability interest" : "New match request",
-  body: isAvailabilityInterest
-    ? `${myProfile?.name ?? "A player"} is interested in your ${availabilityLabel} availability.`
-    : `${myProfile?.name ?? "A player"} has challenged you to a match.`,
-  message: isAvailabilityInterest
-    ? `${myProfile?.name ?? "A player"} is interested in your ${availabilityLabel} availability.`
-    : `${myProfile?.name ?? "A player"} has challenged you to a match.`,
-  route: "/matches",
-  url: "https://tennismate.vercel.app/matches",
-  timestamp: serverTimestamp(),
-  read: false,
-  source: isAvailabilityInterest ? "client:availability_interest" : "client:match_request",
+  toUserId: toUid,
 });
+
+try {
+  console.debug("[MatchPage] before notifications create", {
+    matchRequestId: ref.id,
+    recipientId: toUid,
+    fromUserId: user.uid,
+  });
+
+  await addDoc(collection(db, "notifications"), {
+    recipientId: toUid,
+    toUserId: toUid,
+    fromUserId: user.uid,
+    type: "match_request",
+    matchId: ref.id,
+    title: isAvailabilityInterest ? "New availability interest" : "New match request",
+    body: isAvailabilityInterest
+      ? `${myProfile?.name ?? "A player"} is interested in your ${availabilityLabel} availability.`
+      : `${myProfile?.name ?? "A player"} has challenged you to a match.`,
+    message: isAvailabilityInterest
+      ? `${myProfile?.name ?? "A player"} is interested in your ${availabilityLabel} availability.`
+      : `${myProfile?.name ?? "A player"} has challenged you to a match.`,
+    route: "/matches",
+    url: "https://tennismate.vercel.app/matches",
+    timestamp: serverTimestamp(),
+    read: false,
+    source: isAvailabilityInterest ? "client:availability_interest" : "client:match_request",
+  });
+
+  console.debug("[MatchPage] after notifications create", {
+    matchRequestId: ref.id,
+    recipientId: toUid,
+  });
+} catch (notificationError) {
+  console.warn("[MatchPage] optional notification create failed after match request was created", {
+    matchRequestId: ref.id,
+    recipientId: toUid,
+    error: notificationError,
+  });
+}
 
 trackEvent("match_request_sent", {
   requestId: ref.id,

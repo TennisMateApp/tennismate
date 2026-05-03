@@ -18,6 +18,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { Trophy } from "lucide-react";
 import { GiTennisBall } from "react-icons/gi";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
+import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
 
 export default function MatchSummaryPage() {
   const { id: matchId } = useParams();
@@ -92,10 +93,13 @@ export default function MatchSummaryPage() {
     if (!currentUserId || !match) return;
     const { fromUserId, toUserId, fromName, toName } = match;
     const opponentId = currentUserId === fromUserId ? toUserId : fromUserId;
+    if (!opponentId) return;
     const myName = currentUserId === fromUserId ? fromName : toName;
     const opponentName = currentUserId === fromUserId ? toName : fromName;
 
-    const newMatchRef = await addDoc(collection(db, "match_requests"), {
+    // Stage 1 player_relationships: link new match_requests to
+    // player_relationships/{pairId}. Other collections migrate later.
+    const newMatchRef = await createMatchRequestWithRelationship(db, currentUserId, opponentId, {
       fromUserId: currentUserId,
       toUserId: opponentId,
       fromName: myName,
@@ -105,6 +109,12 @@ export default function MatchSummaryPage() {
       winnerId: "",
       completed: false,
       createdAt: serverTimestamp(),
+    }, {
+      actorId: currentUserId,
+      playerSnapshots: {
+        [currentUserId]: { name: myName ?? "Player" },
+        [opponentId]: { name: opponentName ?? "Opponent" },
+      },
     });
 
     await addDoc(collection(db, "notifications"), {

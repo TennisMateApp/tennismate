@@ -27,6 +27,46 @@ service cloud.firestore {
       return data.players is list ? data.players : [];
     }
 
+    function relationshipParticipant(data) {
+      return signedIn()
+        && data.players is list
+        && request.auth.uid in data.players;
+    }
+
+    function relationshipPlayersValid(data) {
+      return data.players is list
+        && data.players.size() == 2
+        && data.playerAId is string
+        && data.playerBId is string
+        && data.playerAId in data.players
+        && data.playerBId in data.players
+        && data.playerAId != data.playerBId;
+    }
+
+    function relationshipAllowedKeys() {
+      return [
+        "pairId",
+        "players",
+        "playerAId",
+        "playerBId",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "lastInteractionAt",
+        "lastInteraction",
+        "refs",
+        "relationshipRefPath",
+        "playerSnapshots"
+      ];
+    }
+
+    function relationshipIdentityUnchanged() {
+      return request.resource.data.pairId == resource.data.pairId
+        && request.resource.data.players == resource.data.players
+        && request.resource.data.playerAId == resource.data.playerAId
+        && request.resource.data.playerBId == resource.data.playerBId;
+    }
+
     function isConversationParticipant() {
       return signedIn()
         && request.auth.uid in participantsOf(resource.data);
@@ -50,7 +90,9 @@ service cloud.firestore {
         && (!("senderId" in resource.data) || request.resource.data.senderId == resource.data.senderId)
         && (!("receiverId" in resource.data) || request.resource.data.receiverId == resource.data.receiverId)
         && (!("userId" in resource.data) || request.resource.data.userId == resource.data.userId)
-        && (!("ownerId" in resource.data) || request.resource.data.ownerId == resource.data.ownerId);
+        && (!("ownerId" in resource.data) || request.resource.data.ownerId == resource.data.ownerId)
+        && (!("pairId" in resource.data) || request.resource.data.pairId == resource.data.pairId)
+        && (!("relationshipRefPath" in resource.data) || request.resource.data.relationshipRefPath == resource.data.relationshipRefPath);
     }
 
     function isMatchPartyFromResource() {
@@ -162,6 +204,26 @@ service cloud.firestore {
     match /player_public_stats/{uid} {
       allow read: if signedIn();
       allow write: if false;
+    }
+
+    // Stage 1 player_relationships parent/link records.
+    // Only new match_requests write these for now; stats/counters are reserved
+    // for a later Cloud Functions-backed migration.
+    match /player_relationships/{pairId} {
+      allow read: if relationshipParticipant(resource.data);
+
+      allow create: if signedIn()
+        && pairId == request.resource.data.pairId
+        && relationshipPlayersValid(request.resource.data)
+        && request.auth.uid in request.resource.data.players
+        && request.resource.data.keys().hasOnly(relationshipAllowedKeys());
+
+      allow update: if relationshipParticipant(resource.data)
+        && relationshipPlayersValid(request.resource.data)
+        && relationshipIdentityUnchanged()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(relationshipAllowedKeys());
+
+      allow delete: if false;
     }
 
     match /coaches/{coachId} {

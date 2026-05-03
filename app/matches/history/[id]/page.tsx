@@ -10,6 +10,7 @@ import { GiTennisBall } from "react-icons/gi";
 
 import { auth, db } from "@/lib/firebaseConfig";
 import { resolveProfilePhoto } from "@/lib/profilePhoto";
+import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
 
 type HistoryMatch = {
   id: string;
@@ -258,7 +259,9 @@ export default function MatchHistoryDetailsPage() {
     try {
       setRequestingRematch(true);
 
-      const newMatchRef = await addDoc(collection(db, "match_requests"), {
+      // Stage 1 player_relationships: link new match_requests to
+      // player_relationships/{pairId}. Other collections migrate later.
+      const newMatchRef = await createMatchRequestWithRelationship(db, currentUserId, opponentId, {
         fromUserId: currentUserId,
         toUserId: opponentId,
         fromName: myName,
@@ -268,6 +271,20 @@ export default function MatchHistoryDetailsPage() {
         winnerId: "",
         completed: false,
         createdAt: serverTimestamp(),
+      }, {
+        actorId: currentUserId,
+        playerSnapshots: {
+          [currentUserId]: {
+            name: myName,
+            photoURL: currentPhotos[currentUserId] ?? null,
+            photoThumbURL: currentPhotos[currentUserId] ?? null,
+          },
+          [opponentId]: {
+            name: opponentName,
+            photoURL: currentPhotos[opponentId] ?? null,
+            photoThumbURL: currentPhotos[opponentId] ?? null,
+          },
+        },
       });
 
       await addDoc(collection(db, "notifications"), {
