@@ -768,10 +768,14 @@ setPreviewURL(photoThumbURL || photoURL);
 
 const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
+  await handleSaveAndExitEditMode();
+};
 
+const handleSaveAndExitEditMode = async () => {
   const ok = await saveProfile();
 
   if (ok) {
+    setEditMode(false);
     router.replace("/profile");
   }
 };
@@ -1141,7 +1145,7 @@ return (
 
   <button
     type="button"
-    onClick={saveProfile}
+    onClick={handleSaveAndExitEditMode}
     disabled={saving}
     className="touch-manipulation w-full rounded-[26px] py-4 text-base font-black shadow disabled:opacity-50 disabled:cursor-not-allowed"
     style={{ background: TM.neon, color: TM.forest }}
