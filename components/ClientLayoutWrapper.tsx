@@ -268,12 +268,14 @@ useEffect(() => {
   // Throttle writes to avoid cost + spam
   if (!shouldPingLastActive(user.uid)) return;
 
-  // Use setDoc(merge) so it works even if player doc doesn't exist yet
-  setDoc(
-    doc(db, "players", user.uid),
-    { lastActiveAt: serverTimestamp() },
-    { merge: true }
-  ).catch(() => {});
+  const playerRef = doc(db, "players", user.uid);
+
+  getDoc(playerRef)
+    .then((snap) => {
+      if (!snap.exists() || !isPlayerProfileUsable(snap.data())) return;
+      return updateDoc(playerRef, { lastActiveAt: serverTimestamp() });
+    })
+    .catch(() => {});
 }, [user?.uid, pathname]);
 
 

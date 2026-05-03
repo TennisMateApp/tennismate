@@ -414,6 +414,83 @@ const isAvailabilityExpired = (availability: { date?: string; expiresAt?: any } 
   return false;
 };
 
+const hasText = (value: unknown) => typeof value === "string" && value.trim().length > 0;
+
+const hasUsablePublicPlayerProfile = (data: any) => {
+  if (!data || typeof data !== "object") return false;
+
+  const hasSkill =
+    hasText(data.skillLevel) ||
+    hasText(data.skillBand) ||
+    (typeof data.skillRating === "number" && Number.isFinite(data.skillRating)) ||
+    (typeof data.utr === "number" && Number.isFinite(data.utr));
+
+  return hasText(data.name) && hasText(data.postcode) && hasSkill;
+};
+
+const needsAvailabilityProfileEnrichment = (availability: AvailabilityRecord) =>
+  !hasText(availability.name) ||
+  availability.name.trim().toLowerCase() === "player" ||
+  !hasText(availability.photoURL) ||
+  !hasText(availability.photoThumbURL);
+
+const availabilitySnapshotFromPlayer = (player: any) => ({
+  name: hasText(player.name) ? player.name.trim() : "Player",
+  photoURL: resolveProfilePhoto(player),
+  photoThumbURL:
+    hasText(player.photoThumbURL) ? player.photoThumbURL.trim() : resolveProfilePhoto(player),
+  postcode: hasText(player.postcode) ? player.postcode.trim() : "",
+  skillBand: (hasText(player.skillBand) ? player.skillBand.trim() : "") as SkillBand | "",
+  skillBandLabel: hasText(player.skillBandLabel) ? player.skillBandLabel.trim() : null,
+  skillLevel: hasText(player.skillLevel) ? player.skillLevel.trim() : null,
+  skillRating:
+    typeof player.skillRating === "number" && Number.isFinite(player.skillRating)
+      ? player.skillRating
+      : null,
+  utr:
+    typeof player.utr === "number" && Number.isFinite(player.utr)
+      ? player.utr
+      : null,
+});
+
+const enrichAvailabilityRecordsFromPlayers = async (records: AvailabilityRecord[]) => {
+  if (records.length === 0) return records;
+
+  const uniqueUserIds = Array.from(new Set(records.map((item) => item.userId)));
+  const playerSnaps = await Promise.all(
+    uniqueUserIds.map(async (uid) => ({
+      uid,
+      snap: await getDoc(doc(db, "players", uid)),
+    }))
+  );
+
+  const publicProfiles = new Map<string, ReturnType<typeof availabilitySnapshotFromPlayer>>();
+  playerSnaps.forEach(({ uid, snap }) => {
+    if (!snap.exists()) return;
+    const player = snap.data();
+    if (!hasUsablePublicPlayerProfile(player)) return;
+    publicProfiles.set(uid, availabilitySnapshotFromPlayer(player));
+  });
+
+  return records.flatMap((record) => {
+    const profile = publicProfiles.get(record.userId);
+    if (!profile) return [];
+
+    return {
+      ...record,
+      name: needsAvailabilityProfileEnrichment(record) ? profile.name : record.name,
+      photoURL: profile.photoURL,
+      photoThumbURL: profile.photoThumbURL,
+      postcode: profile.postcode || record.postcode,
+      skillBand: profile.skillBand || record.skillBand,
+      skillBandLabel: profile.skillBandLabel || record.skillBandLabel,
+      skillLevel: profile.skillLevel || record.skillLevel,
+      skillRating: profile.skillRating ?? record.skillRating,
+      utr: profile.utr ?? record.utr,
+    };
+  });
+};
+
 const normalizeAvailabilityRecord = (id: string, data: any): AvailabilityRecord | null => {
   if (!data || typeof data !== "object") return null;
 
@@ -713,7 +790,7 @@ useEffect(() => {
 
   const unsubBrowse = onSnapshot(
     browseQ,
-    (snap) => {
+    async (snap) => {
       const next = snap.docs
         .map((d) => normalizeAvailabilityRecord(d.id, d.data()))
         .filter((item): item is AvailabilityRecord => !!item)
@@ -731,7 +808,12 @@ useEffect(() => {
           return bTime - aTime;
         });
 
-      setBrowseAvailabilityRecords(next);
+      try {
+        setBrowseAvailabilityRecords(await enrichAvailabilityRecordsFromPlayers(next));
+      } catch (error) {
+        console.warn("[MatchPage] failed to enrich availability profiles", error);
+        setBrowseAvailabilityRecords(next);
+      }
     },
     (error) => {
       console.error("[MatchPage] failed to subscribe to browse availabilities", error);
@@ -1057,6 +1139,12 @@ const refreshMatches = useCallback(async () => {
     if (!mySnap.exists()) return;
 
     const myData = mySnap.data() as any;
+    if (!hasUsablePublicPlayerProfile(myData)) {
+      setMyProfileHidden(false);
+      setRawMatches([]);
+      setLastUpdated(Date.now());
+      return;
+    }
 
     const myBirthYear =
       typeof myData.birthYear === "number" && Number.isFinite(myData.birthYear)
@@ -1336,15 +1424,19 @@ useEffect(() => {
     const mySnap = await getDoc(myRef);
     if (cancelled) return;
 
-    if (!mySnap.exists()) {
+    const myData = mySnap.exists() ? (mySnap.data() as any) : null;
+
+    if (!mySnap.exists() || !hasUsablePublicPlayerProfile(myData)) {
       console.log("[PROFILE REDIRECT DEBUG]", {
         source: "MatchPage",
-        reason: "missing players/{uid} document",
+        reason: mySnap.exists()
+          ? "incomplete players/{uid} public profile"
+          : "missing players/{uid} document",
         pathname: "/match",
         uid: user.uid,
-        playerExists: false,
-        profileComplete: null,
-        birthYear: null,
+        playerExists: mySnap.exists(),
+        profileComplete: myData?.profileComplete ?? null,
+        birthYear: myData?.birthYear ?? null,
       });
       console.trace("[PROFILE REDIRECT TRACE]", {
         source: "MatchPage",
@@ -1352,12 +1444,12 @@ useEffect(() => {
         target: "/profile",
         uid: user.uid,
         profileGateReady: null,
-        playerExists: false,
-        profileComplete: null,
+        playerExists: mySnap.exists(),
+        profileComplete: myData?.profileComplete ?? null,
         usableProfile: false,
-        playerData: null,
+        playerData: myData,
         authReady: true,
-        loadingState: "missing-player-document",
+        loadingState: mySnap.exists() ? "incomplete-player-document" : "missing-player-document",
         timestamp: new Date().toISOString(),
       });
       alert("Please complete your profile first.");
