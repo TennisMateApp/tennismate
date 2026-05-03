@@ -15,9 +15,15 @@ type PublicPlayerSnapshot = {
   photoThumbURL?: string | null;
 };
 
+type RelationshipInteractionType = "match_request" | "match_invite";
+type RelationshipInteractionCollection = "match_requests" | "match_invites";
+
 type RelationshipUpsertOptions = {
   actorId: string;
-  matchRequestId: string;
+  interactionId: string;
+  interactionType: RelationshipInteractionType;
+  interactionCollection: RelationshipInteractionCollection;
+  latestRefField: "latestMatchRequestId" | "latestMatchInviteId";
   playerSnapshots?: Record<string, PublicPlayerSnapshot | null | undefined>;
 };
 
@@ -40,6 +46,23 @@ export function getRelationshipRef(db: Firestore, uidA: string, uidB: string) {
   return doc(db, "player_relationships", getPairId(uidA, uidB));
 }
 
+export function getRelationshipRefPath(uidA: string, uidB: string) {
+  return `player_relationships/${getPairId(uidA, uidB)}`;
+}
+
+export function withRelationshipFields<T extends DocumentData>(
+  uidA: string,
+  uidB: string,
+  payload: T
+): T & { pairId: string; relationshipRefPath: string } {
+  const pairId = getPairId(uidA, uidB);
+  return {
+    ...payload,
+    pairId,
+    relationshipRefPath: getRelationshipRefPath(uidA, uidB),
+  };
+}
+
 export function buildRelationshipUpsertPayload(
   uidA: string,
   uidB: string,
@@ -56,23 +79,53 @@ export function buildRelationshipUpsertPayload(
     playerBId,
     status: "active",
 
-    // Stage 1: match request writes only. Counters/stats are intentionally
-    // left for a later Cloud Functions-backed migration.
+    // Stage 1/2: client writes only link latest match_requests/match_invites.
+    // Counters/stats are intentionally left for a later Cloud Functions-backed migration.
     createdAt: at,
     updatedAt: at,
     lastInteractionAt: at,
     lastInteraction: {
-      type: "match_request",
-      id: options.matchRequestId,
-      collection: "match_requests",
+      type: options.interactionType,
+      id: options.interactionId,
+      collection: options.interactionCollection,
       at,
       actorId: options.actorId,
     },
     refs: {
-      latestMatchRequestId: options.matchRequestId,
+      [options.latestRefField]: options.interactionId,
     },
     ...(options.playerSnapshots ? { playerSnapshots: options.playerSnapshots } : {}),
   };
+}
+
+export async function upsertPlayerRelationshipInteraction(
+  db: Firestore,
+  uidA: string,
+  uidB: string,
+  options: RelationshipUpsertOptions
+) {
+  const relationshipRef = getRelationshipRef(db, uidA, uidB);
+  const relationshipPayload = buildRelationshipUpsertPayload(uidA, uidB, options);
+
+  await setDoc(relationshipRef, relationshipPayload, { merge: true });
+}
+
+export async function upsertMatchInviteRelationship(
+  db: Firestore,
+  uidA: string,
+  uidB: string,
+  inviteId: string,
+  actorId: string,
+  playerSnapshots?: Record<string, PublicPlayerSnapshot | null | undefined>
+) {
+  await upsertPlayerRelationshipInteraction(db, uidA, uidB, {
+    actorId,
+    interactionId: inviteId,
+    interactionType: "match_invite",
+    interactionCollection: "match_invites",
+    latestRefField: "latestMatchInviteId",
+    playerSnapshots,
+  });
 }
 
 export async function createMatchRequestWithRelationship(
@@ -84,15 +137,8 @@ export async function createMatchRequestWithRelationship(
 ) {
   const pairId = getPairId(uidA, uidB);
   const relationshipRef = getRelationshipRef(db, uidA, uidB);
-  const relationshipRefPath = `player_relationships/${pairId}`;
-  const matchRequestWithRelationship: DocumentData & {
-    pairId: string;
-    relationshipRefPath: string;
-  } = {
-    ...matchRequestPayload,
-    pairId,
-    relationshipRefPath,
-  };
+  const relationshipRefPath = getRelationshipRefPath(uidA, uidB);
+  const matchRequestWithRelationship = withRelationshipFields(uidA, uidB, matchRequestPayload);
 
   console.debug("[player_relationships:stage1] before match_requests create", {
     pairId,
@@ -123,7 +169,10 @@ export async function createMatchRequestWithRelationship(
 
   const relationshipPayload = buildRelationshipUpsertPayload(uidA, uidB, {
     actorId: options.actorId,
-    matchRequestId: matchRequestRef.id,
+    interactionId: matchRequestRef.id,
+    interactionType: "match_request",
+    interactionCollection: "match_requests",
+    latestRefField: "latestMatchRequestId",
     playerSnapshots: options.playerSnapshots,
   });
 

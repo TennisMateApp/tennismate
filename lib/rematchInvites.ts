@@ -2,6 +2,11 @@
 
 import { db } from "@/lib/firebaseConfig";
 import {
+  getPairId,
+  getRelationshipRefPath,
+  upsertMatchInviteRelationship,
+} from "@/lib/playerRelationships";
+import {
   addDoc,
   collection,
   doc,
@@ -324,6 +329,22 @@ export async function createRematchInviteFromPrevious(params: {
   }
 
   const recipientId = currentUserId === fromUserId ? toUserId : fromUserId;
+  const conversationSnap = await getDoc(doc(db, "conversations", conversationId));
+  const conversationParticipants = conversationSnap.exists()
+    ? conversationSnap.data()?.participants
+    : null;
+  const shouldLinkRelationship =
+    Array.isArray(conversationParticipants) &&
+    conversationParticipants.length === 2 &&
+    conversationParticipants.includes(currentUserId) &&
+    conversationParticipants.includes(recipientId);
+  const relationshipFields = shouldLinkRelationship
+    ? {
+        pairId: getPairId(currentUserId, recipientId),
+        relationshipRefPath: getRelationshipRefPath(currentUserId, recipientId),
+      }
+    : {};
+
   const invitePayload: InvitePayload = {
     startISO,
     durationMins,
@@ -360,6 +381,7 @@ export async function createRematchInviteFromPrevious(params: {
     fromUserId: currentUserId,
     toUserId: recipientId,
     participants: [currentUserId, recipientId],
+    ...relationshipFields,
     opponentId: recipientId,
     startISO,
     location: location.trim(),
@@ -375,6 +397,20 @@ export async function createRematchInviteFromPrevious(params: {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  if (shouldLinkRelationship) {
+    try {
+      await upsertMatchInviteRelationship(db, currentUserId, recipientId, inviteId, currentUserId);
+    } catch (error) {
+      console.error("[player_relationships:stage2] rematch invite relationship upsert failed", {
+        inviteId,
+        fromUserId: currentUserId,
+        toUserId: recipientId,
+        pairId: relationshipFields.pairId,
+        error,
+      });
+    }
+  }
 
   await updateDoc(msgRef, { inviteId });
 

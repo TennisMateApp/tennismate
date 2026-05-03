@@ -17,6 +17,11 @@ import {
   markRematchPromptShown,
   type RematchPrefill,
 } from "@/lib/rematchInvites";
+import {
+  getPairId,
+  getRelationshipRefPath,
+  upsertMatchInviteRelationship,
+} from "@/lib/playerRelationships";
 
 import { db, auth } from "@/lib/firebaseConfig";
 import {
@@ -1609,6 +1614,25 @@ return () => unsub();
       }
     }
 
+    let conversationParticipants = participants;
+    if (!conversationParticipants.length) {
+      const convoSnap = await getDoc(doc(db, "conversations", String(conversationID)));
+      const dataParticipants = convoSnap.exists() ? convoSnap.data()?.participants : null;
+      conversationParticipants = Array.isArray(dataParticipants) ? dataParticipants : [];
+    }
+
+    const shouldLinkRelationship =
+      conversationParticipants.length === 2 &&
+      conversationParticipants.includes(user.uid) &&
+      conversationParticipants.includes(recipientId);
+
+    const relationshipFields = shouldLinkRelationship
+      ? {
+          pairId: getPairId(user.uid, recipientId),
+          relationshipRefPath: getRelationshipRefPath(user.uid, recipientId),
+        }
+      : {};
+
     const newMessage: any = {
       senderId: user.uid,
       recipientId,
@@ -1655,6 +1679,7 @@ await setDoc(doc(db, "match_invites", inviteId), {
   fromUserId: user.uid,
   toUserId: recipientId,
   participants: [user.uid, recipientId],
+  ...relationshipFields,
 
   // copy the invite payload so the details page is stable
   invite: newMessage.invite,
@@ -1668,6 +1693,20 @@ await setDoc(doc(db, "match_invites", inviteId), {
   createdAt: serverTimestamp(),
   updatedAt: serverTimestamp(),
 });
+
+if (shouldLinkRelationship) {
+  try {
+    await upsertMatchInviteRelationship(db, user.uid, recipientId, inviteId, user.uid);
+  } catch (error) {
+    console.error("[player_relationships:stage2] match invite relationship upsert failed", {
+      inviteId,
+      fromUserId: user.uid,
+      toUserId: recipientId,
+      pairId: relationshipFields.pairId,
+      error,
+    });
+  }
+}
 
 // 3) (Optional but recommended) write inviteId onto the message itself
 await updateDoc(msgRef, { inviteId });
