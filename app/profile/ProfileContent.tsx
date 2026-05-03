@@ -160,6 +160,7 @@ export default function ProfileContent() {
   const [bioExpanded, setBioExpanded] = useState(false);
 
   const originalPostcodeRef = React.useRef<string>("");
+  const exitingEditModeRef = React.useRef(false);
 
 const [formData, setFormData] = useState({
   name: "",
@@ -392,8 +393,32 @@ originalPostcodeRef.current = String(privateData.postcode || data.postcode || ""
 
 
   useEffect(() => {
-    setEditMode(searchParams.get("edit") === "true");
+    const wantsEdit = searchParams.get("edit") === "true";
+    console.log("[ProfileContent] edit search param effect", {
+      wantsEdit,
+      search: searchParams.toString(),
+      exitingEditMode: exitingEditModeRef.current,
+    });
+
+    if (exitingEditModeRef.current && wantsEdit) {
+      console.log("[ProfileContent] suppressing stale edit=true while exiting edit mode");
+      return;
+    }
+
+    if (!wantsEdit) {
+      exitingEditModeRef.current = false;
+    }
+
+    setEditMode(wantsEdit);
   }, [searchParams]);
+
+  useEffect(() => {
+    console.log("[ProfileContent] editMode changed", {
+      editMode,
+      search: searchParams.toString(),
+      href: typeof window !== "undefined" ? window.location.href : null,
+    });
+  }, [editMode, searchParams]);
 
 const handleChange = (e: any) => {
   const { name, value } = e.target;
@@ -768,15 +793,43 @@ setPreviewURL(photoThumbURL || photoURL);
 
 const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
+  console.log("[ProfileContent] edit form submit Save clicked", {
+    editMode,
+    search: searchParams.toString(),
+  });
   await handleSaveAndExitEditMode();
 };
 
 const handleSaveAndExitEditMode = async () => {
+  console.log("[ProfileContent] before saveProfile", {
+    editMode,
+    search: searchParams.toString(),
+    href: typeof window !== "undefined" ? window.location.href : null,
+  });
+
   const ok = await saveProfile();
 
+  console.log("[ProfileContent] after saveProfile", {
+    ok,
+    editMode,
+    search: searchParams.toString(),
+    href: typeof window !== "undefined" ? window.location.href : null,
+  });
+
   if (ok) {
+    exitingEditModeRef.current = true;
     setEditMode(false);
-    router.replace("/profile");
+
+    if (typeof window !== "undefined" && window.location.pathname === "/profile") {
+      window.history.replaceState(null, "", "/profile");
+      console.log("[ProfileContent] window.history.replaceState /profile complete", {
+        href: window.location.href,
+      });
+    }
+
+    console.log("[ProfileContent] before router.replace /profile");
+    router.replace("/profile", { scroll: false });
+    console.log("[ProfileContent] after router.replace /profile");
   }
 };
 
@@ -1145,7 +1198,10 @@ return (
 
   <button
     type="button"
-    onClick={handleSaveAndExitEditMode}
+    onClick={() => {
+      console.log("[ProfileContent] non-edit bottom Save Changes clicked");
+      void handleSaveAndExitEditMode();
+    }}
     disabled={saving}
     className="touch-manipulation w-full rounded-[26px] py-4 text-base font-black shadow disabled:opacity-50 disabled:cursor-not-allowed"
     style={{ background: TM.neon, color: TM.forest }}
@@ -1553,8 +1609,11 @@ return (
 >
 
       <button
-        form="editProfile"
-        type="submit"
+        type="button"
+        onClick={() => {
+          console.log("[ProfileContent] mobile edit fixed Save Changes clicked");
+          void handleSaveAndExitEditMode();
+        }}
         disabled={
           saving ||
           !hasPhoto ||
