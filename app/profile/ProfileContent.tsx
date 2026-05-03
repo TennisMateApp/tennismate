@@ -302,18 +302,26 @@ originalPostcodeRef.current = String(privateData.postcode || data.postcode || ""
       where("players", "array-contains", currentUser.uid)
     );
 
-    const historySnap = await logFirestoreCall(
-      `getDocs match_history players array-contains ${currentUser.uid}`,
-      () => getDocs(historyQ)
-    );
+    let historyRows: any[] = [];
+    try {
+      const historySnap = await logFirestoreCall(
+        `getDocs match_history players array-contains ${currentUser.uid}`,
+        () => getDocs(historyQ)
+      );
+      historyRows = historySnap.docs.map((d) => d.data() as any);
+    } catch (error) {
+      console.error(
+        `[ProfileContent][Firestore] match_history unavailable; continuing with empty history for ${currentUser.uid}`,
+        error
+      );
+      historyRows = [];
+    }
 
     let completed = 0;
     let wins = 0;
     let hasLoveHold = false;
 
-    historySnap.forEach((d) => {
-      const m = d.data() as any;
-
+    historyRows.forEach((m) => {
       const isCompleted =
         m.completed === true ||
         m.status === "completed";

@@ -352,18 +352,26 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
         collection(db, "match_history"),
         where("players", "array-contains", u.uid)
       );
-      const historySnap = await logFirestoreCall(
-        `getDocs match_history players array-contains ${u.uid}`,
-        () => getDocs(historyQ)
-      );
+      let historyRows: any[] = [];
+      try {
+        const historySnap = await logFirestoreCall(
+          `getDocs match_history players array-contains ${u.uid}`,
+          () => getDocs(historyQ)
+        );
+        historyRows = historySnap.docs.map((d) => d.data() as any);
+      } catch (error) {
+        console.error(
+          `[DesktopProfilePage][Firestore] match_history unavailable; continuing with empty history for ${u.uid}`,
+          error
+        );
+        historyRows = [];
+      }
 
       let completed = 0;
       let wins = 0;
       let hasLoveHold = false;
 
-      historySnap.forEach((d) => {
-        const m = d.data() as any;
-
+      historyRows.forEach((m) => {
         const isCompleted =
           m.completed === true ||
           m.status === "completed";
