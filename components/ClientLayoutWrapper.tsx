@@ -36,6 +36,11 @@ const PushClientOnly = dynamic(
   { ssr: false }
 );
 
+const ServiceWorkerUpdateHandler = dynamic(
+  () => import("@/components/ServiceWorkerUpdateHandler").then(m => m.default),
+  { ssr: false }
+);
+
 import NotificationBell from "@/components/notifications/NotificationBell";
 import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 import { Capacitor } from '@capacitor/core';
@@ -690,6 +695,7 @@ return (
 
       <BackButtonHandler />
 
+    <ServiceWorkerUpdateHandler />
     <PushClientOnly />
 
 <main

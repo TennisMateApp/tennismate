@@ -35,7 +35,9 @@ export default function PushPermissionPrompt() {
 
         const { messaging, getToken, onMessage } = client;
 
-        const registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+        const registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js", {
+          scope: "/firebase-cloud-messaging-push-scope",
+        });
 
         const token = await getToken(messaging, {
           vapidKey,
