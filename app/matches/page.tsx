@@ -120,7 +120,10 @@ type Match = {
 type HistoryMatch = {
   id: string;
   matchRequestId?: string | null;
+  pairId?: string | null;
+  relationshipRefPath?: string | null;
   players?: string[];
+  participants?: string[];
   fromUserId?: string | null;
   toUserId?: string | null;
   fromName?: string | null;
@@ -131,6 +134,7 @@ type HistoryMatch = {
   score?: string | null;
   status?: string | null;
   completed?: boolean;
+  createdAt?: any;
   completedAt?: any;
   updatedAt?: any;
   playedDate?: string | null;
@@ -234,7 +238,52 @@ const getHistoryOpponentId = (history: HistoryMatch, currentUserId: string) => {
     : null;
   if (fromPlayers) return fromPlayers;
 
-  return history.fromUserId === currentUserId ? history.toUserId ?? null : history.fromUserId ?? null;
+  const fromParticipants = Array.isArray(history.participants)
+    ? history.participants.find((uid) => typeof uid === "string" && uid && uid !== currentUserId)
+    : null;
+  if (fromParticipants) return fromParticipants;
+
+  if (history.fromUserId === currentUserId) return history.toUserId ?? null;
+  if (history.toUserId === currentUserId) return history.fromUserId ?? null;
+  return history.fromUserId ?? history.toUserId ?? null;
+};
+
+const historyDocToMatch = (docSnap: QuerySnapshot<DocumentData>["docs"][number]): HistoryMatch => {
+  const d = docSnap.data() as DocumentData;
+  return {
+    id: docSnap.id,
+    matchRequestId:
+      typeof d.matchRequestId === "string" && d.matchRequestId.trim()
+        ? d.matchRequestId
+        : null,
+    pairId: typeof d.pairId === "string" && d.pairId.trim() ? d.pairId : null,
+    relationshipRefPath:
+      typeof d.relationshipRefPath === "string" && d.relationshipRefPath.trim()
+        ? d.relationshipRefPath
+        : null,
+    players: Array.isArray(d.players)
+      ? d.players.filter((uid: unknown): uid is string => typeof uid === "string" && !!uid)
+      : [],
+    participants: Array.isArray(d.participants)
+      ? d.participants.filter((uid: unknown): uid is string => typeof uid === "string" && !!uid)
+      : [],
+    fromUserId: d.fromUserId ?? null,
+    toUserId: d.toUserId ?? null,
+    fromName: d.fromName ?? null,
+    toName: d.toName ?? null,
+    fromPhotoURL: d.fromPhotoURL ?? null,
+    toPhotoURL: d.toPhotoURL ?? null,
+    winnerId: d.winnerId ?? null,
+    score: d.score ?? null,
+    status: d.status ?? null,
+    completed: d.completed === true || d.status === "completed",
+    createdAt: d.createdAt ?? null,
+    completedAt: d.completedAt ?? null,
+    updatedAt: d.updatedAt ?? null,
+    playedDate: d.playedDate ?? null,
+    matchType: d.matchType ?? null,
+    location: d.location ?? null,
+  };
 };
 
 
@@ -295,13 +344,15 @@ const logCourtClick = async (
   }
 };
 
-// Try multiple collections because some courts live in `booking` not `courts`
+// Try multiple root collections because some courts live in `booking` not `courts`.
 async function fetchCourtDocById(dbRef: typeof db, id: string) {
-
-  const cols = ["courts", "booking"]; // add more if needed later
-  for (const col of cols) {
-    const snap = await getDoc(doc(dbRef, col, id));
-    if (snap.exists()) return snap.data() as any;
+  for (const col of ["courts", "booking"] as const) {
+    try {
+      const snap = await getDoc(doc(dbRef, col, id));
+      if (snap.exists()) return { data: snap.data() as any, resolvedId: snap.id, source: col };
+    } catch {
+      // Optional hydration falls back to the next source.
+    }
   }
   return null;
 }
@@ -658,15 +709,19 @@ const targets = matches
 async function resolveCourtData(id?: string | null, name?: string | null) {
   if (id) {
     const byId = await fetchCourtDocById(db, id);
-    if (byId) return { data: byId, resolvedId: id };
+    if (byId) return byId;
   }
   if (name) {
     for (const col of ["courts", "booking"] as const) {
-      const qy = query(collection(db, col), where("name", "==", name), limit(1));
-      const snap = await getDocs(qy);
-      if (!snap.empty) {
-        const docSnap = snap.docs[0];
-        return { data: docSnap.data() as any, resolvedId: docSnap.id };
+      try {
+        const qy = query(collection(db, col), where("name", "==", name), limit(1));
+        const snap = await getDocs(qy);
+        if (!snap.empty) {
+          const docSnap = snap.docs[0];
+          return { data: docSnap.data() as any, resolvedId: docSnap.id, source: col };
+        }
+      } catch {
+        // Optional hydration falls back to the next source.
       }
     }
   }
@@ -677,6 +732,7 @@ const found = await resolveCourtData(m.suggestedCourtId, m.suggestedCourtName ||
 if (!found) return;
 const c = found.data as any;
 const resolvedId = found.resolvedId;
+const source = found.source;
 
 
       const address =
@@ -701,7 +757,8 @@ const resolvedId = found.resolvedId;
 
       const name = c.name ?? m.suggestedCourtName ?? null;
 
-      await updateDoc(doc(db, "match_requests", m.id), {
+      try {
+        await updateDoc(doc(db, "match_requests", m.id), {
   ...(resolvedId && !m.suggestedCourtId ? { suggestedCourtId: resolvedId } : {}),
   ...(name ? { suggestedCourtName: name } : {}),
   ...(lat != null ? { suggestedCourtLat: lat } : {}),
@@ -709,6 +766,18 @@ const resolvedId = found.resolvedId;
   ...(address ? { suggestedCourtAddress: address } : {}),
   suggestedCourtBookingUrl: bookingUrl,
 });
+      } catch (error) {
+        console.debug("[MatchesPage] court hydration write skipped", {
+          collection: "match_requests",
+          currentUserId,
+          queryPurpose: "cache accepted match suggested court details",
+          matchId: m.id,
+          courtSource: source,
+          code: (error as any)?.code,
+          message: (error as any)?.message,
+        });
+        return;
+      }
 
       setMatches((prev) =>
         prev.map((x) =>
@@ -725,11 +794,22 @@ const resolvedId = found.resolvedId;
         )
       );
 
+    } catch (error) {
+      console.debug("[MatchesPage] court hydration skipped", {
+        collection: "root courts/root booking",
+        currentUserId,
+        queryPurpose: "hydrate accepted match suggested court details",
+        matchId: m.id,
+        suggestedCourtId: m.suggestedCourtId ?? null,
+        suggestedCourtName: m.suggestedCourtName ?? null,
+        code: (error as any)?.code,
+        message: (error as any)?.message,
+      });
     } finally {
       hydratingRef.current.delete(m.id);
     }
   });
-}, [matches]);
+}, [currentUserId, matches]);
 
 // 3) then the effect that calls it
 useEffect(() => {
@@ -819,7 +899,7 @@ useEffect(() => {
 
 
 useEffect(() => {
-  if (!currentUserId) return;
+  if (!currentUserId || isDesktop) return;
 
   const fromQ = query(
     collection(db, "match_requests"),
@@ -885,7 +965,10 @@ const toMatch = (d: DocumentData, id: string): Match => ({
     fromQ,
     proc,
     (err) => {
-      console.error("[MatchesPage] onSnapshot(fromQ) failed", {
+      console.error("[MatchesPage] match_requests listener failed", {
+        collection: "match_requests",
+        currentUserId,
+        queryPurpose: "load matches sent by current user",
         code: (err as any)?.code,
         message: (err as any)?.message,
         uid: auth.currentUser?.uid,
@@ -899,7 +982,10 @@ const toMatch = (d: DocumentData, id: string): Match => ({
     toQ,
     proc,
     (err) => {
-      console.error("[MatchesPage] onSnapshot(toQ) failed", {
+      console.error("[MatchesPage] match_requests listener failed", {
+        collection: "match_requests",
+        currentUserId,
+        queryPurpose: "load matches received by current user",
         code: (err as any)?.code,
         message: (err as any)?.message,
         uid: auth.currentUser?.uid,
@@ -913,77 +999,70 @@ const toMatch = (d: DocumentData, id: string): Match => ({
     unsubFrom();
     unsubTo();
   };
-}, [currentUserId]);
+}, [currentUserId, isDesktop]);
 
 useEffect(() => {
-  if (!currentUserId) return;
+  if (!currentUserId || isDesktop) return;
 
   setHistoryLoading(true);
 
-  const historyQ = query(
-    collection(db, "match_history"),
-    where("players", "array-contains", currentUserId)
-  );
-
-  const unsubHistory = onSnapshot(
-    historyQ,
-    (snap) => {
-      const next = snap.docs
-        .map((docSnap) => {
-          const d = docSnap.data() as DocumentData;
-          return {
-            id: docSnap.id,
-            matchRequestId:
-              typeof d.matchRequestId === "string" && d.matchRequestId.trim()
-                ? d.matchRequestId
-                : null,
-            players: Array.isArray(d.players)
-              ? d.players.filter((uid: unknown): uid is string => typeof uid === "string" && !!uid)
-              : [],
-            fromUserId: d.fromUserId ?? null,
-            toUserId: d.toUserId ?? null,
-            fromName: d.fromName ?? null,
-            toName: d.toName ?? null,
-            fromPhotoURL: d.fromPhotoURL ?? null,
-            toPhotoURL: d.toPhotoURL ?? null,
-            winnerId: d.winnerId ?? null,
-            score: d.score ?? null,
-            status: d.status ?? null,
-            completed: d.completed === true || d.status === "completed",
-            completedAt: d.completedAt ?? null,
-            updatedAt: d.updatedAt ?? null,
-            playedDate: d.playedDate ?? null,
-            matchType: d.matchType ?? null,
-            location: d.location ?? null,
-          } as HistoryMatch;
-        })
-        .filter((m) => m.completed)
-        .sort((a, b) => {
-          const aTime =
-            toDateOrNull(a.completedAt)?.getTime() ??
-            toDateOrNull(a.playedDate)?.getTime() ??
-            toDateOrNull(a.updatedAt)?.getTime() ??
-            0;
-          const bTime =
-            toDateOrNull(b.completedAt)?.getTime() ??
-            toDateOrNull(b.playedDate)?.getTime() ??
-            toDateOrNull(b.updatedAt)?.getTime() ??
-            0;
-          return bTime - aTime;
-        });
-
-      setHistoryMatches(next);
-      setHistoryLoading(false);
+  const historyQueries = [
+    {
+      label: "players",
+      ref: query(collection(db, "match_history"), where("players", "array-contains", currentUserId)),
     },
-    (error) => {
-      console.error("Failed to load match history", error);
-      setHistoryMatches([]);
-      setHistoryLoading(false);
-    }
+    {
+      label: "fromUserId",
+      ref: query(collection(db, "match_history"), where("fromUserId", "==", currentUserId)),
+    },
+    {
+      label: "toUserId",
+      ref: query(collection(db, "match_history"), where("toUserId", "==", currentUserId)),
+    },
+    {
+      label: "participants",
+      ref: query(collection(db, "match_history"), where("participants", "array-contains", currentUserId)),
+    },
+  ];
+
+  const snapshots = new Map<string, QuerySnapshot<DocumentData>>();
+
+  const emitHistory = () => {
+    const docsById = new Map<string, QuerySnapshot<DocumentData>["docs"][number]>();
+
+    snapshots.forEach((snap) => {
+      snap.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
+    });
+
+    const next = Array.from(docsById.values())
+      .map(historyDocToMatch)
+      .filter((m) => m.completed)
+      .sort((a, b) => historyMatchTime(b) - historyMatchTime(a));
+
+    setHistoryMatches(next);
+    setHistoryLoading(false);
+  };
+
+  const unsubs = historyQueries.map(({ label, ref }) =>
+    onSnapshot(
+      ref,
+      (snap) => {
+        snapshots.set(label, snap);
+        emitHistory();
+      },
+      (error) => {
+        console.debug(`[MatchesPage history] ${label} query skipped`, {
+          code: (error as any)?.code,
+          message: (error as any)?.message,
+          currentUserId,
+        });
+        setHistoryLoading(false);
+      }
+    )
   );
 
-  return () => unsubHistory();
-}, [currentUserId]);
+  return () => unsubs.forEach((unsub) => unsub());
+}, [currentUserId, isDesktop]);
 
 // Warm opponent cache so avatars/names are available
 useEffect(() => {
