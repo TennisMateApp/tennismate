@@ -191,6 +191,9 @@ service cloud.firestore {
     match /players/{uid} {
       allow read: if signedIn();
 
+      allow update: if isSelf(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lastActiveAt"]);
+
       allow create, update: if isSelf(uid)
         && playerWriteHasNoSensitiveFields();
 

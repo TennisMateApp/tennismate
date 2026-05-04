@@ -18,9 +18,12 @@ import {
   type RematchPrefill,
 } from "@/lib/rematchInvites";
 import {
+  ensureOneToOneConversationRelationship,
   getPairId,
   getRelationshipRefPath,
+  relationshipFieldsForParticipants,
   upsertMatchInviteRelationship,
+  upsertMessageRelationship,
 } from "@/lib/playerRelationships";
 
 import { db, auth } from "@/lib/firebaseConfig";
@@ -1172,22 +1175,51 @@ const clearMessageNotifsForConversation = async (uid: string, convoId: string) =
   let currentUserId: string | null = null;
   let heartbeatTimer: any = null;
 
+  const updateOwnLastActiveAt = async (uid: string, reason: string) => {
+    const signedInUid = auth.currentUser?.uid ?? null;
+
+    if (!signedInUid || signedInUid !== uid) {
+      console.warn("[ChatPage] skipped lastActiveAt update for non-current player", {
+        requestedUid: uid,
+        signedInUid,
+        reason,
+      });
+      return;
+    }
+
+    try {
+      const playerRef = doc(db, "players", signedInUid);
+      const playerSnap = await getDoc(playerRef);
+
+      if (!playerSnap.exists()) {
+        console.warn("[ChatPage] skipped lastActiveAt update because player doc is missing", {
+          uid: signedInUid,
+          reason,
+        });
+        return;
+      }
+
+      await updateDoc(playerRef, { lastActiveAt: serverTimestamp() });
+    } catch (err) {
+      console.warn("[ChatPage] optional lastActiveAt update failed", {
+        uid: signedInUid,
+        reason,
+        code: (err as any)?.code,
+        message: (err as any)?.message,
+      });
+    }
+  };
+
     const unsubscribeAuth = auth.onAuthStateChanged(async (u) => {
       if (!u) return;
       setUser(u);
       currentUserId = u.uid;
 
-      try {
-  await updateDoc(doc(db, "players", u.uid), { lastActiveAt: serverTimestamp() });
-} catch (err) {
-  console.error("Failed to set lastActiveAt:", err);
-}
+      await updateOwnLastActiveAt(u.uid, "messages_page_enter");
 
 // keep it fresh while this page is open
 heartbeatTimer = setInterval(async () => {
-  try {
-    await updateDoc(doc(db, "players", u.uid), { lastActiveAt: serverTimestamp() });
-  } catch {}
+  await updateOwnLastActiveAt(u.uid, "messages_page_heartbeat");
 }, 30_000);
 
 
@@ -1214,8 +1246,15 @@ heartbeatTimer = setInterval(async () => {
 setOtherUserId(otherUserId);
 
 if (!convoSnap.exists() && looksLikeOneToOne && otherUserId) {
+  const relationshipFields = relationshipFieldsForParticipants([u.uid, otherUserId]);
   await setDoc(convoRef, {
     participants: [u.uid, otherUserId],
+    ...(relationshipFields
+      ? {
+          pairId: relationshipFields.pairId,
+          relationshipRefPath: relationshipFields.relationshipRefPath,
+        }
+      : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     typing: {},
@@ -1229,6 +1268,26 @@ if (!convoSnap.exists() && looksLikeOneToOne && otherUserId) {
     matchCheckInSuppressed: false,
     activeMatchId: null,
   });
+
+  if (relationshipFields) {
+    try {
+      await ensureOneToOneConversationRelationship(
+        db,
+        String(conversationID),
+        relationshipFields.players,
+        u.uid,
+        relationshipFields.pairId,
+        relationshipFields.relationshipRefPath
+      );
+    } catch (error) {
+      console.warn("[player_relationships:stage4] conversation relationship upsert failed", {
+        conversationId: String(conversationID),
+        pairId: relationshipFields.pairId,
+        actorId: u.uid,
+        error,
+      });
+    }
+  }
 } else if (convoSnap.exists()) {
   await updateDoc(convoRef, { [`lastRead.${u.uid}`]: serverTimestamp() });
 }
@@ -1299,13 +1358,7 @@ setShowMatchPrompt(
   if (heartbeatTimer) clearInterval(heartbeatTimer);
 
   if (currentUserId) {
-    (async () => {
-      try {
-        await updateDoc(doc(db, "players", currentUserId!), { lastActiveAt: serverTimestamp() });
-      } catch (err) {
-        console.error("Failed to bump lastActiveAt on exit:", err);
-      }
-    })();
+    updateOwnLastActiveAt(currentUserId, "messages_page_exit");
   }
 };
 
@@ -1498,11 +1551,46 @@ return () => unsub();
       if (!recipientId) return; // ensure valid 1:1
     }
 
+    let conversationRelationship: ReturnType<typeof relationshipFieldsForParticipants> = null;
+    if (!isEventChat && recipientId) {
+      const convoRef = doc(db, "conversations", String(conversationID));
+      const convoSnap = await getDoc(convoRef);
+      const convoData = convoSnap.exists() ? (convoSnap.data() as any) : {};
+      const convoParticipants = Array.isArray(convoData.participants)
+        ? convoData.participants
+        : participants;
+
+      try {
+        conversationRelationship = await ensureOneToOneConversationRelationship(
+          db,
+          String(conversationID),
+          convoParticipants,
+          user.uid,
+          typeof convoData.pairId === "string" ? convoData.pairId : null,
+          typeof convoData.relationshipRefPath === "string" ? convoData.relationshipRefPath : null
+        );
+      } catch (error) {
+        conversationRelationship = relationshipFieldsForParticipants(convoParticipants);
+        console.warn("[player_relationships:stage4] conversation repair/upsert failed before message send", {
+          conversationId: String(conversationID),
+          senderId: user.uid,
+          pairId: conversationRelationship?.pairId ?? null,
+          error,
+        });
+      }
+    }
+
     const newMessage: any = {
       senderId: user.uid,
       recipientId, // null for event chats
       text: input,
       timestamp: serverTimestamp(),
+      ...(conversationRelationship
+        ? {
+            pairId: conversationRelationship.pairId,
+            relationshipRefPath: conversationRelationship.relationshipRefPath,
+          }
+        : {}),
     };
     if (!isEventChat) newMessage.read = false;
 
@@ -1510,10 +1598,32 @@ return () => unsub();
       conversationID: String(conversationID),
       payload: newMessage,
     });
-    await addDoc(collection(db, "conversations", String(conversationID), "messages"), newMessage);
+    const msgRef = await addDoc(collection(db, "conversations", String(conversationID), "messages"), newMessage);
     console.log("[ChatPage] message addDoc success", {
       conversationID: String(conversationID),
     });
+
+    if (conversationRelationship) {
+      try {
+        await upsertMessageRelationship(
+          db,
+          conversationRelationship.players[0],
+          conversationRelationship.players[1],
+          String(conversationID),
+          msgRef.id,
+          user.uid
+        );
+      } catch (error) {
+        console.warn("[player_relationships:stage4] message relationship upsert failed", {
+          conversationId: String(conversationID),
+          messageId: msgRef.id,
+          pairId: conversationRelationship.pairId,
+          senderId: user.uid,
+          error,
+        });
+      }
+    }
+
     setInput("");
 
     try {
@@ -1633,6 +1743,24 @@ return () => unsub();
         }
       : {};
 
+    if (shouldLinkRelationship) {
+      try {
+        await ensureOneToOneConversationRelationship(
+          db,
+          String(conversationID),
+          conversationParticipants,
+          user.uid
+        );
+      } catch (error) {
+        console.warn("[player_relationships:stage4] conversation relationship upsert failed before invite send", {
+          conversationId: String(conversationID),
+          pairId: relationshipFields.pairId,
+          senderId: user.uid,
+          error,
+        });
+      }
+    }
+
     const newMessage: any = {
       senderId: user.uid,
       recipientId,
@@ -1661,6 +1789,7 @@ court: activeCourt
       inviteStatus: "pending", // pending | accepted | declined
       timestamp: serverTimestamp(),
       read: false,
+      ...relationshipFields,
     };
 
     // 1) Create the message first so we get messageId
@@ -1703,6 +1832,18 @@ if (shouldLinkRelationship) {
       fromUserId: user.uid,
       toUserId: recipientId,
       pairId: relationshipFields.pairId,
+      error,
+    });
+  }
+
+  try {
+    await upsertMessageRelationship(db, user.uid, recipientId, String(conversationID), msgRef.id, user.uid);
+  } catch (error) {
+    console.warn("[player_relationships:stage4] invite message relationship upsert failed", {
+      conversationId: String(conversationID),
+      messageId: msgRef.id,
+      pairId: relationshipFields.pairId,
+      senderId: user.uid,
       error,
     });
   }
