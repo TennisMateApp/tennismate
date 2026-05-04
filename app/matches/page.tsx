@@ -1006,62 +1006,35 @@ useEffect(() => {
 
   setHistoryLoading(true);
 
-  const historyQueries = [
-    {
-      label: "players",
-      ref: query(collection(db, "match_history"), where("players", "array-contains", currentUserId)),
-    },
-    {
-      label: "fromUserId",
-      ref: query(collection(db, "match_history"), where("fromUserId", "==", currentUserId)),
-    },
-    {
-      label: "toUserId",
-      ref: query(collection(db, "match_history"), where("toUserId", "==", currentUserId)),
-    },
-    {
-      label: "participants",
-      ref: query(collection(db, "match_history"), where("participants", "array-contains", currentUserId)),
-    },
-  ];
-
-  const snapshots = new Map<string, QuerySnapshot<DocumentData>>();
-
-  const emitHistory = () => {
-    const docsById = new Map<string, QuerySnapshot<DocumentData>["docs"][number]>();
-
-    snapshots.forEach((snap) => {
-      snap.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
-    });
-
-    const next = Array.from(docsById.values())
-      .map(historyDocToMatch)
-      .filter((m) => m.completed)
-      .sort((a, b) => historyMatchTime(b) - historyMatchTime(a));
-
-    setHistoryMatches(next);
-    setHistoryLoading(false);
-  };
-
-  const unsubs = historyQueries.map(({ label, ref }) =>
-    onSnapshot(
-      ref,
-      (snap) => {
-        snapshots.set(label, snap);
-        emitHistory();
-      },
-      (error) => {
-        console.debug(`[MatchesPage history] ${label} query skipped`, {
-          code: (error as any)?.code,
-          message: (error as any)?.message,
-          currentUserId,
-        });
-        setHistoryLoading(false);
-      }
-    )
+  const historyQ = query(
+    collection(db, "match_history"),
+    where("players", "array-contains", currentUserId)
   );
 
-  return () => unsubs.forEach((unsub) => unsub());
+  const unsubHistory = onSnapshot(
+    historyQ,
+    (snap) => {
+      const next = snap.docs
+        .map(historyDocToMatch)
+        .filter((m) => m.completed)
+        .sort((a, b) => historyMatchTime(b) - historyMatchTime(a));
+
+      setHistoryMatches(next);
+      setHistoryLoading(false);
+    },
+    (error) => {
+      console.error("[MatchesPage history] match_history listener failed", {
+        collection: "match_history",
+        currentUserId,
+        queryPurpose: "load completed match history by players array",
+        code: (error as any)?.code,
+        message: (error as any)?.message,
+      });
+      setHistoryLoading(false);
+    }
+  );
+
+  return () => unsubHistory();
 }, [currentUserId, isDesktop]);
 
 // Warm opponent cache so avatars/names are available
