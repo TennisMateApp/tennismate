@@ -22,6 +22,7 @@ import {
   createMatchRequestWithRelationship,
   getPairId,
   upsertCompletedMatchRelationship,
+  upsertMatchFeedbackRelationship,
   withRelationshipFields,
 } from "@/lib/playerRelationships";
 
@@ -250,7 +251,7 @@ const handleComplete = async () => {
               }
             );
           } catch (error) {
-            console.error("[player_relationships:stage3] summary completed_matches relationship upsert failed", {
+            console.warn("[player_relationships:stage3] summary completed_matches relationship upsert failed", {
               completedMatchId: cleanId,
               historyId: historyRef.id,
               pairId: relationshipPairId,
@@ -265,16 +266,53 @@ const handleComplete = async () => {
     // Step 4: ensure feedback doc exists for this user (idempotent)
     if (currentUserId) {
       const feedbackDocId = `${cleanId}_${currentUserId}`;
+      const feedbackRelationshipPairId =
+        matchData?.fromUserId && matchData?.toUserId
+          ? (() => {
+              try {
+                return getPairId(matchData.fromUserId, matchData.toUserId);
+              } catch {
+                return null;
+              }
+            })()
+          : null;
+      const feedbackPayload: Record<string, any> = {
+        matchId: cleanId,
+        userId: currentUserId,
+        createdAt: serverTimestamp(),
+        feedback: {},
+      };
       await setDoc(
         doc(db, "match_feedback", feedbackDocId),
-        {
-          matchId: cleanId,
-          userId: currentUserId,
-          createdAt: serverTimestamp(),
-          feedback: {},
-        },
+        feedbackRelationshipPairId
+          ? withRelationshipFields(matchData.fromUserId, matchData.toUserId, feedbackPayload)
+          : feedbackPayload,
         { merge: true }
       );
+
+      if (feedbackRelationshipPairId) {
+        try {
+          await upsertMatchFeedbackRelationship(
+            db,
+            matchData.fromUserId,
+            matchData.toUserId,
+            feedbackDocId,
+            currentUserId,
+            {
+              latestFeedbackId: feedbackDocId,
+              latestCompletedMatchId: cleanId,
+            }
+          );
+        } catch (error) {
+          console.warn("[player_relationships:stage3] summary match_feedback relationship upsert failed", {
+            feedbackId: feedbackDocId,
+            completedMatchId: cleanId,
+            pairId: feedbackRelationshipPairId,
+            players: [matchData.fromUserId, matchData.toUserId],
+            error,
+          });
+        }
+      }
     }
 
     // Always navigate to feedback

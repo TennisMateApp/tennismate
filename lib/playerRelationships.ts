@@ -20,6 +20,8 @@ type RelationshipInteractionType =
   | "match_request"
   | "match_invite"
   | "completed_match"
+  | "match_score"
+  | "match_feedback"
   | "conversation"
   | "message";
 type RelationshipInteractionCollection =
@@ -29,7 +31,8 @@ type RelationshipInteractionCollection =
   | "match_invites"
   | "match_history"
   | "completed_matches"
-  | "match_scores";
+  | "match_scores"
+  | "match_feedback";
 
 type RelationshipUpsertOptions = {
   actorId: string;
@@ -43,7 +46,8 @@ type RelationshipUpsertOptions = {
     | "latestMessageId"
     | "latestHistoryId"
     | "latestCompletedMatchId"
-    | "latestScoreId";
+    | "latestScoreId"
+    | "latestFeedbackId";
   refs?: Record<string, string | null | undefined>;
   playerSnapshots?: Record<string, PublicPlayerSnapshot | null | undefined>;
 };
@@ -263,6 +267,42 @@ export async function upsertCompletedMatchRelationship(
     interactionType: "completed_match",
     interactionCollection,
     latestRefField,
+    refs,
+  });
+}
+
+export async function upsertMatchScoreRelationship(
+  db: Firestore,
+  uidA: string,
+  uidB: string,
+  scoreId: string,
+  actorId: string,
+  refs?: Record<string, string | null | undefined>
+) {
+  await upsertPlayerRelationshipInteraction(db, uidA, uidB, {
+    actorId,
+    interactionId: scoreId,
+    interactionType: "match_score",
+    interactionCollection: "match_scores",
+    latestRefField: "latestScoreId",
+    refs,
+  });
+}
+
+export async function upsertMatchFeedbackRelationship(
+  db: Firestore,
+  uidA: string,
+  uidB: string,
+  feedbackId: string,
+  actorId: string,
+  refs?: Record<string, string | null | undefined>
+) {
+  await upsertPlayerRelationshipInteraction(db, uidA, uidB, {
+    actorId,
+    interactionId: feedbackId,
+    interactionType: "match_feedback",
+    interactionCollection: "match_feedback",
+    latestRefField: "latestFeedbackId",
     refs,
   });
 }

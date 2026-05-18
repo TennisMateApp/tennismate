@@ -12,6 +12,11 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { GiTennisBall } from "react-icons/gi";
+import {
+  getPairId,
+  getRelationshipRefPath,
+  upsertMatchFeedbackRelationship,
+} from "@/lib/playerRelationships";
 
 type FormState = {
   enjoyment: string;         // 1..5
@@ -19,6 +24,12 @@ type FormState = {
   wouldPlayAgain: "Yes" | "No" | "";
   punctual: "Yes" | "No" | "N/A" | "";
   comments: string;
+};
+
+type RelationshipContext = {
+  players: [string, string];
+  pairId: string;
+  relationshipRefPath: string;
 };
 
 export default function MatchFeedbackPage() {
@@ -32,6 +43,7 @@ export default function MatchFeedbackPage() {
   const [opponentName, setOpponentName] = useState<string>("");
   const [opponentPhoto, setOpponentPhoto] = useState<string | null>(null);
   const [score, setScore] = useState<string>("");
+  const [relationshipContext, setRelationshipContext] = useState<RelationshipContext | null>(null);
 
   // sensible defaults (faster completion)
   const [form, setForm] = useState<FormState>({
@@ -55,10 +67,42 @@ export default function MatchFeedbackPage() {
     const run = async () => {
       if (!matchId) return;
       try {
-        const mRef = doc(db, "match_requests", matchId);
-        const snap = await getDoc(mRef);
-        if (!snap.exists()) return;
+        const matchRequestSnap = await getDoc(doc(db, "match_requests", matchId));
+        const historySnap = matchRequestSnap.exists()
+          ? null
+          : await getDoc(doc(db, "match_history", matchId));
+        const completedSnap = matchRequestSnap.exists() || historySnap?.exists()
+          ? null
+          : await getDoc(doc(db, "completed_matches", matchId));
+
+        const snap = matchRequestSnap.exists()
+          ? matchRequestSnap
+          : historySnap?.exists()
+            ? historySnap
+            : completedSnap?.exists()
+              ? completedSnap
+              : null;
+
+        if (!snap) return;
         const m = snap.data() as any;
+        const fromUserId = typeof m?.fromUserId === "string" ? m.fromUserId : "";
+        const toUserId = typeof m?.toUserId === "string" ? m.toUserId : "";
+        const players = [fromUserId, toUserId].filter(Boolean);
+
+        if (players.length === 2 && players[0] !== players[1]) {
+          try {
+            const pairId = getPairId(players[0], players[1]);
+            setRelationshipContext({
+              players: [players[0], players[1]],
+              pairId,
+              relationshipRefPath: getRelationshipRefPath(players[0], players[1]),
+            });
+          } catch {
+            setRelationshipContext(null);
+          }
+        } else {
+          setRelationshipContext(null);
+        }
 
         // names are stored on the match doc already
         setScore(m?.score || "");
@@ -90,6 +134,39 @@ export default function MatchFeedbackPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const relationshipFields = relationshipContext
+    ? {
+        pairId: relationshipContext.pairId,
+        relationshipRefPath: relationshipContext.relationshipRefPath,
+      }
+    : {};
+
+  const upsertFeedbackRelationship = async (feedbackId: string) => {
+    if (!relationshipContext || !userId) return;
+
+    try {
+      await upsertMatchFeedbackRelationship(
+        db,
+        relationshipContext.players[0],
+        relationshipContext.players[1],
+        feedbackId,
+        userId,
+        {
+          latestFeedbackId: feedbackId,
+          latestCompletedMatchId: matchId,
+        }
+      );
+    } catch (error) {
+      console.warn("[player_relationships:stage3] match_feedback relationship upsert failed", {
+        feedbackId,
+        matchId,
+        pairId: relationshipContext.pairId,
+        players: relationshipContext.players,
+        error,
+      });
+    }
+  };
+
   // ---- autosave (debounced) whenever user changes something ----
   useEffect(() => {
     if (!feedbackDocId || !userId || !matchId) return;
@@ -107,12 +184,14 @@ export default function MatchFeedbackPage() {
             ...form,
             matchId,
             userId,
+            ...relationshipFields,
             updatedAt: serverTimestamp(),
             // create timestamp if first time
             createdAt: serverTimestamp(),
           },
           { merge: true }
         );
+        await upsertFeedbackRelationship(feedbackDocId);
         setSaving("saved");
         setTimeout(() => setSaving("idle"), 1200);
       } catch {
@@ -143,10 +222,12 @@ export default function MatchFeedbackPage() {
           ...form,
           matchId,
           userId,
+          ...relationshipFields,
           submittedAt: serverTimestamp(),
         },
         { merge: true }
       );
+      await upsertFeedbackRelationship(feedbackDocId);
 
       // go back to Matches list (change if you prefer /directory)
       router.push("/matches");

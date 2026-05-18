@@ -13,6 +13,7 @@ import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import {
   getPairId,
   upsertCompletedMatchRelationship,
+  upsertMatchScoreRelationship,
   withRelationshipFields,
 } from "@/lib/playerRelationships";
 
@@ -329,17 +330,16 @@ await setDoc(
 
 if (relationshipPairId) {
   try {
-    await upsertCompletedMatchRelationship(
+    await upsertMatchScoreRelationship(
       db,
       playerA.id,
       playerB.id,
       cleanMatchId,
       actorId,
-      "match_scores",
       { latestScoreId: cleanMatchId }
     );
   } catch (error) {
-    console.error("[player_relationships:stage3] match_scores relationship upsert failed", {
+    console.warn("[player_relationships:stage3] match_scores relationship upsert failed", {
       scoreId: cleanMatchId,
       pairId: relationshipPairId,
       players: [playerA.id, playerB.id],

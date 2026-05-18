@@ -19,6 +19,7 @@ import {
 import {
   getPairId,
   upsertCompletedMatchRelationship,
+  upsertMatchScoreRelationship,
   withRelationshipFields,
 } from "@/lib/playerRelationships";
 
@@ -394,20 +395,19 @@ const handleSaveMatch = async () => {
 
       if (relationshipPairId) {
         try {
-          await upsertCompletedMatchRelationship(
+          await upsertMatchScoreRelationship(
             db,
             currentUserId,
             otherPlayerId,
             scoreDocRef.id,
             currentUserId,
-            "match_scores",
             {
               latestHistoryId: historyRef.id,
               latestScoreId: scoreDocRef.id,
             }
           );
         } catch (error) {
-          console.error("[player_relationships:stage3] match_scores relationship upsert failed", {
+          console.warn("[player_relationships:stage3] match_scores relationship upsert failed", {
             scoreId: scoreDocRef.id,
             historyId: historyRef.id,
             pairId: relationshipPairId,
@@ -447,7 +447,7 @@ const handleSaveMatch = async () => {
             }
           );
         } catch (error) {
-          console.error("[player_relationships:stage3] completed_matches relationship upsert failed", {
+          console.warn("[player_relationships:stage3] completed_matches relationship upsert failed", {
             completedMatchId: completedMatchRef.id,
             scoreId: scoreDocRef.id,
             historyId: historyRef.id,
