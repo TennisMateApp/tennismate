@@ -21,6 +21,7 @@ import {
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import { trackEvent } from "@/lib/mixpanel";
 import { shouldTrackRematchInviteAccepted } from "@/lib/rematchAnalytics";
+import { relationshipFieldsForParticipants, upsertMessageRelationship } from "@/lib/playerRelationships";
 
 const TM = {
   ink: "#0B3D2E",
@@ -408,8 +409,8 @@ async function goToRecordScore() {
       console.error("Failed to delete related calendar events:", err);
     }
 
-    // system message so chat shows cancellation
-    await addDoc(collection(db, "conversations", String(inviteDoc.conversationId), "messages"), {
+    const relationshipFields = relationshipFieldsForParticipants(inviteDoc.participants);
+    const messagePayload = {
       type: "system",
       system: true,
       systemType: "invite_cancelled",
@@ -420,7 +421,40 @@ async function goToRecordScore() {
       conversationId: String(inviteDoc.conversationId),
       text: "🚫 This invite has been cancelled.",
       timestamp: serverTimestamp(),
-    });
+      ...(relationshipFields
+        ? {
+            pairId: relationshipFields.pairId,
+            relationshipRefPath: relationshipFields.relationshipRefPath,
+          }
+        : {}),
+    };
+
+    // system message so chat shows cancellation
+    const msgRef = await addDoc(
+      collection(db, "conversations", String(inviteDoc.conversationId), "messages"),
+      messagePayload
+    );
+
+    if (relationshipFields) {
+      try {
+        await upsertMessageRelationship(
+          db,
+          relationshipFields.players[0],
+          relationshipFields.players[1],
+          String(inviteDoc.conversationId),
+          msgRef.id,
+          me
+        );
+      } catch (error) {
+        console.warn("[player_relationships:stage4] invite cancellation message relationship upsert failed", {
+          conversationId: String(inviteDoc.conversationId),
+          messageId: msgRef.id,
+          pairId: relationshipFields.pairId,
+          actorId: me,
+          error,
+        });
+      }
+    }
 
     onClose?.(); // ✅ close overlay
   }

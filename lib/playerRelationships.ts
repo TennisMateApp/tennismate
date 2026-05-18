@@ -4,6 +4,7 @@ import {
   doc,
   serverTimestamp,
   setDoc,
+  updateDoc,
   type DocumentData,
   type DocumentReference,
   type Firestore,
@@ -15,8 +16,15 @@ type PublicPlayerSnapshot = {
   photoThumbURL?: string | null;
 };
 
-type RelationshipInteractionType = "match_request" | "match_invite" | "completed_match";
+type RelationshipInteractionType =
+  | "match_request"
+  | "match_invite"
+  | "completed_match"
+  | "conversation"
+  | "message";
 type RelationshipInteractionCollection =
+  | "conversations"
+  | `conversations/${string}/messages`
   | "match_requests"
   | "match_invites"
   | "match_history"
@@ -31,6 +39,8 @@ type RelationshipUpsertOptions = {
   latestRefField:
     | "latestMatchRequestId"
     | "latestMatchInviteId"
+    | "latestConversationId"
+    | "latestMessageId"
     | "latestHistoryId"
     | "latestCompletedMatchId"
     | "latestScoreId";
@@ -43,7 +53,7 @@ type CreateMatchRequestOptions = {
   playerSnapshots?: Record<string, PublicPlayerSnapshot | null | undefined>;
 };
 
-const cleanUid = (uid: string) => uid.trim();
+const cleanUid = (uid: unknown) => (typeof uid === "string" ? uid.trim() : "");
 
 export function getPairId(uidA: string, uidB: string) {
   const players = [cleanUid(uidA), cleanUid(uidB)].filter(Boolean).sort();
@@ -59,6 +69,28 @@ export function getRelationshipRef(db: Firestore, uidA: string, uidB: string) {
 
 export function getRelationshipRefPath(uidA: string, uidB: string) {
   return `player_relationships/${getPairId(uidA, uidB)}`;
+}
+
+export function isOneToOneParticipants(participants: unknown) {
+  if (!Array.isArray(participants)) return false;
+  const players = participants
+    .filter((uid): uid is string => typeof uid === "string")
+    .map(cleanUid)
+    .filter(Boolean);
+  const unique = Array.from(new Set(players));
+  return unique.length === 2;
+}
+
+export function relationshipFieldsForParticipants(participants: unknown) {
+  if (!isOneToOneParticipants(participants)) return null;
+  const source = Array.isArray(participants) ? participants : [];
+  const players = Array.from(new Set(source.map(cleanUid).filter(Boolean))).sort();
+  const pairId = getPairId(players[0], players[1]);
+  return {
+    players: [players[0], players[1]] as [string, string],
+    pairId,
+    relationshipRefPath: `player_relationships/${pairId}`,
+  };
 }
 
 export function withRelationshipFields<T extends DocumentData>(
@@ -138,6 +170,72 @@ export async function upsertMatchInviteRelationship(
     latestRefField: "latestMatchInviteId",
     playerSnapshots,
   });
+}
+
+export async function upsertConversationRelationship(
+  db: Firestore,
+  uidA: string,
+  uidB: string,
+  conversationId: string,
+  actorId: string
+) {
+  await upsertPlayerRelationshipInteraction(db, uidA, uidB, {
+    actorId,
+    interactionId: conversationId,
+    interactionType: "conversation",
+    interactionCollection: "conversations",
+    latestRefField: "latestConversationId",
+    refs: {
+      latestConversationId: conversationId,
+    },
+  });
+}
+
+export async function upsertMessageRelationship(
+  db: Firestore,
+  uidA: string,
+  uidB: string,
+  conversationId: string,
+  messageId: string,
+  senderId: string
+) {
+  await upsertPlayerRelationshipInteraction(db, uidA, uidB, {
+    actorId: senderId,
+    interactionId: messageId,
+    interactionType: "message",
+    interactionCollection: `conversations/${conversationId}/messages`,
+    latestRefField: "latestMessageId",
+    refs: {
+      latestConversationId: conversationId,
+      latestMessageId: messageId,
+    },
+  });
+}
+
+export async function ensureOneToOneConversationRelationship(
+  db: Firestore,
+  conversationId: string,
+  participants: unknown,
+  actorId: string,
+  existingPairId?: string | null,
+  existingRelationshipRefPath?: string | null
+) {
+  const relationship = relationshipFieldsForParticipants(participants);
+  if (!relationship) return null;
+
+  const { players, pairId, relationshipRefPath } = relationship;
+  const conversationUpdates: Record<string, string> = {};
+
+  if (!existingPairId) conversationUpdates.pairId = pairId;
+  if (!existingRelationshipRefPath) conversationUpdates.relationshipRefPath = relationshipRefPath;
+
+  if (Object.keys(conversationUpdates).length > 0) {
+    await updateDoc(doc(db, "conversations", conversationId), conversationUpdates);
+  }
+
+  await upsertConversationRelationship(db, players[0], players[1], conversationId, actorId);
+
+  return relationship;
 }
 
 export async function upsertCompletedMatchRelationship(

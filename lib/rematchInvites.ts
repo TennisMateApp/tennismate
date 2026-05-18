@@ -2,9 +2,11 @@
 
 import { db } from "@/lib/firebaseConfig";
 import {
+  ensureOneToOneConversationRelationship,
   getPairId,
   getRelationshipRefPath,
   upsertMatchInviteRelationship,
+  upsertMessageRelationship,
 } from "@/lib/playerRelationships";
 import {
   addDoc,
@@ -345,6 +347,30 @@ export async function createRematchInviteFromPrevious(params: {
       }
     : {};
 
+  if (shouldLinkRelationship) {
+    try {
+      await ensureOneToOneConversationRelationship(
+        db,
+        conversationId,
+        conversationParticipants,
+        currentUserId,
+        conversationSnap.exists() && typeof conversationSnap.data()?.pairId === "string"
+          ? conversationSnap.data()?.pairId
+          : null,
+        conversationSnap.exists() && typeof conversationSnap.data()?.relationshipRefPath === "string"
+          ? conversationSnap.data()?.relationshipRefPath
+          : null
+      );
+    } catch (error) {
+      console.warn("[player_relationships:stage4] rematch conversation relationship upsert failed", {
+        conversationId,
+        pairId: relationshipFields.pairId,
+        senderId: currentUserId,
+        error,
+      });
+    }
+  }
+
   const invitePayload: InvitePayload = {
     startISO,
     durationMins,
@@ -364,6 +390,7 @@ export async function createRematchInviteFromPrevious(params: {
     inviteStatus: "pending",
     timestamp: serverTimestamp(),
     read: false,
+    ...relationshipFields,
   };
 
   const msgRef = await addDoc(
@@ -407,6 +434,18 @@ export async function createRematchInviteFromPrevious(params: {
         fromUserId: currentUserId,
         toUserId: recipientId,
         pairId: relationshipFields.pairId,
+        error,
+      });
+    }
+
+    try {
+      await upsertMessageRelationship(db, currentUserId, recipientId, conversationId, msgRef.id, currentUserId);
+    } catch (error) {
+      console.warn("[player_relationships:stage4] rematch invite message relationship upsert failed", {
+        conversationId,
+        messageId: msgRef.id,
+        pairId: relationshipFields.pairId,
+        senderId: currentUserId,
         error,
       });
     }
