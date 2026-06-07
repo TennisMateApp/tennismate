@@ -84,6 +84,12 @@ type ScoredPlayer = Player & {
   skillBand: SkillBand | "";
 };
 
+type RecommendedMatchPlayer = Player & {
+  recommendationReasons: string[];
+  recommendationScore?: number | null;
+  notificationId?: string | null;
+};
+
 type AvailabilityFormState = {
   date: string;
   timeSlot: "morning" | "afternoon" | "evening";
@@ -584,6 +590,8 @@ export default function MatchPage() {
   const refreshingRef = useRef(false);
   const matchPageTrackedRef = useRef(false);
   const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
+  const [recommendedMatches, setRecommendedMatches] = useState<RecommendedMatchPlayer[]>([]);
+  const [recommendedMatchLoading, setRecommendedMatchLoading] = useState(false);
   const isDesktop = useIsDesktop();
   const [matchSurface, setMatchSurface] = useState<"players" | "availability">("players");
   const [availabilityRequestOpen, setAvailabilityRequestOpen] = useState(false);
@@ -622,6 +630,15 @@ const setQuery = (key: string, value?: string) => {
   if (value == null || value === "") p.delete(key);
   else p.set(key, value);
   router.replace(`?${p.toString()}`);
+};
+
+const clearRecommendedMatchQuery = () => {
+  const p = new URLSearchParams(params.toString());
+  p.delete("recommendedPlayerId");
+  p.delete("candidateId");
+  p.delete("notificationId");
+  const qs = p.toString();
+  router.replace(qs ? `?${qs}` : "/match", { scroll: false });
 };
 
 const [justVerified, setJustVerified] = useState(false);
@@ -1638,22 +1655,279 @@ const uidOf = (p: any): string | null => {
 const resolveRecipientUid = (target: Player | string): string | null => {
   return uidOf(target);
 };
+
+const HIGH_PROBABILITY_BLOCKING_STATUSES = new Set([
+  "unread",
+  "requested",
+  "pending",
+  "accepted",
+  "confirmed",
+  "completed",
+]);
+
+const safeRecommendationReasons = (value: unknown): string[] => {
+  const raw = Array.isArray(value) ? value : [];
+  const labels = raw
+    .map((reason) => {
+      if (reason === "nearby") return "Nearby player";
+      if (reason === "similar_skill") return "Similar skill level";
+      if (reason === "availability_overlap") return "Availability match";
+      if (reason === "recently_active") return "Recently active";
+      return null;
+    })
+    .filter((reason) => typeof reason === "string");
+
+  return Array.from(new Set(labels));
+};
+
+const hasExistingMatchBetweenUsers = async (currentUid: string, candidateUid: string) => {
+  const [
+    fromSnap,
+    toSnap,
+    historySnap,
+    completedFromSnap,
+    completedToSnap,
+    scoresSnap,
+  ] = await Promise.all([
+    getDocs(
+      query(
+        collection(db, "match_requests"),
+        where("fromUserId", "==", currentUid),
+        where("toUserId", "==", candidateUid)
+      )
+    ),
+    getDocs(
+      query(
+        collection(db, "match_requests"),
+        where("fromUserId", "==", candidateUid),
+        where("toUserId", "==", currentUid)
+      )
+    ),
+    getDocs(
+      query(
+        collection(db, "match_history"),
+        where("players", "array-contains", currentUid),
+        limit(50)
+      )
+    ),
+    getDocs(
+      query(
+        collection(db, "completed_matches"),
+        where("fromUserId", "==", currentUid),
+        where("toUserId", "==", candidateUid)
+      )
+    ),
+    getDocs(
+      query(
+        collection(db, "completed_matches"),
+        where("fromUserId", "==", candidateUid),
+        where("toUserId", "==", currentUid)
+      )
+    ),
+    getDocs(
+      query(
+        collection(db, "match_scores"),
+        where("players", "array-contains", currentUid),
+        limit(50)
+      )
+    ),
+  ]);
+
+  const blockingRequest = [...fromSnap.docs, ...toSnap.docs].some((docSnap) =>
+    HIGH_PROBABILITY_BLOCKING_STATUSES.has(String(docSnap.data()?.status || ""))
+  );
+  if (blockingRequest) return true;
+
+  if (!completedFromSnap.empty || !completedToSnap.empty) return true;
+
+  const historyBlocks = historySnap.docs.some((docSnap) => {
+    const players = Array.isArray(docSnap.data()?.players) ? docSnap.data().players : [];
+    return players.includes(candidateUid);
+  });
+  if (historyBlocks) return true;
+
+  return scoresSnap.docs.some((docSnap) => {
+    const players = Array.isArray(docSnap.data()?.players) ? docSnap.data().players : [];
+    return players.includes(candidateUid);
+  });
+};
+
+useEffect(() => {
+  if (!user?.uid || loading) return;
+
+  let cancelled = false;
+
+  const loadRecommendedMatches = async () => {
+    const notificationId = params.get("notificationId");
+    const queryCandidateId = params.get("recommendedPlayerId") || params.get("candidateId") || "";
+    const descriptors = new Map<
+      string,
+      { candidateId: string; reasons: string[]; score: number | null }
+    >();
+
+    const addDescriptor = (
+      candidateId: unknown,
+      reasons: string[] = [],
+      score: number | null = null
+    ) => {
+      if (typeof candidateId !== "string" || !candidateId || candidateId === user.uid) return;
+      if (descriptors.has(candidateId)) return;
+      descriptors.set(candidateId, { candidateId, reasons, score });
+    };
+
+    addDescriptor(queryCandidateId);
+
+    setRecommendedMatchLoading(true);
+
+    try {
+      if (notificationId) {
+        const notificationSnap = await getDoc(doc(db, "notifications", notificationId));
+        if (!notificationSnap.exists()) {
+          if (!cancelled) setRecommendedMatches([]);
+          return;
+        }
+
+        const notification = notificationSnap.data() as any;
+        if (notification.recipientId && notification.recipientId !== user.uid) {
+          if (!cancelled) setRecommendedMatches([]);
+          return;
+        }
+
+        const notificationType = String(notification.type || "");
+        if (
+          notificationType !== "high_probability_match" &&
+          notificationType !== "high_probability_match_alert"
+        ) {
+          if (!cancelled) setRecommendedMatches([]);
+          return;
+        }
+
+        const recommendationRows = Array.isArray(notification.recommendedCandidates)
+          ? notification.recommendedCandidates
+          : [];
+
+        recommendationRows.forEach((item: any) => {
+          addDescriptor(
+            item?.candidateId || item?.recommendedPlayerId,
+            safeRecommendationReasons(item?.scoreReasons),
+            typeof item?.score === "number" ? item.score : null
+          );
+        });
+
+        const candidateIds = Array.isArray(notification.candidateIds)
+          ? notification.candidateIds
+          : Array.isArray(notification.recommendedPlayerIds)
+            ? notification.recommendedPlayerIds
+            : [];
+
+        candidateIds.forEach((id: unknown) => {
+          addDescriptor(id, safeRecommendationReasons(notification.scoreReasons), null);
+        });
+
+        addDescriptor(
+          notification.candidateId || notification.recommendedPlayerId,
+          safeRecommendationReasons(notification.scoreReasons),
+          typeof notification.score === "number" ? notification.score : null
+        );
+
+        if (notification.read !== true) {
+          try {
+            await updateDoc(doc(db, "notifications", notificationId), { read: true });
+          } catch (error) {
+            console.warn("[MatchPage] failed to mark high probability notification read on open", error);
+          }
+        }
+      }
+
+      const requestedCandidates = Array.from(descriptors.values()).slice(0, 3);
+      if (!requestedCandidates.length) {
+        if (!cancelled) setRecommendedMatches([]);
+        return;
+      }
+
+      const loadedCandidates = await Promise.all(
+        requestedCandidates.map(async (descriptor): Promise<RecommendedMatchPlayer | null> => {
+          const candidateSnap = await getDoc(doc(db, "players", descriptor.candidateId));
+          if (!candidateSnap.exists()) return null;
+
+          const candidateData = candidateSnap.data() as any;
+          if (candidateData.profileComplete !== true || candidateData.isMatchable === false) return null;
+
+          const blocked = await hasExistingMatchBetweenUsers(user.uid, descriptor.candidateId);
+          if (blocked) return null;
+
+          return {
+            id: descriptor.candidateId,
+            userId: descriptor.candidateId,
+            name: typeof candidateData.name === "string" ? candidateData.name : "TennisMate player",
+            postcode: typeof candidateData.postcode === "string" ? candidateData.postcode : "",
+            skillLevel: typeof candidateData.skillLevel === "string" ? candidateData.skillLevel : undefined,
+            skillBand:
+              typeof candidateData.skillBand === "string"
+                ? (candidateData.skillBand as SkillBand)
+                : "",
+            skillBandLabel:
+              typeof candidateData.skillBandLabel === "string" ? candidateData.skillBandLabel : null,
+            utr: typeof candidateData.utr === "number" ? candidateData.utr : null,
+            skillRating:
+              typeof candidateData.skillRating === "number" ? candidateData.skillRating : null,
+            availability: Array.isArray(candidateData.availability) ? candidateData.availability : [],
+            bio: typeof candidateData.bio === "string" ? candidateData.bio : "",
+            email: "",
+            photoURL: typeof candidateData.photoURL === "string" ? candidateData.photoURL : undefined,
+            photoThumbURL:
+              typeof candidateData.photoThumbURL === "string" ? candidateData.photoThumbURL : null,
+            avatar: typeof candidateData.avatar === "string" ? candidateData.avatar : null,
+            profileComplete: true,
+            isMatchable: candidateData.isMatchable !== false,
+            lastActiveAt: candidateData.lastActiveAt ?? null,
+            recommendationReasons: descriptor.reasons.length
+              ? descriptor.reasons
+              : ["Nearby player", "Similar skill level"],
+            recommendationScore: descriptor.score,
+            notificationId,
+          };
+        })
+      );
+
+      if (!cancelled) {
+        const validCandidates = loadedCandidates.filter(
+          (candidate): candidate is RecommendedMatchPlayer => candidate != null
+        );
+        setRecommendedMatches(validCandidates);
+        if (validCandidates.length) setMatchSurface("players");
+      }
+    } catch (error) {
+      console.warn("[MatchPage] recommended match overlay skipped", error);
+      if (!cancelled) setRecommendedMatches([]);
+    } finally {
+      if (!cancelled) setRecommendedMatchLoading(false);
+    }
+  };
+
+  void loadRecommendedMatches();
+
+  return () => {
+    cancelled = true;
+  };
+}, [user?.uid, loading, params]);
+
   // don't double-submit the same card
 const handleMatchRequest = async (target: Player | string) => {
-  if (!myProfile || !user) return;
+  if (!myProfile || !user) return false;
 
   const toUid = resolveRecipientUid(target);
   if (!toUid) {
     console.error("[TM] Missing recipient UID", { target });
     alert("Could not send request (missing recipient id). Please refresh.");
-    return;
+    return false;
   }
 
   // Prevent self-send
-  if (toUid === user.uid) return;
+  if (toUid === user.uid) return false;
 
   // Don't double-submit
-  if (sendingIds.has(toUid)) return;
+  if (sendingIds.has(toUid)) return false;
 
   setSendingIds((s) => new Set(s).add(toUid));
 
@@ -1817,15 +2091,35 @@ setBlockedMatchUserIds((prev) => {
       writeSentCache(auth.currentUser.uid, merged);
     }
 
+    return true;
   } catch (err: any) {
     console.error("Failed to send match request:", err);
     alert(`❌ Could not send request: ${err?.message ?? String(err)}`);
+    return false;
   } finally {
     setSendingIds((s) => {
       const n = new Set(s);
       n.delete(toUid);
       return n;
     });
+  }
+};
+
+const closeRecommendedMatchOverlay = () => {
+  setRecommendedMatches([]);
+  clearRecommendedMatchQuery();
+};
+
+const handleRecommendedMatchRequest = async (recommendedMatch: RecommendedMatchPlayer) => {
+  const sent = await handleMatchRequest(recommendedMatch);
+  if (!sent) return;
+
+  if (recommendedMatch.notificationId) {
+    try {
+      await updateDoc(doc(db, "notifications", recommendedMatch.notificationId), { read: true });
+    } catch (error) {
+      console.warn("[MatchPage] failed to mark high probability notification read", error);
+    }
   }
 };
 
@@ -1860,6 +2154,180 @@ const handleDismissPlayer = useCallback(
   },
   [user?.uid]
 );
+
+const recommendedMatchOverlay = !recommendedMatchLoading && recommendedMatches.length > 0 ? (
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="recommended-match-title"
+    className="fixed inset-0 z-[10020] flex items-center justify-center p-4"
+  >
+    <div
+      className="absolute inset-0 bg-black/55"
+      onMouseDown={closeRecommendedMatchOverlay}
+    />
+
+    <div
+      className="relative z-[10021] flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10"
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-start justify-between gap-4 border-b border-black/5 px-5 py-5">
+        <div>
+          <div
+            className="text-[11px] font-extrabold uppercase tracking-[0.16em]"
+            style={{ color: "rgba(11,61,46,0.58)" }}
+          >
+            Recommended match
+          </div>
+          <h2 id="recommended-match-title" className="mt-1 text-xl font-black" style={{ color: "#0B3D2E" }}>
+            Recommended matches
+          </h2>
+          <p className="mt-1 text-sm font-medium text-gray-600">
+            A smart suggestion based on public match signals, not a guaranteed match.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={closeRecommendedMatchOverlay}
+          className="grid h-10 w-10 place-items-center rounded-full bg-black/5 text-gray-600 hover:bg-black/10"
+          aria-label="Close recommended match"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      <div className="overflow-y-auto px-5 py-5">
+        <div className="grid gap-4">
+          {recommendedMatches.map((recommendedMatch) => (
+            <div
+              key={recommendedMatch.id}
+              className="rounded-2xl border border-black/10 bg-white p-4"
+            >
+              <div className="flex items-start gap-4">
+                <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-full bg-gray-100 ring-1 ring-black/10 sm:h-20 sm:w-20">
+                  {resolveProfilePhoto(recommendedMatch) ? (
+                    <Image
+                      src={resolveProfilePhoto(recommendedMatch)!}
+                      alt={recommendedMatch.name ? `${recommendedMatch.name} profile photo` : "Profile photo"}
+                      fill
+                      sizes="80px"
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center text-xl font-black text-gray-500">
+                      {(recommendedMatch.name || "?").trim().charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-lg font-black" style={{ color: "#0B3D2E" }}>
+                    {recommendedMatch.name}
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span
+                      className="inline-flex rounded-full px-2.5 py-1 text-[11px] font-extrabold"
+                      style={{
+                        background: "rgba(57,255,20,0.14)",
+                        border: "1px solid rgba(57,255,20,0.35)",
+                        color: "#0B3D2E",
+                      }}
+                    >
+                      {(() => {
+                        const numeric =
+                          typeof (recommendedMatch.skillRating ?? recommendedMatch.utr) === "number"
+                            ? (recommendedMatch.skillRating ?? recommendedMatch.utr)!
+                            : null;
+                        const label = labelForBand(
+                          recommendedMatch.skillBand ||
+                            skillFromUTR((recommendedMatch.skillRating ?? recommendedMatch.utr) ?? null) ||
+                            legacyToBand(recommendedMatch.skillLevel),
+                          recommendedMatch.skillBandLabel
+                        );
+                        return numeric != null ? `LEVEL ${numeric.toFixed(1)}` : label.toUpperCase();
+                      })()}
+                    </span>
+
+                    {recommendedMatch.postcode && (
+                      <span className="text-[12px] font-semibold text-gray-600">
+                        {recommendedMatch.postcode}
+                      </span>
+                    )}
+                  </div>
+
+                  {recommendedMatch.availability?.length > 0 && (
+                    <div className="mt-2 text-sm text-gray-600">
+                      Availability: {formatAvailability(recommendedMatch.availability)}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {recommendedMatch.recommendationReasons.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {recommendedMatch.recommendationReasons.map((reason) => (
+                    <span
+                      key={`${recommendedMatch.id}-${reason}`}
+                      className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-700 ring-1 ring-black/5"
+                    >
+                      {reason}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProfileOpenId(recommendedMatch.id);
+                    closeRecommendedMatchOverlay();
+                  }}
+                  className="w-full rounded-full py-3 text-sm font-extrabold"
+                  style={{
+                    background: "#EEF0F2",
+                    color: "#0F172A",
+                    border: "1px solid rgba(15,23,42,0.10)",
+                  }}
+                >
+                  View profile
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleRecommendedMatchRequest(recommendedMatch)}
+                  disabled={sendingIds.has(recommendedMatch.id) || sentRequests.has(recommendedMatch.id)}
+                  className="w-full rounded-full py-3 text-sm font-extrabold disabled:opacity-60"
+                  style={{
+                    background: "#39FF14",
+                    color: "#0B3D2E",
+                    boxShadow: "0 10px 30px rgba(57,255,20,0.18)",
+                  }}
+                >
+                  {sentRequests.has(recommendedMatch.id)
+                    ? "Request sent"
+                    : sendingIds.has(recommendedMatch.id)
+                      ? "Sending..."
+                      : "Send match request"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={closeRecommendedMatchOverlay}
+          className="mt-4 w-full rounded-full py-3 text-sm font-extrabold text-gray-600 hover:bg-gray-50"
+        >
+          Not now
+        </button>
+      </div>
+    </div>
+  </div>
+) : null;
 
   // Sort matches based on user choice
 const filteredMatches = useMemo(() => {
@@ -2221,6 +2689,8 @@ if (isDesktop) {
           </div>
         </div>
       </div>
+
+      {recommendedMatchOverlay}
 
       {availabilityRequestOpen && (
         <div className="fixed inset-0 z-[10000]">
@@ -2742,6 +3212,8 @@ return (
 
 
 
+
+{recommendedMatchOverlay}
 
 {justVerified && (
   <div
