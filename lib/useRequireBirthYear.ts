@@ -97,6 +97,7 @@ export function useRequireBirthYear(enabled = true) {
     await setDoc(
       doc(db, "players_private", user.uid),
       {
+        email: user.email || "",
         birthYear,
         birthYearUpdatedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),

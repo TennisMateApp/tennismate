@@ -201,7 +201,9 @@ service cloud.firestore {
     }
 
     match /players_private/{uid} {
-      allow read, write: if isSelf(uid);
+      allow read: if isSelf(uid);
+      allow write: if isSelf(uid)
+        && request.resource.data.email == request.auth.token.email;
     }
 
     match /player_public_stats/{uid} {
@@ -399,11 +401,7 @@ match /match_invites/{inviteId} {
     }
 
 match /match_history/{historyId} {
-  allow get, list: if signedIn()
-    && (
-      resource.data.players is list &&
-      request.auth.uid in resource.data.players
-    );
+  allow get, list: if isMatchPartyFromResource();
 
   allow create: if signedIn()
     && request.resource.data.players is list
@@ -475,6 +473,10 @@ match /match_history/{historyId} {
     }
 
     match /message_notification_state/{id} {
+      allow read, write: if false;
+    }
+
+    match /high_probability_match_recommendations/{recommendationId} {
       allow read, write: if false;
     }
 

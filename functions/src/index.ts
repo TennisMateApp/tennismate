@@ -215,17 +215,22 @@ export const deleteMyAccount = onCall(async (request) => {
 
   const usersRef = db.collection("users").doc(uid);
   const playersRef = db.collection("players").doc(uid);
+  const playersPrivateRef = db.collection("players_private").doc(uid);
   const devicesCol = usersRef.collection("devices");
 
   // ---- STEP 1: read some state (for debugging only) ----
   try {
-    const [uSnap, pSnap, dSnap] = await Promise.all([
+    const [uSnap, pSnap, ppSnap, dSnap] = await Promise.all([
       usersRef.get().catch((e) => {
         console.warn("[DeleteAccount][%s] users read failed", runId, String(e));
         return null as any;
       }),
       playersRef.get().catch((e) => {
         console.warn("[DeleteAccount][%s] players read failed", runId, String(e));
+        return null as any;
+      }),
+      playersPrivateRef.get().catch((e) => {
+        console.warn("[DeleteAccount][%s] players_private read failed", runId, String(e));
         return null as any;
       }),
       devicesCol.get().catch((e) => {
@@ -237,6 +242,7 @@ export const deleteMyAccount = onCall(async (request) => {
     console.log("[DeleteAccount][%s] PRECHECK", runId, {
       usersDocExists: !!uSnap?.exists,
       playersDocExists: !!pSnap?.exists,
+      playersPrivateDocExists: !!ppSnap?.exists,
       devicesCount: dSnap?.size ?? null,
     });
   } catch (e: any) {
@@ -280,6 +286,7 @@ export const deleteMyAccount = onCall(async (request) => {
     const batch = db.batch();
     batch.delete(usersRef);
     batch.delete(playersRef);
+    batch.delete(playersPrivateRef);
     await batch.commit();
     console.log("[DeleteAccount][%s] firestore docs deleted", runId);
   } catch (e: any) {
@@ -751,6 +758,19 @@ function formatLocal(iso?: string | null): string {
 const AVAILABILITY_ALERT_RADIUS_KM = 10;
 const AVAILABILITY_ALERT_PUSH_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const AVAILABILITY_ALERT_MAX_RECIPIENTS = 50;
+const HIGH_PROBABILITY_ALERT_FIRST_INACTIVE_MS = 7 * 24 * 60 * 60 * 1000;
+const HIGH_PROBABILITY_ALERT_SECOND_INACTIVE_MS = 14 * 24 * 60 * 60 * 1000;
+const HIGH_PROBABILITY_ALERT_REPEAT_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+const HIGH_PROBABILITY_RECOMMENDATION_EXCLUSION_MS = 90 * 24 * 60 * 60 * 1000;
+const HIGH_PROBABILITY_ALERT_RECENT_ACTIVE_MS = 7 * 24 * 60 * 60 * 1000;
+const HIGH_PROBABILITY_ALERT_RECENT_INTENT_MS = 30 * 24 * 60 * 60 * 1000;
+const HIGH_PROBABILITY_ALERT_NEARBY_KM = 15;
+const HIGH_PROBABILITY_ALERT_SCORE_THRESHOLD = 70;
+const HIGH_PROBABILITY_ALERT_MAX_USERS = 200;
+const HIGH_PROBABILITY_ALERT_MAX_POOL = 700;
+const HIGH_PROBABILITY_ALERT_INTENT_CHUNK_SIZE = 30;
+const HIGH_PROBABILITY_ALERT_MAX_RECOMMENDATIONS = 3;
+const HIGH_PROBABILITY_RECOMMENDATIONS_COLLECTION = "high_probability_match_recommendations";
 const ACTIVE_MATCH_RELATIONSHIP_STATUSES = [
   "unread",
   "requested",
@@ -758,6 +778,11 @@ const ACTIVE_MATCH_RELATIONSHIP_STATUSES = [
   "accepted",
   "confirmed",
 ];
+const BLOCKING_MATCH_RELATIONSHIP_STATUSES = [
+  ...ACTIVE_MATCH_RELATIONSHIP_STATUSES,
+  "completed",
+];
+const HIGH_PROBABILITY_ACCEPTED_STATUSES = new Set(["accepted", "confirmed", "completed"]);
 
 function getAvailabilityProfileSlot(dateValue: unknown, timeSlotValue: unknown): string | null {
   if (typeof dateValue !== "string" || !dateValue) return null;
@@ -810,6 +835,625 @@ function timestampToMillis(value: unknown): number | null {
   }
 
   return null;
+}
+
+function getPairIdForUsers(uidA: string, uidB: string): string {
+  return [uidA, uidB].map((uid) => uid.trim()).sort().join("_");
+}
+
+function valueAsString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function valueAsNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function valueAsUidSet(value: unknown): Set<string> {
+  if (!Array.isArray(value)) return new Set<string>();
+  return new Set(
+    value
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .map((item) => item.trim())
+  );
+}
+
+function availabilitySlots(value: unknown): Set<string> {
+  if (!Array.isArray(value)) return new Set<string>();
+  return new Set(
+    value
+      .map((item) => String(item || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function availabilityOverlaps(a: unknown, b: unknown): boolean {
+  const slotsA = availabilitySlots(a);
+  if (!slotsA.size) return false;
+  for (const slot of availabilitySlots(b)) {
+    if (slotsA.has(slot)) return true;
+  }
+  return false;
+}
+
+function skillBandIndex(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const order = [
+    "lower_beginner",
+    "beginner",
+    "upper_beginner",
+    "lower_intermediate",
+    "intermediate",
+    "upper_intermediate",
+    "lower_advanced",
+    "advanced",
+    "upper_advanced",
+  ];
+  const index = order.indexOf(value);
+  return index >= 0 ? index : null;
+}
+
+function skillIsSimilar(
+  user: FirebaseFirestore.DocumentData,
+  candidate: FirebaseFirestore.DocumentData
+): boolean {
+  const userRating = valueAsNumber(user.skillRating) ?? valueAsNumber(user.utr);
+  const candidateRating = valueAsNumber(candidate.skillRating) ?? valueAsNumber(candidate.utr);
+  if (userRating != null && candidateRating != null) {
+    return Math.abs(userRating - candidateRating) <= 1.2;
+  }
+
+  const userBand = skillBandIndex(user.skillBand);
+  const candidateBand = skillBandIndex(candidate.skillBand);
+  if (userBand != null && candidateBand != null) {
+    return Math.abs(userBand - candidateBand) <= 1;
+  }
+
+  const userLevel = valueAsString(user.skillLevel)?.toLowerCase();
+  const candidateLevel = valueAsString(candidate.skillLevel)?.toLowerCase();
+  return !!userLevel && !!candidateLevel && userLevel === candidateLevel;
+}
+
+function docParticipants(data: FirebaseFirestore.DocumentData): Set<string> {
+  const players = valueAsUidSet(data.players);
+  const participants = valueAsUidSet(data.participants);
+  const fromUserId = valueAsString(data.fromUserId);
+  const toUserId = valueAsString(data.toUserId);
+
+  for (const uid of participants) players.add(uid);
+  if (fromUserId) players.add(fromUserId);
+  if (toUserId) players.add(toUserId);
+
+  return players;
+}
+
+function docPairId(data: FirebaseFirestore.DocumentData): string | null {
+  const explicitPairId = valueAsString(data.pairId);
+  if (explicitPairId) return explicitPairId;
+
+  const participants = Array.from(docParticipants(data)).sort();
+  if (participants.length !== 2) return null;
+  return getPairIdForUsers(participants[0], participants[1]);
+}
+
+function isBlockingMatchStatus(value: unknown): boolean {
+  return BLOCKING_MATCH_RELATIONSHIP_STATUSES.includes(String(value || ""));
+}
+
+type HighProbabilityRequestSignals = {
+  previouslySentToUser: Set<string>;
+  userPreviouslySentTo: Set<string>;
+  blockedPairIds: Set<string>;
+};
+
+async function collectHighProbabilityRequestSignals(
+  uid: string
+): Promise<HighProbabilityRequestSignals> {
+  const previouslySentToUser = new Set<string>();
+  const userPreviouslySentTo = new Set<string>();
+  const blockedPairIds = new Set<string>();
+
+  const [fromSnap, toSnap] = await Promise.all([
+    db.collection("match_requests").where("fromUserId", "==", uid).get(),
+    db.collection("match_requests").where("toUserId", "==", uid).get(),
+  ]);
+
+  for (const docSnap of fromSnap.docs) {
+    const data = docSnap.data();
+    const otherUid = valueAsString(data.toUserId);
+    if (!otherUid || otherUid === uid) continue;
+    userPreviouslySentTo.add(otherUid);
+    if (isBlockingMatchStatus(data.status)) {
+      blockedPairIds.add(getPairIdForUsers(uid, otherUid));
+    }
+  }
+
+  for (const docSnap of toSnap.docs) {
+    const data = docSnap.data();
+    const otherUid = valueAsString(data.fromUserId);
+    if (!otherUid || otherUid === uid) continue;
+    previouslySentToUser.add(otherUid);
+    if (isBlockingMatchStatus(data.status)) {
+      blockedPairIds.add(getPairIdForUsers(uid, otherUid));
+    }
+  }
+
+  return { previouslySentToUser, userPreviouslySentTo, blockedPairIds };
+}
+
+async function collectPlayedPairIds(uid: string): Promise<Set<string>> {
+  const blockedPairIds = new Set<string>();
+
+  const [
+    historySnap,
+    completedFromSnap,
+    completedToSnap,
+    scoresSnap,
+  ] = await Promise.all([
+    db.collection("match_history").where("players", "array-contains", uid).get(),
+    db.collection("completed_matches").where("fromUserId", "==", uid).get(),
+    db.collection("completed_matches").where("toUserId", "==", uid).get(),
+    db.collection("match_scores").where("players", "array-contains", uid).get(),
+  ]);
+
+  for (const snap of [historySnap, completedFromSnap, completedToSnap, scoresSnap]) {
+    for (const docSnap of snap.docs) {
+      const pairId = docPairId(docSnap.data());
+      if (pairId) blockedPairIds.add(pairId);
+    }
+  }
+
+  return blockedPairIds;
+}
+
+async function highProbabilityPushEligibility(
+  uid: string
+): Promise<{ eligible: boolean; reason?: "push_disabled" | "no_device_token" }> {
+  const userSnap = await db.collection("users").doc(uid).get();
+  const userData = userSnap.exists ? userSnap.data() || {} : {};
+
+  if (userData.notificationsEnabled === false) return { eligible: false, reason: "push_disabled" };
+  if (userData.pushOptOut === true) return { eligible: false, reason: "push_disabled" };
+  if (userData.highProbabilityMatchAlertsEnabled === false) {
+    return { eligible: false, reason: "push_disabled" };
+  }
+
+  const hasToken = await hasActiveAndroidPush(uid);
+  return hasToken
+    ? { eligible: true }
+    : { eligible: false, reason: "no_device_token" };
+}
+
+async function fetchLocationForPlayer(
+  uid: string,
+  playerData: FirebaseFirestore.DocumentData
+): Promise<{ lat: number; lng: number } | null> {
+  const publicLat = valueAsNumber(playerData.lat);
+  const publicLng = valueAsNumber(playerData.lng);
+  if (publicLat != null && publicLng != null) {
+    return { lat: publicLat, lng: publicLng };
+  }
+
+  const privateSnap = await db.collection("players_private").doc(uid).get();
+  const privateData = privateSnap.exists ? privateSnap.data() || {} : {};
+  const privateLat = valueAsNumber(privateData.lat);
+  const privateLng = valueAsNumber(privateData.lng);
+  if (privateLat != null && privateLng != null) {
+    return { lat: privateLat, lng: privateLng };
+  }
+
+  const postcode = valueAsString(playerData.postcode);
+  if (!postcode) return null;
+
+  const postcodeSnap = await db.collection("postcodes").doc(postcode).get();
+  const postcodeData = postcodeSnap.exists ? postcodeSnap.data() || {} : {};
+  const postcodeLat = valueAsNumber(postcodeData.lat);
+  const postcodeLng = valueAsNumber(postcodeData.lng);
+  return postcodeLat != null && postcodeLng != null
+    ? { lat: postcodeLat, lng: postcodeLng }
+    : null;
+}
+
+type HighProbabilityCandidate = {
+  uid: string;
+  data: FirebaseFirestore.DocumentData;
+  score: number;
+  reasons: string[];
+  distanceKm: number | null;
+};
+
+function highProbabilityRecommendationHistoryId(uid: string, candidateUid: string): string {
+  return `${uid}_${candidateUid}`;
+}
+
+type CandidateIntentSignals = {
+  sentRequestUserIds: Set<string>;
+  acceptedRequestUserIds: Set<string>;
+  recentIntentUserIds: Set<string>;
+};
+
+type CandidateIntentCache = {
+  dayKey: string;
+  candidateKey: string;
+  signals: CandidateIntentSignals;
+  statsByUid: Map<string, FirebaseFirestore.DocumentData>;
+};
+
+let highProbabilityIntentCache: CandidateIntentCache | null = null;
+
+function chunkHighProbabilityIntentIds(values: string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < values.length; i += size) {
+    chunks.push(values.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function matchRequestActivityMillis(data: FirebaseFirestore.DocumentData): number | null {
+  const times = [
+    timestampToMillis(data.acceptedAt),
+    timestampToMillis(data.updatedAt),
+    timestampToMillis(data.createdAt),
+    timestampToMillis(data.timestamp),
+  ].filter((value): value is number => typeof value === "number");
+
+  return times.length ? Math.max(...times) : null;
+}
+
+async function collectCandidateIntentSignals(
+  candidateIds: string[],
+  nowMs: number
+): Promise<CandidateIntentSignals> {
+  const sentRequestUserIds = new Set<string>();
+  const acceptedRequestUserIds = new Set<string>();
+  const recentIntentUserIds = new Set<string>();
+  const chunks = chunkHighProbabilityIntentIds(candidateIds, HIGH_PROBABILITY_ALERT_INTENT_CHUNK_SIZE);
+
+  if (!chunks.length) {
+    return { sentRequestUserIds, acceptedRequestUserIds, recentIntentUserIds };
+  }
+
+  // General match intent is the strongest re-engagement signal: candidates who
+  // send requests or accept incoming requests anywhere on TennisMate are more
+  // likely to act on a timely recommendation, even if they have not met this user.
+  const [sentSnaps, receivedSnaps] = await Promise.all([
+    Promise.all(
+      chunks.map((chunk) =>
+        db.collection("match_requests").where("fromUserId", "in", chunk).get()
+      )
+    ),
+    Promise.all(
+      chunks.map((chunk) =>
+        db.collection("match_requests").where("toUserId", "in", chunk).get()
+      )
+    ),
+  ]);
+
+  for (const snap of sentSnaps) {
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      const candidateUid = valueAsString(data.fromUserId);
+      if (!candidateUid) continue;
+
+      sentRequestUserIds.add(candidateUid);
+
+      const activityMs = matchRequestActivityMillis(data);
+      if (activityMs != null && nowMs - activityMs <= HIGH_PROBABILITY_ALERT_RECENT_INTENT_MS) {
+        recentIntentUserIds.add(candidateUid);
+      }
+    }
+  }
+
+  for (const snap of receivedSnaps) {
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      const candidateUid = valueAsString(data.toUserId);
+      if (!candidateUid) continue;
+      if (!HIGH_PROBABILITY_ACCEPTED_STATUSES.has(String(data.status || ""))) continue;
+
+      acceptedRequestUserIds.add(candidateUid);
+
+      const activityMs = matchRequestActivityMillis(data);
+      if (activityMs != null && nowMs - activityMs <= HIGH_PROBABILITY_ALERT_RECENT_INTENT_MS) {
+        recentIntentUserIds.add(candidateUid);
+      }
+    }
+  }
+
+  return { sentRequestUserIds, acceptedRequestUserIds, recentIntentUserIds };
+}
+
+async function collectRecentlyRecommendedCandidateIds(
+  uid: string,
+  candidateIds: string[],
+  nowMs: number
+): Promise<Set<string>> {
+  if (!candidateIds.length) return new Set<string>();
+
+  const refs = candidateIds.map((candidateUid) =>
+    db
+      .collection(HIGH_PROBABILITY_RECOMMENDATIONS_COLLECTION)
+      .doc(highProbabilityRecommendationHistoryId(uid, candidateUid))
+  );
+  const snaps = await db.getAll(...refs);
+  const cutoffMs = nowMs - HIGH_PROBABILITY_RECOMMENDATION_EXCLUSION_MS;
+  const out = new Set<string>();
+
+  snaps.forEach((snap) => {
+    if (!snap.exists) return;
+    const lastRecommendedMs = timestampToMillis(snap.get("lastRecommendedAt"));
+    const candidateUid = valueAsString(snap.get("candidateId"));
+    if (candidateUid && lastRecommendedMs != null && lastRecommendedMs >= cutoffMs) {
+      out.add(candidateUid);
+    }
+  });
+
+  return out;
+}
+
+async function findHighProbabilityCandidatesForUser(
+  uid: string,
+  userData: FirebaseFirestore.DocumentData,
+  nowMs: number
+): Promise<HighProbabilityCandidate[]> {
+  const [requestSignals, playedPairIds, userLocation] = await Promise.all([
+    collectHighProbabilityRequestSignals(uid),
+    collectPlayedPairIds(uid),
+    fetchLocationForPlayer(uid, userData),
+  ]);
+
+  const blockedPairIds = new Set<string>([
+    ...requestSignals.blockedPairIds,
+    ...playedPairIds,
+  ]);
+
+  const poolSnap = await db
+    .collection("players")
+    .where("profileComplete", "==", true)
+    .limit(HIGH_PROBABILITY_ALERT_MAX_POOL)
+    .get();
+
+  const candidateIds = poolSnap.docs
+    .map((docSnap) => docSnap.id)
+    .filter((candidateUid) => candidateUid !== uid);
+  const candidateKey = candidateIds.join("|");
+  const dayKey = new Date(nowMs).toISOString().slice(0, 10);
+  let candidateIntent: CandidateIntentSignals;
+  let statsByUid: Map<string, FirebaseFirestore.DocumentData>;
+
+  if (
+    highProbabilityIntentCache &&
+    highProbabilityIntentCache.dayKey === dayKey &&
+    highProbabilityIntentCache.candidateKey === candidateKey
+  ) {
+    candidateIntent = highProbabilityIntentCache.signals;
+    statsByUid = highProbabilityIntentCache.statsByUid;
+  } else {
+    const [statSnaps, collectedIntent] = await Promise.all([
+      candidateIds.length
+        ? db.getAll(...candidateIds.map((candidateUid) => db.collection("player_public_stats").doc(candidateUid)))
+        : Promise.resolve([] as FirebaseFirestore.DocumentSnapshot[]),
+      collectCandidateIntentSignals(candidateIds, nowMs),
+    ]);
+
+    statsByUid = new Map<string, FirebaseFirestore.DocumentData>();
+    statSnaps.forEach((snap) => {
+      if (snap.exists) statsByUid.set(snap.id, snap.data() || {});
+    });
+
+    candidateIntent = collectedIntent;
+    highProbabilityIntentCache = {
+      dayKey,
+      candidateKey,
+      signals: candidateIntent,
+      statsByUid,
+    };
+  }
+
+  const recentlyRecommendedIds = await collectRecentlyRecommendedCandidateIds(
+    uid,
+    candidateIds,
+    nowMs
+  );
+  const eligibleCandidates: HighProbabilityCandidate[] = [];
+
+  for (const docSnap of poolSnap.docs) {
+    const candidateUid = docSnap.id;
+    if (candidateUid === uid) continue;
+
+    const candidateData = docSnap.data() || {};
+    if (candidateData.isMatchable === false) continue;
+
+    const pairId = getPairIdForUsers(uid, candidateUid);
+    if (blockedPairIds.has(pairId)) continue;
+    if (recentlyRecommendedIds.has(candidateUid)) continue;
+
+    let score = 0;
+    const reasons: string[] = [];
+
+    if (candidateIntent.sentRequestUserIds.has(candidateUid)) {
+      score += 45;
+      reasons.push("candidate_has_sent_requests");
+    }
+
+    const candidateStats = statsByUid.get(candidateUid) || {};
+    const acceptedFromStats = valueAsNumber(candidateStats.acceptedMatches);
+    if (
+      candidateIntent.acceptedRequestUserIds.has(candidateUid) ||
+      (acceptedFromStats != null && acceptedFromStats > 0)
+    ) {
+      score += 45;
+      reasons.push("candidate_has_accepted_requests");
+    }
+
+    if (candidateIntent.recentIntentUserIds.has(candidateUid)) {
+      score += 25;
+      reasons.push("candidate_recent_match_intent");
+    }
+
+    if (
+      requestSignals.previouslySentToUser.has(candidateUid) ||
+      requestSignals.userPreviouslySentTo.has(candidateUid)
+    ) {
+      score += 10;
+      reasons.push("specific_user_interaction");
+    }
+
+    if (availabilityOverlaps(userData.availability, candidateData.availability)) {
+      score += 20;
+      reasons.push("availability_overlap");
+    }
+
+    let distanceKm: number | null = null;
+    if (userLocation) {
+      const candidateLocation = await fetchLocationForPlayer(candidateUid, candidateData);
+      if (candidateLocation) {
+        distanceKm = calculateDistance(userLocation, candidateLocation);
+        if (distanceKm <= HIGH_PROBABILITY_ALERT_NEARBY_KM) {
+          score += 20;
+          reasons.push("nearby");
+        }
+      }
+    }
+
+    if (skillIsSimilar(userData, candidateData)) {
+      score += 15;
+      reasons.push("similar_skill");
+    }
+
+    const candidateLastActiveMs = timestampToMillis(candidateData.lastActiveAt);
+    if (candidateLastActiveMs != null && nowMs - candidateLastActiveMs <= HIGH_PROBABILITY_ALERT_RECENT_ACTIVE_MS) {
+      score += 10;
+      reasons.push("recently_active");
+    }
+
+    if (score < HIGH_PROBABILITY_ALERT_SCORE_THRESHOLD) continue;
+    eligibleCandidates.push({
+      uid: candidateUid,
+      data: candidateData,
+      score,
+      reasons,
+      distanceKm,
+    });
+  }
+
+  return eligibleCandidates
+    .sort((a, b) => b.score - a.score || (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999))
+    .slice(0, HIGH_PROBABILITY_ALERT_MAX_RECOMMENDATIONS);
+}
+
+async function createHighProbabilityMatchAlert(
+  uid: string,
+  candidates: HighProbabilityCandidate[],
+  nowMs: number
+): Promise<boolean> {
+  if (!candidates.length) return false;
+
+  const userRef = db.collection("users").doc(uid);
+  const dayKey = new Date(nowMs).toISOString().slice(0, 10).replace(/-/g, "");
+  const notifRef = db.collection("notifications").doc(`highProbabilityMatch_${uid}_${dayKey}`);
+  const primaryCandidate = candidates[0];
+  const recommendedCandidates = candidates.map((candidate, index) => ({
+    rank: index + 1,
+    candidateId: candidate.uid,
+    score: candidate.score,
+    scoreReasons: candidate.reasons,
+    distanceKm:
+      candidate.distanceKm == null ? null : Math.round(candidate.distanceKm * 10) / 10,
+  }));
+  const candidateIds = candidates.map((candidate) => candidate.uid);
+
+  return db.runTransaction(async (tx) => {
+    const notifSnap = await tx.get(notifRef);
+
+    if (notifSnap.exists) return false;
+
+    tx.set(notifRef, {
+      recipientId: uid,
+      type: "high_probability_match",
+      title: "🎾 New match opportunity",
+      body: "A nearby player is likely to accept a match. Open TennisMate to view your best match.",
+      message: "A nearby player is likely to accept a match. Open TennisMate to view your best match.",
+      route: "/match",
+      url: "https://tennismate.vercel.app/match",
+      candidateId: primaryCandidate.uid,
+      recommendedPlayerId: primaryCandidate.uid,
+      candidateIds,
+      recommendedPlayerIds: candidateIds,
+      recommendedCandidates,
+      pairId: getPairIdForUsers(uid, primaryCandidate.uid),
+      score: primaryCandidate.score,
+      scoreReasons: primaryCandidate.reasons,
+      distanceKm:
+        primaryCandidate.distanceKm == null ? null : Math.round(primaryCandidate.distanceKm * 10) / 10,
+      read: false,
+      pushDisabled: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      source: "cf:high_probability_match_alert",
+      generatedBy: "high_probability_match_alert",
+    });
+
+    tx.set(
+      userRef,
+      {
+        lastHighProbabilityMatchAlertAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastHighProbabilityMatchAlertCandidateId: primaryCandidate.uid,
+        highProbabilityMatchAlertCount: admin.firestore.FieldValue.increment(1),
+      },
+      { merge: true }
+    );
+
+    candidates.forEach((candidate, index) => {
+      const historyRef = db
+        .collection(HIGH_PROBABILITY_RECOMMENDATIONS_COLLECTION)
+        .doc(highProbabilityRecommendationHistoryId(uid, candidate.uid));
+
+      tx.set(
+        historyRef,
+        {
+          recipientId: uid,
+          candidateId: candidate.uid,
+          rank: index + 1,
+          notificationId: notifRef.id,
+          score: candidate.score,
+          scoreReasons: candidate.reasons,
+          distanceKm:
+            candidate.distanceKm == null ? null : Math.round(candidate.distanceKm * 10) / 10,
+          lastRecommendedAt: admin.firestore.FieldValue.serverTimestamp(),
+          generatedBy: "high_probability_match_alert",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    return true;
+  });
+}
+
+function highProbabilityAlertCadenceEligible(
+  userData: FirebaseFirestore.DocumentData,
+  lastActiveMs: number,
+  nowMs: number
+): boolean {
+  const inactiveMs = nowMs - lastActiveMs;
+  const sentCount = Math.max(0, Math.floor(valueAsNumber(userData.highProbabilityMatchAlertCount) || 0));
+  const lastAlertMs = timestampToMillis(userData.lastHighProbabilityMatchAlertAt);
+
+  if (sentCount <= 0) {
+    return inactiveMs >= HIGH_PROBABILITY_ALERT_FIRST_INACTIVE_MS;
+  }
+
+  if (sentCount === 1) {
+    return inactiveMs >= HIGH_PROBABILITY_ALERT_SECOND_INACTIVE_MS;
+  }
+
+  return (
+    inactiveMs >= HIGH_PROBABILITY_ALERT_SECOND_INACTIVE_MS &&
+    lastAlertMs != null &&
+    nowMs - lastAlertMs >= HIGH_PROBABILITY_ALERT_REPEAT_COOLDOWN_MS
+  );
 }
 
 async function getActiveRelationshipUserIds(uid: string): Promise<Set<string>> {
@@ -1884,6 +2528,121 @@ export const nudgePendingMatchRequests = pubsub
 
 
 
+export const sendHighProbabilityMatchAlerts = pubsub
+  .schedule("0 10 * * *")
+  .timeZone("Australia/Melbourne")
+  .onRun(async () => {
+    const nowMs = Date.now();
+
+    console.log("[HighProbabilityMatchAlert] run start", {
+      at: melNowISO(),
+      firstInactiveAfterDays: 7,
+      secondInactiveAfterDays: 14,
+      repeatCooldownDays: 30,
+      threshold: HIGH_PROBABILITY_ALERT_SCORE_THRESHOLD,
+      maxRecommendations: HIGH_PROBABILITY_ALERT_MAX_RECOMMENDATIONS,
+    });
+
+    const playersSnap = await db
+      .collection("players")
+      .where("profileComplete", "==", true)
+      .limit(HIGH_PROBABILITY_ALERT_MAX_POOL)
+      .get();
+
+    const inactivePlayers = playersSnap.docs
+      .filter((docSnap) => {
+        const data = docSnap.data() || {};
+        if (data.isMatchable === false) return false;
+        const lastActiveMs = timestampToMillis(data.lastActiveAt);
+        if (lastActiveMs == null) return false;
+        return nowMs - lastActiveMs >= HIGH_PROBABILITY_ALERT_FIRST_INACTIVE_MS;
+      })
+      .slice(0, HIGH_PROBABILITY_ALERT_MAX_USERS);
+
+    let skippedNoPush = 0;
+    let skippedPushDisabled = 0;
+    let skippedCadence = 0;
+    let skippedNoCandidate = 0;
+    let sentCount = 0;
+    const createdAlertScores: number[] = [];
+    const scoreReasonCounts = new Map<string, number>();
+
+    for (const playerSnap of inactivePlayers) {
+      const uid = playerSnap.id;
+      const playerData = playerSnap.data() || {};
+
+      try {
+        const userSnap = await db.collection("users").doc(uid).get();
+        const userData = userSnap.exists ? userSnap.data() || {} : {};
+        const lastActiveMs = timestampToMillis(playerData.lastActiveAt);
+        if (
+          lastActiveMs == null ||
+          !highProbabilityAlertCadenceEligible(userData, lastActiveMs, nowMs)
+        ) {
+          skippedCadence += 1;
+          continue;
+        }
+
+        const pushEligibility = await highProbabilityPushEligibility(uid);
+        if (!pushEligibility.eligible) {
+          if (pushEligibility.reason === "push_disabled") {
+            skippedPushDisabled += 1;
+          } else {
+            skippedNoPush += 1;
+          }
+          continue;
+        }
+
+        const candidates = await findHighProbabilityCandidatesForUser(uid, playerData, nowMs);
+        if (!candidates.length) {
+          skippedNoCandidate += 1;
+          continue;
+        }
+
+        const created = await createHighProbabilityMatchAlert(uid, candidates, nowMs);
+        if (created) {
+          sentCount += 1;
+          candidates.forEach((candidate) => {
+            createdAlertScores.push(candidate.score);
+            candidate.reasons.forEach((reason) => {
+              scoreReasonCounts.set(reason, (scoreReasonCounts.get(reason) || 0) + 1);
+            });
+          });
+          console.log("[HighProbabilityMatchAlert] notification created", {
+            candidateCount: candidates.length,
+            scores: candidates.map((candidate) => candidate.score),
+            reasons: candidates.flatMap((candidate) => candidate.reasons),
+          });
+        } else {
+          skippedCadence += 1;
+        }
+      } catch (error) {
+        console.error("[HighProbabilityMatchAlert] user failed", {
+          uid,
+          error: String((error as any)?.message || error),
+        });
+      }
+    }
+
+    const topScoreReasonCategories = Array.from(scoreReasonCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, count]) => ({ reason, count }));
+
+    console.log("[HighProbabilityMatchAlert] run complete", {
+      scannedPlayers: playersSnap.size,
+      inactiveUsersChecked: inactivePlayers.length,
+      skippedNoDeviceToken: skippedNoPush,
+      skippedPushDisabled,
+      skippedCadence,
+      skippedNoEligibleCandidate: skippedNoCandidate,
+      alertsCreated: sentCount,
+      createdAlertScores,
+      topScoreReasonCategories,
+    });
+
+    return null;
+  });
+
 interface Court {
   id: string;
   name: string;
@@ -2173,10 +2932,28 @@ if (notifData.type === "message") {
 
     const title = (notifData.title || notifData.message || "🎾 TennisMate").toString();
     const body = (notifData.body || "You have a new notification").toString();
-  const route =
+  let route =
   (typeof notifData.route === "string" && notifData.route)
     ? notifData.route
     : toRoute(notifData.url);
+
+if (
+  (notifData.type === "high_probability_match" ||
+    notifData.type === "high_probability_match_alert") &&
+  route.startsWith("/match") &&
+  !route.includes("notificationId=")
+) {
+  const params = new URLSearchParams();
+  const candidateId =
+    typeof notifData.candidateId === "string"
+      ? notifData.candidateId
+      : typeof notifData.recommendedPlayerId === "string"
+        ? notifData.recommendedPlayerId
+        : "";
+  if (candidateId) params.set("recommendedPlayerId", candidateId);
+  params.set("notificationId", notifId);
+  route = `/match?${params.toString()}`;
+}
 console.log(`[MR_BELL_CONSUMER] push attempt`, {
   at: melNowISO(),
   notifId,

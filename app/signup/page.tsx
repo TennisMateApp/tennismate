@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseConfig";
 import SignupErrorModal from "@/components/SignupErrorModal";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, serverTimestamp, getDoc } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp, getDoc, writeBatch } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import Cropper from "react-easy-crop";
 import getCroppedImg from "../utils/cropImage";
@@ -284,6 +284,8 @@ const handleSubmit = async (e: React.FormEvent) => {
     );
 
     const user = userCredential.user;
+    const uid = user.uid;
+    const authEmail = user.email?.trim().toLowerCase() || email;
 
     // 2) Upload REQUIRED profile photo (FULL + THUMB)
     if (!croppedImage) {
@@ -295,45 +297,16 @@ const handleSubmit = async (e: React.FormEvent) => {
     let photoURL = DEFAULT_AVATAR;
     let photoThumbURL: string | null = null;
 
-    const fullRef = ref(storage, `profile_pictures/${user.uid}/avatar_full.jpg`);
+    const fullRef = ref(storage, `profile_pictures/${uid}/avatar_full.jpg`);
     await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
     photoURL = await getDownloadURL(fullRef);
 
     const thumbFile = await makeAvatarThumb(croppedImage, 160, 0.72);
-    const thumbRef = ref(storage, `profile_pictures/${user.uid}/avatar_thumb.jpg`);
+    const thumbRef = ref(storage, `profile_pictures/${uid}/avatar_thumb.jpg`);
     await uploadBytes(thumbRef, thumbFile, { contentType: "image/jpeg" });
     photoThumbURL = await getDownloadURL(thumbRef);
 
-    // 3) users/{uid} - create once, keep createdAt forever
-    const userRef = doc(db, "users", user.uid);
-    const userSnap = await getDoc(userRef);
-
-    if (!userSnap.exists()) {
-      await setDoc(userRef, {
-        name: formData.name,
-        email,
-        photoURL,
-        photoThumbURL,
-        requireVerification: true,
-        createdAt: serverTimestamp(),
-      });
-    } else {
-      await setDoc(
-        userRef,
-        {
-          name: formData.name,
-          email,
-          photoURL,
-          photoThumbURL,
-          requireVerification: true,
-        },
-        { merge: true }
-      );
-    }
-
-    // 4) Read users.createdAt back so it becomes source of truth for players.createdAt
-    const freshUserSnap = await getDoc(userRef);
-    const userCreatedAt = freshUserSnap.data()?.createdAt ?? null;
+    const userRef = doc(db, "users", uid);
 
     if (isSupportedRegion) {
       const ratingOrNull = formData.rating === "" ? null : formData.rating;
@@ -359,8 +332,14 @@ const handleSubmit = async (e: React.FormEvent) => {
         console.warn("Postcode lookup failed; continuing without lat/lng/geohash", e);
       }
 
-      const playerRef = doc(db, "players", user.uid);
-      const playerSnap = await getDoc(playerRef);
+      const playerRef = doc(db, "players", uid);
+      const privatePlayerRef = doc(db, "players_private", uid);
+      const [userSnap, playerSnap, privatePlayerSnap] = await Promise.all([
+        getDoc(userRef),
+        getDoc(playerRef),
+        getDoc(privatePlayerRef),
+      ]);
+      const userCreatedAt = userSnap.data()?.createdAt ?? null;
 
       const publicPlayerData = {
         name: formData.name,
@@ -380,7 +359,7 @@ const handleSubmit = async (e: React.FormEvent) => {
       };
 
       const privatePlayerData = {
-        email,
+        email: authEmail,
         postcode: formData.postcode,
         birthYear: formData.birthYear ? Number(formData.birthYear) : null,
         lat,
@@ -389,35 +368,57 @@ const handleSubmit = async (e: React.FormEvent) => {
         updatedAt: serverTimestamp(),
       };
 
-           if (!playerSnap.exists()) {
-        await Promise.all([
-          setDoc(
-            playerRef,
-            {
-              ...publicPlayerData,
-              createdAt: userCreatedAt || serverTimestamp(),
-            },
-            { merge: true }
-          ),
-          setDoc(
-            doc(db, "players_private", user.uid),
-            {
-              ...privatePlayerData,
-              createdAt: userCreatedAt || serverTimestamp(),
-            },
-            { merge: true }
-          ),
-        ]);
-      } else {
-        await Promise.all([
-          setDoc(playerRef, publicPlayerData, { merge: true }),
-          setDoc(doc(db, "players_private", user.uid), privatePlayerData, { merge: true }),
-        ]);
+      try {
+        const batch = writeBatch(db);
+        const createdAt = userCreatedAt || serverTimestamp();
+
+        batch.set(
+          userRef,
+          {
+            name: formData.name,
+            email: authEmail,
+            photoURL,
+            photoThumbURL,
+            requireVerification: true,
+            ...(userSnap.exists() ? {} : { createdAt }),
+          },
+          { merge: true }
+        );
+
+        batch.set(
+          playerRef,
+          {
+            ...publicPlayerData,
+            ...(playerSnap.exists() ? {} : { createdAt }),
+          },
+          { merge: true }
+        );
+
+        batch.set(
+          privatePlayerRef,
+          {
+            ...privatePlayerData,
+            ...(privatePlayerSnap.exists() ? {} : { createdAt }),
+          },
+          { merge: true }
+        );
+
+        await batch.commit();
+      } catch (writeError) {
+        console.error("[Signup] Failed to create profile documents after Auth signup", {
+          uid,
+          email: authEmail,
+          writeError,
+        });
+        setStatus(
+          "Your account was created, but we could not finish your TennisMate profile. Please contact support before continuing."
+        );
+        return;
       }
 
       trackEvent("signup_completed", {
-        userId: user.uid,
-        email,
+        userId: uid,
+        email: authEmail,
         postcode: formData.postcode,
         skillBand: skillBandValue,
         hasRating: ratingOrNull !== null,
@@ -429,17 +430,26 @@ const handleSubmit = async (e: React.FormEvent) => {
       router.replace("/verify-email");
       return;
         } else {
-      await setDoc(doc(db, "waitlist_users", user.uid), {
+      await setDoc(doc(db, "users", uid), {
         name: formData.name,
-        email,
+        email: authEmail,
+        photoURL,
+        photoThumbURL,
+        requireVerification: true,
+        createdAt: serverTimestamp(),
+      }, { merge: true });
+
+      await setDoc(doc(db, "waitlist_users", uid), {
+        name: formData.name,
+        email: authEmail,
         postcode: formData.postcode,
         timestamp: serverTimestamp(),
         source: "signupForm",
       });
 
       trackEvent("signup_completed", {
-        userId: user.uid,
-        email,
+        userId: uid,
+        email: authEmail,
         postcode: formData.postcode,
         skillBand: formData.skillBand || null,
         hasRating: formData.rating !== "",

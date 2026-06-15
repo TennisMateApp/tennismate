@@ -600,6 +600,18 @@ const getLatLngForPostcode = async (postcode: string): Promise<{ lat: number; ln
 
 const saveProfile = async (): Promise<boolean> => {
   if (!user) return false;
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser) {
+    setStatus("Please sign in again before saving your profile.");
+    return false;
+  }
+  if (currentAuthUser.uid !== user.uid) {
+    setStatus("Your session changed. Please refresh and sign in again before saving.");
+    return false;
+  }
+
+  const uid = currentAuthUser.uid;
+  const email = currentAuthUser.email || "";
 
   // Require a profile photo to save
 if (!hasPhoto) {
@@ -692,14 +704,14 @@ let photoURL = formData.photoURL;
 let photoThumbURL = formData.photoThumbURL || formData.photoURL;
 
 if (croppedImage) {
-  const fullRef = ref(storage, PROFILE_FULL_PATH(user.uid));
-  const thumbRef = ref(storage, PROFILE_THUMB_PATH(user.uid));
+  const fullRef = ref(storage, PROFILE_FULL_PATH(uid));
+  const thumbRef = ref(storage, PROFILE_THUMB_PATH(uid));
   await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
   await uploadBytes(thumbRef, croppedImage, { contentType: "image/jpeg" });
   const cacheBustVersion = Date.now();
   photoURL = withPhotoCacheBust(await getDownloadURL(fullRef), cacheBustVersion);
   photoThumbURL = withPhotoCacheBust(await getDownloadURL(thumbRef), cacheBustVersion);
-  await cleanupLegacyProfilePhotos(storage, user.uid);
+  await cleanupLegacyProfilePhotos(storage, uid);
 }
 
 const badges = Array.isArray(formData.badges) ? formData.badges : [];
@@ -725,7 +737,7 @@ const playerPayload = {
 };
 
 const privatePlayerPayload = {
-  email: user.email || "",
+  email,
   postcode: newPostcode,
   birthYear: formData.birthYear === "" ? null : formData.birthYear,
   ...(postcodeChanged ? { lat: nextLat, lng: nextLng, geohash: nextGeohash } : {}),
@@ -741,9 +753,9 @@ const userPayload = {
 };
 
 await Promise.all([
-  logFirestoreCall(`setDoc players/${user.uid} profile merge`, () =>
+  logFirestoreCall(`setDoc players/${uid} profile merge`, () =>
     setDoc(
-      doc(db, "players", user.uid),
+      doc(db, "players", uid),
       {
         ...playerPayload,
         avatar: photoThumbURL || photoURL || null,
@@ -752,11 +764,11 @@ await Promise.all([
       { merge: true }
     )
   ),
-  logFirestoreCall(`setDoc players_private/${user.uid} profile merge`, () =>
-    setDoc(doc(db, "players_private", user.uid), privatePlayerPayload, { merge: true })
+  logFirestoreCall(`setDoc players_private/${uid} profile merge`, () =>
+    setDoc(doc(db, "players_private", uid), privatePlayerPayload, { merge: true })
   ),
-  logFirestoreCall(`setDoc users/${user.uid} profile merge`, () =>
-    setDoc(doc(db, "users", user.uid), userPayload, { merge: true })
+  logFirestoreCall(`setDoc users/${uid} profile merge`, () =>
+    setDoc(doc(db, "users", uid), userPayload, { merge: true })
   ),
 ]);
 
