@@ -56,7 +56,10 @@ service cloud.firestore {
         "lastInteraction",
         "refs",
         "relationshipRefPath",
-        "playerSnapshots"
+        "playerSnapshots",
+        "chatHiddenFor",
+        "matchConnectionHiddenFor",
+        "matchConnectionDeletedFor"
       ];
     }
 
@@ -65,6 +68,24 @@ service cloud.firestore {
         && request.resource.data.players == resource.data.players
         && request.resource.data.playerAId == resource.data.playerAId
         && request.resource.data.playerBId == resource.data.playerBId;
+    }
+
+    function relationshipOtherPlayerId() {
+      return resource.data.playerAId == request.auth.uid
+        ? resource.data.playerBId
+        : resource.data.playerAId;
+    }
+
+    function relationshipVisibilityMapSafe(fieldName) {
+      return request.resource.data.get(fieldName, {}).keys().hasOnly(resource.data.players)
+        && request.resource.data.get(fieldName, {}).get(relationshipOtherPlayerId(), null)
+          == resource.data.get(fieldName, {}).get(relationshipOtherPlayerId(), null);
+    }
+
+    function relationshipVisibilityFieldsSafe() {
+      return relationshipVisibilityMapSafe("chatHiddenFor")
+        && relationshipVisibilityMapSafe("matchConnectionHiddenFor")
+        && relationshipVisibilityMapSafe("matchConnectionDeletedFor");
     }
 
     function isConversationParticipant() {
@@ -186,6 +207,22 @@ service cloud.firestore {
         allow read, create, update, delete: if isSelf(uid)
           && dismissedPlayerId != uid;
       }
+
+      match /match_recommendation_impressions/{candidateId} {
+        allow read: if isSelf(uid);
+        allow create, update: if isSelf(uid)
+          && candidateId != uid
+          && request.resource.data.candidateId == candidateId
+          && request.resource.data.keys().hasOnly([
+            "candidateId",
+            "firstSeenAt",
+            "lastSeenAt",
+            "timesShown",
+            "lastBaseScore",
+            "lastFinalScore"
+          ]);
+        allow delete: if false;
+      }
     }
 
     match /players/{uid} {
@@ -226,6 +263,7 @@ service cloud.firestore {
       allow update: if relationshipParticipant(resource.data)
         && relationshipPlayersValid(request.resource.data)
         && relationshipIdentityUnchanged()
+        && relationshipVisibilityFieldsSafe()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(relationshipAllowedKeys());
 
       allow delete: if false;

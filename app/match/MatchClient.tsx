@@ -13,6 +13,8 @@ import {
   addDoc,
   setDoc,
   serverTimestamp,
+  writeBatch,
+  increment,
   query,
   where,
   updateDoc,
@@ -73,6 +75,10 @@ interface Player {
   timestamp?: any;
   lastActiveAt?: any;
   score?: number;
+  baseScore?: number;
+  finalScore?: number;
+  freshnessAdjustment?: number;
+  activityAdjustment?: number;
   distance?: number;
   lat?: number | null;
   lng?: number | null;
@@ -82,7 +88,32 @@ type ScoredPlayer = Player & {
   score: number;
   distance: number;
   skillBand: SkillBand | "";
+  baseScore?: number;
+  finalScore?: number;
+  freshnessAdjustment?: number;
+  activityAdjustment?: number;
 };
+
+type MatchRecommendationImpression = {
+  candidateId: string;
+  lastSeenAt?: Timestamp | Date | string | number | null;
+  timesShown?: number | null;
+  firstSeenAt?: Timestamp | Date | string | number | null;
+  lastBaseScore?: number | null;
+  lastFinalScore?: number | null;
+};
+
+const MATCH_RECOMMENDATION_IMPRESSIONS_COLLECTION = "match_recommendation_impressions";
+const DAY_MS = 24 * 60 * 60 * 1000;
+const PROTECTED_RELEVANCE_COUNT = 2;
+const TOP_RECENT_ACTIVITY_GUARD_COUNT = 20;
+const RECOMMENDATION_SCORE_SCALE = 5;
+const CLOSE_SCORE_ROTATION_THRESHOLD = 15;
+const RECOMMENDATION_BANDS = [
+  { key: "excellent", min: 80 },
+  { key: "good", min: 60 },
+  { key: "possible", min: 40 },
+] as const;
 
 type RecommendedMatchPlayer = Player & {
   recommendationReasons: string[];
@@ -271,7 +302,18 @@ if (mins < 30) return { label: `ACTIVE ${mins}M AGO`, level: "hot" };
 type ActivityLevel = "online" | "recent" | "inactive";
 
 const getActivityLevel = (ts: any): ActivityLevel => {
-  if (!ts) return "inactive";
+  const days = getDaysSinceActive(ts);
+  if (days == null) return "inactive";
+
+  const mins = days * 24 * 60;
+
+  if (mins <= 5) return "online";
+  if (days <= 14) return "recent";
+  return "inactive";
+};
+
+const getDaysSinceActive = (ts: any): number | null => {
+  if (!ts) return null;
 
   const d: Date =
     typeof ts?.toDate === "function"
@@ -281,14 +323,24 @@ const getActivityLevel = (ts: any): ActivityLevel => {
       : new Date(ts);
 
   const diffMs = Date.now() - d.getTime();
-  if (!Number.isFinite(diffMs) || diffMs < 0) return "inactive";
+  if (!Number.isFinite(diffMs) || diffMs < 0) return null;
 
-  const mins = diffMs / 60000;
-  const days = mins / (60 * 24);
+  return diffMs / DAY_MS;
+};
 
-  if (mins <= 5) return "online";
-  if (days <= 14) return "recent";
-  return "inactive";
+const activityFreshnessPenalty = (ts: any): number => {
+  const days = getDaysSinceActive(ts);
+  if (days == null) return -35;
+  if (days <= 7) return 3;
+  if (days <= 14) return -5;
+  if (days <= 30) return -18;
+  if (days <= 90) return -35;
+  return -60;
+};
+
+const isRecentlyActiveCandidate = (player: Player): boolean => {
+  const days = getDaysSinceActive(player.lastActiveAt);
+  return days != null && days <= 14;
 };
 
 const activityPoints = (ts: any): number => {
@@ -648,6 +700,9 @@ const [hideContacted, setHideContacted] = useState(true);
 const [refreshing, setRefreshing] = useState(false);
 const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 const [dismissedPlayerIds, setDismissedPlayerIds] = useState<Set<string>>(new Set());
+const [recommendationImpressions, setRecommendationImpressions] = useState<Record<string, MatchRecommendationImpression>>({});
+const recommendationImpressionWriteRef = useRef<Set<string>>(new Set());
+const recommendationRotationSeedRef = useRef(`${Date.now()}-${Math.random()}`);
 
 
 const REFRESH_MIN_MS = 2 * 60 * 1000; // 2 minutes
@@ -945,6 +1000,44 @@ useEffect(() => {
   );
 
   return () => unsubDismissed();
+}, [user?.uid]);
+
+useEffect(() => {
+  recommendationImpressionWriteRef.current.clear();
+
+  if (!user?.uid) {
+    setRecommendationImpressions({});
+    return;
+  }
+
+  let cancelled = false;
+  const impressionsRef = collection(
+    db,
+    "users",
+    user.uid,
+    MATCH_RECOMMENDATION_IMPRESSIONS_COLLECTION
+  );
+  getDocs(impressionsRef)
+    .then((snap) => {
+      if (cancelled) return;
+      const next: Record<string, MatchRecommendationImpression> = {};
+      snap.docs.forEach((docSnap) => {
+        const data = docSnap.data() as MatchRecommendationImpression;
+        next[docSnap.id] = {
+          ...data,
+          candidateId: data.candidateId || docSnap.id,
+        };
+      });
+      setRecommendationImpressions(next);
+    })
+    .catch((error) => {
+      if (cancelled) return;
+      console.error("[MatchPage] failed to load recommendation impressions", error);
+    });
+
+  return () => {
+    cancelled = true;
+  };
 }, [user?.uid]);
 
 useEffect(() => {
@@ -1654,6 +1747,98 @@ const uidOf = (p: any): string | null => {
 
 const resolveRecipientUid = (target: Player | string): string | null => {
   return uidOf(target);
+};
+
+const toMillisSafe = (value: unknown): number | null => {
+  if (!value) return null;
+  if (value instanceof Timestamp) return value.toMillis();
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (typeof value === "object" && typeof (value as { toDate?: unknown }).toDate === "function") {
+    const date = (value as { toDate: () => Date }).toDate();
+    return Number.isFinite(date.getTime()) ? date.getTime() : null;
+  }
+  return null;
+};
+
+const getFreshnessAdjustment = (
+  impression: MatchRecommendationImpression | undefined,
+  nowMs: number
+) => {
+  if (!impression) return 8;
+
+  const lastSeenMs = toMillisSafe(impression.lastSeenAt);
+  const timesShown = typeof impression.timesShown === "number" ? impression.timesShown : 0;
+  if (!lastSeenMs) return 8;
+
+  const ageMs = nowMs - lastSeenMs;
+  let adjustment = 0;
+
+  if (ageMs <= DAY_MS) {
+    adjustment -= 25;
+  } else if (ageMs <= 7 * DAY_MS) {
+    adjustment -= 10;
+  }
+
+  if (timesShown >= 3 && ageMs <= 14 * DAY_MS) {
+    adjustment -= 15;
+  }
+
+  return adjustment;
+};
+
+const candidateUidFromPlayer = (player: Player): string => {
+  const uid = (player as Player & { uid?: unknown }).uid;
+
+  return (
+    (typeof player.userId === "string" && player.userId.trim()) ||
+    (typeof uid === "string" && uid.trim()) ||
+    player.id
+  );
+};
+
+const seededRotationValue = (seed: string, value: string): number => {
+  let hash = 2166136261;
+  const input = `${seed}:${value}`;
+
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0) / 4294967295;
+};
+
+const getRecommendationBandIndex = (score: number): number => {
+  const bandIndex = RECOMMENDATION_BANDS.findIndex((band) => score >= band.min);
+  return bandIndex === -1 ? RECOMMENDATION_BANDS.length : bandIndex;
+};
+
+const withFreshnessScore = (
+  player: Player,
+  impressions: Record<string, MatchRecommendationImpression>,
+  nowMs: number
+): ScoredPlayer => {
+  const candidateUid = candidateUidFromPlayer(player);
+  const baseScore = player.score ?? 0;
+  const freshnessAdjustment = getFreshnessAdjustment(impressions[candidateUid], nowMs);
+  const activityAdjustment = activityFreshnessPenalty(player.lastActiveAt);
+  const normalizedBaseScore = baseScore * RECOMMENDATION_SCORE_SCALE;
+
+  return {
+    ...player,
+    score: baseScore,
+    baseScore,
+    finalScore: normalizedBaseScore + freshnessAdjustment + activityAdjustment,
+    freshnessAdjustment,
+    activityAdjustment,
+    distance: typeof player.distance === "number" ? player.distance : Infinity,
+    skillBand: player.skillBand || "",
+  };
 };
 
 const HIGH_PROBABILITY_BLOCKING_STATUSES = new Set([
@@ -2382,16 +2567,78 @@ const filteredMatches = useMemo(() => {
 const sortedMatches = useMemo(() => {
   if (!myProfile) return filteredMatches;
 
+  const byDistanceAsc = (a: Player, b: Player) => {
+    const da = typeof a.distance === "number" ? a.distance! : Infinity;
+    const db = typeof b.distance === "number" ? b.distance! : Infinity;
+    return da - db;
+  };
+
+  const byBaseScore = (a: Player, b: Player) => {
+    const diff = (b.score ?? 0) - (a.score ?? 0);
+    if (diff !== 0) return diff;
+    return byDistanceAsc(a, b);
+  };
+
+  if (sortBy === "score") {
+    const nowMs = Date.now();
+    const byRelevance = [...filteredMatches].sort(byBaseScore);
+    const recentByRelevance = byRelevance.filter(isRecentlyActiveCandidate);
+    const protectedSource = recentByRelevance.length > 0 ? recentByRelevance : byRelevance;
+    const protectedMatches = byRelevance
+      .filter((match) =>
+        protectedSource
+          .slice(0, PROTECTED_RELEVANCE_COUNT)
+          .some((protectedMatch) => candidateUidFromPlayer(protectedMatch) === candidateUidFromPlayer(match))
+      )
+      .map((match) => withFreshnessScore(match, recommendationImpressions, nowMs));
+    const protectedIds = new Set(protectedMatches.map(candidateUidFromPlayer));
+    const scoredRotatingMatches = byRelevance
+      .filter((match) => !protectedIds.has(candidateUidFromPlayer(match)))
+      .map((match) => withFreshnessScore(match, recommendationImpressions, nowMs));
+    const bandedMatches: ScoredPlayer[][] = Array.from(
+      { length: RECOMMENDATION_BANDS.length + 1 },
+      () => []
+    );
+
+    scoredRotatingMatches.forEach((match) => {
+      bandedMatches[getRecommendationBandIndex(match.finalScore ?? 0)].push(match);
+    });
+
+    const rotatingMatches = bandedMatches.flatMap((band) =>
+      band.sort((a, b) => {
+        const finalDiff = (b.finalScore ?? 0) - (a.finalScore ?? 0);
+        if (Math.abs(finalDiff) > CLOSE_SCORE_ROTATION_THRESHOLD) return finalDiff;
+
+        const aRotation = seededRotationValue(
+          recommendationRotationSeedRef.current,
+          candidateUidFromPlayer(a)
+        );
+        const bRotation = seededRotationValue(
+          recommendationRotationSeedRef.current,
+          candidateUidFromPlayer(b)
+        );
+        if (aRotation !== bRotation) return aRotation - bRotation;
+
+        return byBaseScore(a, b);
+      })
+    );
+    const recentRotatingMatches = rotatingMatches.filter(isRecentlyActiveCandidate);
+    const inactiveRotatingMatches = rotatingMatches.filter((match) => !isRecentlyActiveCandidate(match));
+    const recentPriorityMatches = [...protectedMatches, ...recentRotatingMatches];
+    const guardedRecentMatches = recentPriorityMatches.slice(0, TOP_RECENT_ACTIVITY_GUARD_COUNT);
+    const remainingRecentMatches = recentPriorityMatches.slice(TOP_RECENT_ACTIVITY_GUARD_COUNT);
+
+    return [...guardedRecentMatches, ...remainingRecentMatches, ...inactiveRotatingMatches];
+  }
+
   return [...filteredMatches].sort((a, b) => {
-   if (sortBy === "distance_desc") {
+    if (sortBy === "distance_desc") {
   const da = typeof a.distance === "number" ? a.distance! : -Infinity;
   const db = typeof b.distance === "number" ? b.distance! : -Infinity;
   return db - da; // farthest first
 }
   if (sortBy === "distance") {
-    const da = typeof a.distance === "number" ? a.distance! : Infinity;
-    const db = typeof b.distance === "number" ? b.distance! : Infinity;
-    return da - db; // closest first
+    return byDistanceAsc(a, b); // closest first
   }
 
 
@@ -2431,17 +2678,70 @@ const utrGap = (p: Player) => utrDelta(meRating, (p.skillRating ?? p.utr) ?? nul
     }
 
     // default: best match score, tie-breaker: distance
-    const diff = (b.score ?? 0) - (a.score ?? 0);
-    if (diff !== 0) return diff;
-    const da = typeof a.distance === "number" ? a.distance! : Infinity;
-    const db = typeof b.distance === "number" ? b.distance! : Infinity;
-    return da - db;
+    return byBaseScore(a, b);
   });
-}, [filteredMatches, sortBy, myProfile]);
+}, [filteredMatches, sortBy, myProfile, recommendationImpressions]);
 const visibleMatches = useMemo(
   () => sortedMatches.slice(0, visibleCount),
   [sortedMatches, visibleCount]
 );
+
+useEffect(() => {
+  if (!user?.uid || visibleMatches.length === 0) return;
+
+  const visibleImpressions = visibleMatches
+    .map((match) => {
+      const candidateId = candidateUidFromPlayer(match);
+      return {
+        candidateId,
+        baseScore: match.baseScore ?? match.score ?? 0,
+        finalScore: match.finalScore ?? match.score ?? 0,
+      };
+    })
+    .filter(({ candidateId }) => {
+      if (!candidateId || candidateId === user.uid) return false;
+      if (recommendationImpressionWriteRef.current.has(candidateId)) return false;
+      return true;
+    });
+
+  if (visibleImpressions.length === 0) return;
+
+  visibleImpressions.forEach(({ candidateId }) => {
+    recommendationImpressionWriteRef.current.add(candidateId);
+  });
+
+  const batch = writeBatch(db);
+  visibleImpressions.forEach(({ candidateId, baseScore, finalScore }) => {
+    const impressionRef = doc(
+      db,
+      "users",
+      user.uid,
+      MATCH_RECOMMENDATION_IMPRESSIONS_COLLECTION,
+      candidateId
+    );
+    const existing = recommendationImpressions[candidateId];
+    const payload: Record<string, unknown> = {
+      candidateId,
+      lastSeenAt: serverTimestamp(),
+      timesShown: increment(1),
+      lastBaseScore: baseScore,
+      lastFinalScore: finalScore,
+    };
+
+    if (!existing?.firstSeenAt) {
+      payload.firstSeenAt = serverTimestamp();
+    }
+
+    batch.set(impressionRef, payload, { merge: true });
+  });
+
+  batch.commit().catch((error) => {
+    visibleImpressions.forEach(({ candidateId }) => {
+      recommendationImpressionWriteRef.current.delete(candidateId);
+    });
+    console.error("[MatchPage] failed to write recommendation impressions", error);
+  });
+}, [user?.uid, visibleMatches, recommendationImpressions]);
 
 const activeAvailability = useMemo(() => {
   if (!activeAvailabilityRecord) return null;

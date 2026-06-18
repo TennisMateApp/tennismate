@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { db, auth } from "@/lib/firebaseConfig";
 import {
   collection,
@@ -48,7 +49,15 @@ function safeSnippet(text?: string) {
 }
 
 
-function MessagesHome() {
+type MessagesHomeProps = {
+  selectedConversationId?: string | null;
+  activeThread?: ReactNode;
+};
+
+export function MessagesDesktopShell({
+  selectedConversationId = null,
+  activeThread = null,
+}: MessagesHomeProps) {
   
   const [conversations, setConversations] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
@@ -139,6 +148,7 @@ try {
           convoSnap.docs.map(async (docSnap) => {
             const convoData = docSnap.data() as any;
             const convoId = docSnap.id;
+            if (convoData.hiddenFor?.[u.uid]) return null;
 
             // Detect event chats
             const ctx = convoData.context || {};
@@ -199,12 +209,13 @@ try {
             };
           })
         );
+        const visibleBases = bases.filter(Boolean) as any[];
 
         // ---------- Seed/merge with previous (prevents flicker) ----------
         setConversations((prev) => {
           const prevById = new Map(prev.map((c) => [c.id, c]));
 
-          const seeded = bases.map((b) => {
+          const seeded = visibleBases.map((b) => {
             const prevRow = prevById.get(b.id);
             const latestMessage = prevRow?.latestMessage || null;
 
@@ -260,7 +271,7 @@ try {
         setLoading(false);
 
         // ---------- Sync per-convo "latest message" listeners ----------
-        const liveIds = new Set(bases.map((b) => b.id));
+        const liveIds = new Set(visibleBases.map((b) => b.id));
 
         // Remove old listeners
         Object.keys(msgUnsubsRef.current).forEach((id) => {
@@ -271,7 +282,7 @@ try {
         });
 
         // Add listeners for current convos
-        for (const b of bases) {
+        for (const b of visibleBases) {
           if (msgUnsubsRef.current[b.id]) continue;
 
           msgUnsubsRef.current[b.id] = onSnapshot(
@@ -367,7 +378,7 @@ try {
 
 return (
   <div
-    className="min-h-screen bg-white"
+    className="min-h-screen bg-white lg:h-full lg:min-h-0"
     onClick={() => openSwipeId && setOpenSwipeId(null)}
   >
     {/* =========================
@@ -379,10 +390,10 @@ return (
 {/* =========================
     DESKTOP (md and up)
     ========================= */}
-<div className="hidden md:block">
-  <div className="min-h-screen" style={{ background: "#F7FAF8" }}>
-    <div className="w-full px-8 2xl:px-12 py-8">
-      <div className="grid gap-8 2xl:gap-10 xl:grid-cols-[300px_1fr]">
+<div className="hidden lg:block">
+  <div className="h-screen min-h-0 overflow-hidden" style={{ background: "#F7FAF8" }}>
+    <div className="h-full w-full px-6 py-6 2xl:px-10">
+      <div className="grid h-full min-h-0 grid-cols-[300px_minmax(360px,420px)_minmax(0,1fr)] gap-6">
         {/* Sidebar (same as Home) */}
         <TMDesktopSidebar
           active="Chat"
@@ -396,8 +407,8 @@ return (
         />
 
         {/* Main */}
-        <main className="min-w-0">
-          <div className="mt-2">
+        <main className="min-h-0 min-w-0 overflow-y-auto">
+          <div>
             {/* Top bar */}
             <div className="flex items-center gap-3">
               <button
@@ -467,12 +478,15 @@ return (
                 <ul className="divide-y divide-gray-200">
                   {filteredConversations.map((convo) => {
                     const ring = convo.isUnread ? "ring-green-500" : "ring-transparent";
+                    const selected = convo.id === selectedConversationId;
 
                     return (
                       <li key={convo.id}>
-                        <button
-                          className="w-full px-5 py-4 text-left hover:bg-gray-50 flex items-center gap-4"
-                          onClick={() => router.push(`/messages/${convo.id}`)}
+                        <Link
+                          href={`/messages/${convo.id}`}
+                          className={`w-full px-5 py-4 text-left flex items-center gap-4 ${
+                            selected ? "bg-emerald-50" : "hover:bg-gray-50"
+                          }`}
                         >
                           {/* Avatar */}
                           <div className="relative shrink-0">
@@ -503,7 +517,7 @@ return (
                               <p
                                 className={`truncate text-sm ${
                                   convo.isUnread ? "font-extrabold" : "font-semibold"
-                                } text-gray-900`}
+                                } ${selected ? "text-emerald-950" : "text-gray-900"}`}
                               >
                                 {convo.displayName}
                               </p>
@@ -519,7 +533,7 @@ return (
                               {safeSnippet(convo.latestMessage?.text)}
                             </p>
                           </div>
-                        </button>
+                        </Link>
                       </li>
                     );
                   })}
@@ -528,6 +542,22 @@ return (
             </div>
           </div>
         </main>
+        <section className="min-h-0 min-w-0">
+          <div className="mx-auto h-full min-h-0 max-w-[980px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+            {activeThread ? (
+              activeThread
+            ) : (
+              <div className="flex h-full items-center justify-center px-6 text-center">
+                <div>
+                  <div className="text-xl font-black text-gray-900">Select a conversation</div>
+                  <div className="mt-2 text-sm font-semibold text-gray-500">
+                    Choose a chat from the list to open Match Hub.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -537,7 +567,7 @@ return (
     {/* =========================
         MOBILE (below md)
         ========================= */}
-    <div className="md:hidden w-full pt-4 pb-28">
+    <div className="lg:hidden w-full pt-4 pb-28">
       {/* Paste your existing MOBILE UI here */}
 
       {/* Top bar */}
@@ -683,4 +713,4 @@ return (
 
 }
 
-export default withAuth(MessagesHome);
+export default withAuth(MessagesDesktopShell);

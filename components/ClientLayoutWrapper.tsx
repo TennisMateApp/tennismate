@@ -405,6 +405,7 @@ unsubPlayer = onSnapshot(playerRef, async (docSnap) => {
           const unreadList: any[] = [];
           for (const docSnap of snap.docs) {
             const data = docSnap.data() as any;
+            if (data.hiddenFor?.[u.uid]) continue;
            const lastSeen = data.lastRead?.[u.uid];
 const latest = data.latestMessage?.timestamp;
 

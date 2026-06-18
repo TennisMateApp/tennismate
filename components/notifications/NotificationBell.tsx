@@ -33,6 +33,8 @@ type Notification = {
   conversationId?: string;
   eventId?: string;
   inviteId?: string;
+  candidateId?: string;
+  recommendedPlayerId?: string;
 
   // routing
   route?: string; // e.g. "/invites/abc"
@@ -226,6 +228,15 @@ export default function NotificationBell() {
   const t = (n.type || "").toLowerCase();
   const title = (n.title || "").toLowerCase();
   const body = (n.body || n.message || "").toLowerCase();
+
+  if (t === "high_probability_match" || t === "high_probability_match_alert") {
+    const candidateId = n.candidateId || n.recommendedPlayerId || "";
+    const query = new URLSearchParams();
+    if (candidateId) query.set("recommendedPlayerId", candidateId);
+    query.set("notificationId", n.id);
+    const qs = query.toString();
+    return qs ? `/match?${qs}` : "/match";
+  }
 
   // 🎾 Match check-in notification
 if (t === "match_check_in" && n.conversationId) {

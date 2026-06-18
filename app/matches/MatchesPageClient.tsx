@@ -43,7 +43,7 @@ import { track } from "@/lib/track";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import DesktopMatches from "@/components/matches/DesktopMatches";
 import { trackEvent } from "@/lib/mixpanel";
-import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
+import { createMatchRequestWithRelationship, getPairId } from "@/lib/playerRelationships";
 
 
 // --- Helpers ---
@@ -115,6 +115,15 @@ type Match = {
   acceptedAt?: any;
   started?: boolean;
   startedAt?: any;
+  hiddenFor?: Record<string, any>;
+  deletedFor?: Record<string, any>;
+};
+
+type DeleteMatchTarget = {
+  match: Match;
+  mode: "request" | "accepted";
+  otherName: string;
+  otherUserId: string;
 };
 
 type HistoryMatch = {
@@ -230,6 +239,7 @@ const historyMatchTime = (history: HistoryMatch) =>
   toDateOrNull(history.completedAt)?.getTime() ??
   toDateOrNull(history.playedDate)?.getTime() ??
   toDateOrNull(history.updatedAt)?.getTime() ??
+  toDateOrNull(history.createdAt)?.getTime() ??
   0;
 
 const getHistoryOpponentId = (history: HistoryMatch, currentUserId: string) => {
@@ -276,7 +286,13 @@ const historyDocToMatch = (docSnap: QuerySnapshot<DocumentData>["docs"][number])
     winnerId: d.winnerId ?? null,
     score: d.score ?? null,
     status: d.status ?? null,
-    completed: d.completed === true || d.status === "completed",
+    completed:
+      d.completed === true ||
+      d.status === "completed" ||
+      !!d.winnerId ||
+      !!d.score ||
+      !!d.completedAt ||
+      !!d.playedDate,
     createdAt: d.createdAt ?? null,
     completedAt: d.completedAt ?? null,
     updatedAt: d.updatedAt ?? null,
@@ -512,6 +528,10 @@ const [chatPrompt, setChatPrompt] = useState<{
   otherUserId: string;
   otherName: string;
 } | null>(null);
+const [deleteTarget, setDeleteTarget] = useState<DeleteMatchTarget | null>(null);
+const [deleteBusy, setDeleteBusy] = useState(false);
+const [deleteError, setDeleteError] = useState<string | null>(null);
+const [successToast, setSuccessToast] = useState<string | null>(null);
 
 const [profileOverlayUserId, setProfileOverlayUserId] = useState<string | null>(null);
 
@@ -932,6 +952,8 @@ const toMatch = (d: DocumentData, id: string): Match => ({
   acceptedAt: d.acceptedAt ?? null,
   started: d.started,
   startedAt: d.startedAt,
+  hiddenFor: d.hiddenFor ?? null,
+  deletedFor: d.deletedFor ?? null,
 });
 
   const proc = (snap: QuerySnapshot<DocumentData>) => {
@@ -949,7 +971,22 @@ const toMatch = (d: DocumentData, id: string): Match => ({
       }
 
       // added or modified
-      const m = toMatch(chg.doc.data(), id);
+      const data = chg.doc.data();
+      if (
+        data.hiddenFor?.[currentUserId] ||
+        data.deletedFor?.[currentUserId] ||
+        data.status === "cancelled" ||
+        data.status === "declined"
+      ) {
+        if (state[id]) {
+          delete state[id];
+          changed = true;
+        }
+        setMatches((prev) => prev.filter((m) => m.id !== id));
+        return;
+      }
+
+      const m = toMatch(data, id);
       const prev = state[id];
       if (!prev || JSON.stringify(prev) !== JSON.stringify(m)) {
         state[id] = m;
@@ -1006,35 +1043,63 @@ useEffect(() => {
 
   setHistoryLoading(true);
 
-  const historyQ = query(
-    collection(db, "match_history"),
-    where("players", "array-contains", currentUserId)
-  );
+  const sourceRows = new Map<string, HistoryMatch[]>();
+  const settledSources = new Set<string>();
 
-  const unsubHistory = onSnapshot(
-    historyQ,
-    (snap) => {
-      const next = snap.docs
-        .map(historyDocToMatch)
-        .filter((m) => m.completed)
-        .sort((a, b) => historyMatchTime(b) - historyMatchTime(a));
+  const publishHistory = () => {
+    const byId = new Map<string, HistoryMatch>();
+    sourceRows.forEach((rows) => {
+      rows.forEach((row) => byId.set(row.id, row));
+    });
 
-      setHistoryMatches(next);
-      setHistoryLoading(false);
+    const next = Array.from(byId.values())
+      .filter((m) => m.completed)
+      .sort((a, b) => historyMatchTime(b) - historyMatchTime(a));
+
+    setHistoryMatches(next);
+    setHistoryLoading(settledSources.size < 3);
+  };
+
+  const subscriptions = [
+    {
+      key: "players",
+      query: query(collection(db, "match_history"), where("players", "array-contains", currentUserId)),
+      purpose: "load completed match history by players array",
     },
-    (error) => {
-      console.error("[MatchesPage history] match_history listener failed", {
-        collection: "match_history",
-        currentUserId,
-        queryPurpose: "load completed match history by players array",
-        code: (error as any)?.code,
-        message: (error as any)?.message,
-      });
-      setHistoryLoading(false);
-    }
+    {
+      key: "fromUserId",
+      query: query(collection(db, "match_history"), where("fromUserId", "==", currentUserId)),
+      purpose: "load legacy match history sent by current user",
+    },
+    {
+      key: "toUserId",
+      query: query(collection(db, "match_history"), where("toUserId", "==", currentUserId)),
+      purpose: "load legacy match history received by current user",
+    },
+  ].map(({ key, query: historyQ, purpose }) =>
+    onSnapshot(
+      historyQ,
+      (snap) => {
+        sourceRows.set(key, snap.docs.map(historyDocToMatch));
+        settledSources.add(key);
+        publishHistory();
+      },
+      (error) => {
+        console.error("[MatchesPage history] match_history listener failed", {
+          collection: "match_history",
+          currentUserId,
+          queryPurpose: purpose,
+          code: (error as any)?.code,
+          message: (error as any)?.message,
+        });
+        sourceRows.set(key, []);
+        settledSources.add(key);
+        publishHistory();
+      }
+    )
   );
 
-  return () => unsubHistory();
+  return () => subscriptions.forEach((unsubscribe) => unsubscribe());
 }, [currentUserId, isDesktop]);
 
 // Warm opponent cache so avatars/names are available
@@ -1425,30 +1490,105 @@ const handleRequestRematch = useCallback(async (history: HistoryMatch) => {
   }
 }, [currentUserId, myPlayer?.name, oppCache]);
 
-const deleteMatch = useCallback(async (id: string) => {
-  if (!confirm("Are you sure you want to delete this request?")) return;
-  await deleteDoc(doc(db, "match_requests", id));
-   track("match_request_declined", {
-    match_id: id,
+const deleteMatch = useCallback((match: Match, otherName?: string, otherUserId?: string) => {
+  if (!currentUserId) return;
+  const other = otherUserId || (match.playerId === currentUserId ? match.opponentId : match.playerId);
+  setDeleteError(null);
+  setDeleteTarget({
+    match,
+    mode: "request",
+    otherName: otherName || "this player",
+    otherUserId: other,
   });
-  setMatches((prev) => prev.filter((m) => m.id !== id));
-}, []);
+}, [currentUserId]);
 
 const unmatchMatch = useCallback(
-  async (match: Match, otherName: string, otherUserId: string) => {
+  (match: Match, otherName: string, otherUserId: string) => {
     if (!currentUserId) return;
-
-   const ok = confirm(
-  `Are you sure you want to unmatch with ${otherName}?\n\nThis will remove the match for both of you.`
+    setDeleteError(null);
+    setDeleteTarget({
+      match,
+      mode: "accepted",
+      otherName,
+      otherUserId,
+    });
+  },
+  [currentUserId]
 );
 
-    if (!ok) return;
+const confirmDeleteMatch = useCallback(async () => {
+  if (!currentUserId || !deleteTarget) return;
 
-    // Optimistic: remove immediately
+  const { match, mode, otherName, otherUserId } = deleteTarget;
+  if (match.playerId !== currentUserId && match.opponentId !== currentUserId) {
+    setDeleteError("You can only delete matches you are part of.");
+    return;
+  }
+
+  setDeleteBusy(true);
+  setDeleteError(null);
+
+  try {
+    const matchRequestRef = doc(db, "match_requests", match.id);
+    const requestUpdate =
+      mode === "accepted"
+        ? {
+            [`hiddenFor.${currentUserId}`]: serverTimestamp(),
+            [`deletedFor.${currentUserId}`]: serverTimestamp(),
+            removedBy: currentUserId,
+            removedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }
+        : {
+            status: match.playerId === currentUserId ? "cancelled" : "declined",
+            cancelledBy: currentUserId,
+            cancelledAt: serverTimestamp(),
+            declinedBy: match.opponentId === currentUserId ? currentUserId : null,
+            declinedAt: match.opponentId === currentUserId ? serverTimestamp() : null,
+            updatedAt: serverTimestamp(),
+          };
+
+    console.info("[MatchesPage] match_requests update", {
+      collection: "match_requests",
+      documentId: match.id,
+      operation: "update",
+      uid: currentUserId,
+      fromUserId: match.playerId,
+      toUserId: match.opponentId,
+      status: match.status,
+      mode,
+      updateKeys: Object.keys(requestUpdate),
+    });
+
+    await updateDoc(matchRequestRef, requestUpdate);
     setMatches((prev) => prev.filter((m) => m.id !== match.id));
 
-    try {
-      await deleteDoc(doc(db, "match_requests", match.id));
+    if (mode === "accepted") {
+      const conversationId = [currentUserId, otherUserId].sort().join("_");
+      const conversationRef = doc(db, "conversations", conversationId);
+      const conversationSnap = await getDoc(conversationRef);
+      if (conversationSnap.exists()) {
+        await updateDoc(conversationRef, {
+          [`hiddenFor.${currentUserId}`]: serverTimestamp(),
+          [`matchConnectionHiddenFor.${currentUserId}`]: serverTimestamp(),
+          [`matchConnectionDeletedFor.${currentUserId}`]: serverTimestamp(),
+          matchConnectionDeletedBy: currentUserId,
+          matchConnectionDeletedAt: serverTimestamp(),
+          [`lastRead.${currentUserId}`]: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      const relationshipRef = doc(db, "player_relationships", getPairId(currentUserId, otherUserId));
+      const relationshipSnap = await getDoc(relationshipRef);
+      if (relationshipSnap.exists()) {
+        await updateDoc(relationshipRef, {
+          [`chatHiddenFor.${currentUserId}`]: serverTimestamp(),
+          [`matchConnectionHiddenFor.${currentUserId}`]: serverTimestamp(),
+          [`matchConnectionDeletedFor.${currentUserId}`]: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       track("match_unmatched", {
         match_id: match.id,
@@ -1456,27 +1596,36 @@ const unmatchMatch = useCallback(
         other_user_id: otherUserId,
       });
 
-      // Optional: notify the other person
-      await addDoc(collection(db, "notifications"), {
-        recipientId: otherUserId,
-        toUserId: otherUserId,
-        fromUserId: currentUserId,
-        matchId: match.id,
-        message: `${otherName ? "Match ended." : "A match was ended."}`,
-        timestamp: serverTimestamp(),
-        read: false,
-        type: "match_unmatched",
+      try {
+        await addDoc(collection(db, "notifications"), {
+          recipientId: otherUserId,
+          toUserId: otherUserId,
+          fromUserId: currentUserId,
+          matchId: match.id,
+          message: `${otherName ? "Match ended." : "A match was ended."}`,
+          timestamp: serverTimestamp(),
+          read: false,
+          type: "match_unmatched",
+        });
+      } catch (notificationError) {
+        console.warn("Match removed, but notification failed:", notificationError);
+      }
+    } else {
+      track("match_request_declined", {
+        match_id: match.id,
       });
-    } catch (e) {
-      console.error("Unmatch failed:", e);
-      alert("Could not unmatch right now. Please try again.");
-
-      // Roll back by reloading snapshot state will happen automatically,
-      // but we can also do nothing because onSnapshot will re-add if delete failed.
     }
-  },
-  [currentUserId]
-);
+
+    setDeleteTarget(null);
+    setSuccessToast(mode === "accepted" ? "Match removed." : "Request removed.");
+    window.setTimeout(() => setSuccessToast(null), 2400);
+  } catch (e) {
+    console.error("Delete match failed:", e);
+    setDeleteError("Could not delete this match right now. Please try again.");
+  } finally {
+    setDeleteBusy(false);
+  }
+}, [currentUserId, deleteTarget]);
 
   // Chat logic omitted for brevity
 
@@ -1809,7 +1958,7 @@ return (
     if (isAcceptedStatus(match.status)) {
       unmatchMatch(match, otherName, other);
     } else {
-      deleteMatch(match.id);
+      deleteMatch(match, otherName, other);
     }
   }}
   className="shrink-0 h-10 w-10 rounded-full grid place-items-center bg-gray-100 hover:bg-gray-200 text-gray-700"
@@ -1859,7 +2008,7 @@ return (
 
             <button
               type="button"
-              onClick={() => deleteMatch(match.id)}
+              onClick={() => deleteMatch(match, otherName, other)}
               className="flex-1 rounded-full py-3 text-sm font-extrabold text-gray-700 bg-gray-100"
             >
               Decline
@@ -2317,6 +2466,65 @@ return (
               >
                 <MessageCircle className="h-4 w-4" />
                 Send a message
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {successToast && (
+        <div className="fixed left-1/2 top-5 z-[10001] -translate-x-1/2 rounded-full bg-slate-950 px-4 py-2 text-sm font-bold text-white shadow-xl">
+          {successToast}
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/45 px-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !deleteBusy) {
+              setDeleteTarget(null);
+              setDeleteError(null);
+            }
+          }}
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="mx-auto grid h-11 w-11 place-items-center rounded-full bg-red-100 text-red-600">
+              <Trash2 className="h-5 w-5" />
+            </div>
+            <div className="mt-3 text-center text-lg font-black text-gray-900">
+              Delete Match?
+            </div>
+            <p className="mt-2 text-center text-sm leading-5 text-gray-600">
+              {deleteTarget.mode === "accepted"
+                ? `This will remove your confirmed match with ${deleteTarget.otherName}. Completed match history and scores will be preserved.`
+                : "This will cancel or decline this pending match request. Completed match history and scores will be preserved."}
+            </p>
+            {deleteError && (
+              <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-700">
+                {deleteError}
+              </div>
+            )}
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setDeleteError(null);
+                }}
+                disabled={deleteBusy}
+                className="rounded-xl border px-3 py-3 text-sm font-extrabold text-gray-800 disabled:opacity-50"
+                style={{ borderColor: "rgba(15,23,42,0.12)" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteMatch()}
+                disabled={deleteBusy}
+                className="rounded-xl bg-red-600 px-3 py-3 text-sm font-extrabold text-white disabled:opacity-50"
+              >
+                {deleteBusy ? "Deleting..." : "Delete Match"}
               </button>
             </div>
           </div>

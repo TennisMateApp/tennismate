@@ -44,6 +44,8 @@ type DesktopNotification = {
   matchId?: string | null;
   conversationId?: string | null;
   eventId?: string | null;
+  candidateId?: string | null;
+  recommendedPlayerId?: string | null;
 
     inviteId?: string | null;
   route?: string | null;
@@ -66,6 +68,15 @@ function resolveNotifHref(n: DesktopNotification): string {
   const t = (n.type || "").toLowerCase();
   const title = (n.title || "").toLowerCase();
   const body = ((n.body || n.message || "") as string).toLowerCase();
+
+  if (t === "high_probability_match" || t === "high_probability_match_alert") {
+    const candidateId = n.candidateId || n.recommendedPlayerId || "";
+    const query = new URLSearchParams();
+    if (candidateId) query.set("recommendedPlayerId", candidateId);
+    query.set("notificationId", n.id);
+    const qs = query.toString();
+    return qs ? `/match?${qs}` : "/match";
+  }
 
   // ✅ broaden invite detection (so it works even if type/title differs)
   const looksLikeInvite =
