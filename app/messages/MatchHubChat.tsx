@@ -1056,6 +1056,7 @@ const [lastReadAt, setLastReadAt] = useState<number | null>(null);
 const [showScrollDown, setShowScrollDown] = useState(false);
 const [vvBottomInset, setVvBottomInset] = useState(0);
 const [vvTopInset, setVvTopInset] = useState(0);
+const [mobileViewportHeight, setMobileViewportHeight] = useState<number | null>(null);
 const [inputBarH, setInputBarH] = useState(56); // measured later
 const [inputBarMeasured, setInputBarMeasured] = useState(false);
 
@@ -2067,6 +2068,7 @@ setShowMatchPrompt(
 
     setVvTopInset(topInset);
     setVvBottomInset(bottomInset);
+    setMobileViewportHeight(Math.max(320, vv.height));
   };
 
   computeInset();
@@ -2089,7 +2091,7 @@ setShowMatchPrompt(
   } else if (isNearBottom()) {
     scrollToBottom(false);
   }
-}, [vvBottomInset, inputBarH]);
+}, [vvBottomInset, mobileViewportHeight, inputBarH]);
 
 
   // ===== LOAD PARTICIPANT PROFILES (TOP-LEVEL EFFECT) =====
@@ -3255,7 +3257,14 @@ useEffect(() => {
 
   // ===== RENDER =====
   return (
-   <div className={embeddedDesktop ? "flex h-full min-h-0 flex-col bg-white overflow-hidden" : "flex h-[100svh] flex-col bg-white overflow-hidden"}>
+   <div
+    className={embeddedDesktop ? "flex h-full min-h-0 flex-col bg-white overflow-hidden" : "flex min-h-0 flex-col bg-white overflow-hidden"}
+    style={
+      embeddedDesktop
+        ? undefined
+        : { height: mobileViewportHeight ? `${mobileViewportHeight}px` : "100dvh" }
+    }
+  >
     {/* Header */}
 <div
   className="relative z-20 border-b bg-white px-3"
