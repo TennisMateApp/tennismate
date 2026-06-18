@@ -24,6 +24,7 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import DesktopDirectoryPage from "@/components/directory/DesktopDirectoryPage";
+import { getPlayerPhotoUrl } from "@/lib/profilePhoto";
 
 
 interface Player {
@@ -43,12 +44,6 @@ interface Player {
 
 // ✅ show first 10 like the mock (and load 10 at a time)
 const PAGE_SIZE = 10;
-
-const DIR_CACHE_KEY = "tm_directory_page1_v2";
-const DIR_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-const SEARCH_CACHE_PREFIX = "tm_dir_search_v2:";
-const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
 const TM = {
   forest: "#0B3D2E",
@@ -101,6 +96,25 @@ function getSkillLabel(v: DocumentData): string {
   }
 
   return "";
+}
+
+function playerFromDoc(d: QueryDocumentSnapshot<DocumentData>): Player {
+  const v = d.data();
+  const photo = getPlayerPhotoUrl(v);
+
+  return {
+    id: d.id,
+    name: v.name ?? "",
+    postcode: v.postcode ?? "",
+    skillLevel: getSkillLabel(v),
+    photoURL: photo ?? undefined,
+    photoThumbURL: typeof v.photoThumbURL === "string" ? v.photoThumbURL : undefined,
+    timestamp: v.timestamp ?? undefined,
+    joinedAt: v.joinedAt ?? undefined,
+    createdAt: v.createdAt ?? undefined,
+    nameLower: v.nameLower ?? undefined,
+    bio: v.bio ?? undefined,
+  } as Player;
 }
 
 export default function DirectoryPage() {
@@ -171,57 +185,16 @@ useEffect(() => {
   // ----- initial browse load -----
   useEffect(() => {
     const loadFirstPage = async () => {
-      const cachedRaw = sessionStorage.getItem(DIR_CACHE_KEY);
-      if (cachedRaw) {
-        try {
-          const cached = JSON.parse(cachedRaw);
-          const isFresh = Date.now() - cached.ts < DIR_CACHE_TTL_MS;
-          if (isFresh && Array.isArray(cached.players)) {
-            setPlayers(cached.players);
-            setHasMore(!!cached.hasMore);
-            setCursor(null);
-            setLoading(false);
-            return;
-          }
-        } catch {
-          // ignore
-        }
-      }
-
       try {
         setLoading(true);
         const qy = query(collection(db, "players"), orderBy("nameLower"), limit(PAGE_SIZE));
         const snap = await getDocs(qy);
 
-        const page = snap.docs.map((d) => {
-          const v = d.data() as DocumentData;
-          return {
-            id: d.id,
-            name: v.name ?? "",
-            postcode: v.postcode ?? "",
-            skillLevel: getSkillLabel(v),
-            photoURL: v.photoURL ?? undefined,
-            photoThumbURL: v.photoThumbURL ?? undefined,
-            timestamp: v.timestamp ?? undefined,
-            joinedAt: v.joinedAt ?? undefined,
-            createdAt: v.createdAt ?? undefined,
-            nameLower: v.nameLower ?? undefined,
-            bio: v.bio ?? undefined,
-          } as Player;
-        });
+        const page = snap.docs.map(playerFromDoc);
 
         setPlayers(page);
         setCursor(snap.docs[snap.docs.length - 1] ?? null);
         setHasMore(snap.size === PAGE_SIZE);
-
-        sessionStorage.setItem(
-          DIR_CACHE_KEY,
-          JSON.stringify({
-            ts: Date.now(),
-            players: page,
-            hasMore: snap.size === PAGE_SIZE,
-          })
-        );
       } catch (err) {
         console.error("Error fetching first page:", err);
       } finally {
@@ -259,22 +232,7 @@ useEffect(() => {
 
       const snap = await getDocs(qy);
 
-      const page = snap.docs.map((d) => {
-        const v = d.data() as DocumentData;
-        return {
-          id: d.id,
-          name: v.name ?? "",
-          postcode: v.postcode ?? "",
-          skillLevel: getSkillLabel(v),
-          photoURL: v.photoURL ?? undefined,
-          photoThumbURL: v.photoThumbURL ?? undefined,
-          timestamp: v.timestamp ?? undefined,
-          joinedAt: v.joinedAt ?? undefined,
-          createdAt: v.createdAt ?? undefined,
-          nameLower: v.nameLower ?? undefined,
-          bio: v.bio ?? undefined,
-        } as Player;
-      });
+      const page = snap.docs.map(playerFromDoc);
 
       setPlayers((prev) => [...prev, ...page]);
       setCursor(snap.docs[snap.docs.length - 1] ?? null);
@@ -300,25 +258,6 @@ useEffect(() => {
 
     setSearching(true);
 
-    const cacheKey = SEARCH_CACHE_PREFIX + qStr;
-    const cachedRaw = sessionStorage.getItem(cacheKey);
-    if (cachedRaw) {
-      try {
-        const cached = JSON.parse(cachedRaw);
-        const isFresh = Date.now() - cached.ts < SEARCH_CACHE_TTL_MS;
-
-        if (isFresh && Array.isArray(cached.players)) {
-          setSearchResults(cached.players);
-          setSearchCursor(null);
-          setHasMoreSearch(!!cached.hasMore);
-          setSearching(false);
-          return;
-        }
-      } catch {
-        // ignore
-      }
-    }
-
     const handle = setTimeout(async () => {
       try {
         const qy = query(
@@ -332,35 +271,11 @@ useEffect(() => {
         const snap = await getDocs(qy);
         if (cancelled) return;
 
-        const page = snap.docs.map((d) => {
-          const v = d.data() as DocumentData;
-          return {
-            id: d.id,
-            name: v.name ?? "",
-            postcode: v.postcode ?? "",
-            skillLevel: getSkillLabel(v),
-            photoURL: v.photoURL ?? undefined,
-            photoThumbURL: v.photoThumbURL ?? undefined,
-            timestamp: v.timestamp ?? undefined,
-            joinedAt: v.joinedAt ?? undefined,
-            createdAt: v.createdAt ?? undefined,
-            nameLower: v.nameLower ?? undefined,
-            bio: v.bio ?? undefined,
-          } as Player;
-        });
+        const page = snap.docs.map(playerFromDoc);
 
         setSearchResults(page);
         setSearchCursor(snap.docs[snap.docs.length - 1] ?? null);
         setHasMoreSearch(snap.size === PAGE_SIZE);
-
-        sessionStorage.setItem(
-          cacheKey,
-          JSON.stringify({
-            ts: Date.now(),
-            players: page,
-            hasMore: snap.size === PAGE_SIZE,
-          })
-        );
       } catch (err) {
         console.error("Error searching players:", err);
       } finally {
@@ -408,22 +323,7 @@ useEffect(() => {
 
       const snap = await getDocs(qy);
 
-      const page = snap.docs.map((d) => {
-        const v = d.data() as DocumentData;
-        return {
-          id: d.id,
-          name: v.name ?? "",
-          postcode: v.postcode ?? "",
-          skillLevel: getSkillLabel(v),
-          photoURL: v.photoURL ?? undefined,
-          photoThumbURL: v.photoThumbURL ?? undefined,
-          timestamp: v.timestamp ?? undefined,
-          joinedAt: v.joinedAt ?? undefined,
-          createdAt: v.createdAt ?? undefined,
-          nameLower: v.nameLower ?? undefined,
-          bio: v.bio ?? undefined,
-        } as Player;
-      });
+      const page = snap.docs.map(playerFromDoc);
 
       setSearchResults((prev) => [...prev, ...page]);
       setSearchCursor(snap.docs[snap.docs.length - 1] ?? null);
@@ -717,4 +617,3 @@ useEffect(() => {
     </div>
   );
 }
-

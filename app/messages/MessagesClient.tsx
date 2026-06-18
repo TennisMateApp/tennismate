@@ -14,11 +14,12 @@ import {
   doc,
   deleteDoc,
   onSnapshot,
+  type DocumentData,
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { Search, Trash2, SquarePen, Settings } from "lucide-react";
 import { onAuthStateChanged } from "firebase/auth";
-import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
+import { getPlayerPhotoUrl, resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import withAuth from "@/components/withAuth";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar"; // adjust path
 // optional (if you have it):
@@ -65,6 +66,7 @@ export function MessagesDesktopShell({
 
   // one ref only
   const msgUnsubsRef = useRef<Record<string, () => void>>({});
+  const playerUnsubsRef = useRef<Record<string, () => void>>({});
 
   // UI state: search + tab
   const [queryText, setQueryText] = useState("");
@@ -107,10 +109,17 @@ useEffect(() => {
     msgUnsubsRef.current = {};
   };
 
+  const stopAllPlayerListeners = () => {
+    Object.values(playerUnsubsRef.current).forEach((fn) => fn?.());
+    playerUnsubsRef.current = {};
+  };
+
   const unsubAuth = onAuthStateChanged(auth, async (u) => {
     if (!u) {
       setUser(null);
       setConversations([]);
+      stopAllMsgListeners();
+      stopAllPlayerListeners();
       setLoading(false); // no user, nothing to load
       return;
     }
@@ -170,20 +179,13 @@ try {
                   (id) => id !== u.uid
                 ) || null;
 
-              try {
-                if (otherUserId) {
-                  const playerSnap = await getDoc(
-                    doc(db, "players", otherUserId)
-                  );
-                  if (playerSnap.exists()) {
-                    const playerData = playerSnap.data() as any;
-                    displayName = playerData.name || "Unknown";
-                    photoURL = resolveSmallProfilePhoto(playerData);
-                  }
-                }
-              } catch (err) {
-                console.warn("Error fetching player profile", err);
-              }
+              const snapshotProfile = otherUserId
+                ? convoData.playerSnapshots?.[otherUserId] ||
+                  convoData.participantSnapshots?.[otherUserId] ||
+                  null
+                : null;
+              displayName = snapshotProfile?.name || displayName;
+              photoURL = getPlayerPhotoUrl(null, snapshotProfile);
 
               // keep “seen by other” only for 1:1
               const lastReadOther = otherUserId
@@ -210,6 +212,46 @@ try {
           })
         );
         const visibleBases = bases.filter(Boolean) as any[];
+        const liveOtherIds = new Set(
+          visibleBases
+            .map((b) => b.otherUserId)
+            .filter((id): id is string => typeof id === "string" && id.length > 0)
+        );
+
+        Object.keys(playerUnsubsRef.current).forEach((uid) => {
+          if (!liveOtherIds.has(uid)) {
+            playerUnsubsRef.current[uid]?.();
+            delete playerUnsubsRef.current[uid];
+          }
+        });
+
+        liveOtherIds.forEach((otherUid) => {
+          if (playerUnsubsRef.current[otherUid]) return;
+
+          playerUnsubsRef.current[otherUid] = onSnapshot(
+            doc(db, "players", otherUid),
+            (playerSnap) => {
+              const playerData = playerSnap.exists() ? (playerSnap.data() as DocumentData) : null;
+
+              setConversations((prev) =>
+                prev.map((conversation) =>
+                  conversation.otherUserId === otherUid
+                    ? {
+                        ...conversation,
+                        displayName:
+                          (typeof playerData?.name === "string" && playerData.name.trim()) ||
+                          conversation.displayName,
+                        photoURL: getPlayerPhotoUrl(playerData, conversation),
+                      }
+                    : conversation
+                )
+              );
+            },
+            (error) => {
+              console.warn("Error listening to player profile", otherUid, error);
+            }
+          );
+        });
 
         // ---------- Seed/merge with previous (prevents flicker) ----------
         setConversations((prev) => {
@@ -251,8 +293,14 @@ try {
             return {
               id: b.id,
               isEvent: b.isEvent,
-              displayName: b.displayName,
-              photoURL: b.photoURL,
+              displayName:
+                prevRow?.otherUserId === b.otherUserId
+                  ? prevRow.displayName || b.displayName
+                  : b.displayName,
+              photoURL:
+                prevRow?.otherUserId === b.otherUserId
+                  ? prevRow.photoURL || b.photoURL
+                  : b.photoURL,
               otherUserId: b.otherUserId,
               lastReadMeMillis: b.lastReadMeMillis,
               lastReadOtherMillis: b.lastReadOtherMillis,
@@ -352,6 +400,7 @@ try {
     convoUnsub?.();
     unsubAuth();
     stopAllMsgListeners();
+    stopAllPlayerListeners();
   };
 }, []);
 

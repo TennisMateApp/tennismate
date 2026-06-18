@@ -63,6 +63,10 @@ export function resolveSmallProfilePhoto(data: any): string | null {
   return avatar;
 }
 
+export function getPlayerPhotoUrl(player: any, fallbackSnapshot?: any): string | null {
+  return resolveSmallProfilePhoto(player) || resolveSmallProfilePhoto(fallbackSnapshot) || null;
+}
+
 export function resolveLargeProfilePhoto(data: any): string | null {
   if (!data || typeof data !== "object") return null;
 

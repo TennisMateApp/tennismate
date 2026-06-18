@@ -2098,41 +2098,35 @@ setShowMatchPrompt(
   useEffect(() => {
     if (!participants.length) return;
 
-    let cancelled = false;
-    (async () => {
-      const out: Record<
-        string,
-        {
-          name?: string;
-          photoURL?: string;
-          photoThumbURL?: string;
-          avatar?: string;
-          availability?: string[];
-        }
-      > = {};
-      for (const uid of participants) {
-        try {
-          const pSnap = await getDoc(doc(db, "players", uid));
-          if (pSnap.exists()) {
-            const d = pSnap.data() as any;
-            out[uid] = {
+    const unsubs = participants.map((uid) =>
+      onSnapshot(
+        doc(db, "players", uid),
+        (pSnap) => {
+          const d = pSnap.exists() ? (pSnap.data() as any) : {};
+          setProfiles((prev) => ({
+            ...prev,
+            [uid]: {
               name: d.name,
               photoURL: d.photoURL,
               photoThumbURL: d.photoThumbURL,
               avatar: d.avatar,
               availability: Array.isArray(d.availability) ? d.availability : [],
-            };
-          } else {
-            out[uid] = {};
-          }
-        } catch {
-          out[uid] = {};
-        }
-      }
-      if (!cancelled) setProfiles(out);
-    })();
+            },
+          }));
 
-    return () => { cancelled = true; };
+          if (uid === auth.currentUser?.uid) {
+            setUserAvatar(resolveSmallProfilePhoto(d) || null);
+          }
+        },
+        () => {
+          setProfiles((prev) => ({ ...prev, [uid]: prev[uid] || {} }));
+        }
+      )
+    );
+
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+    };
   }, [participants]);
 
     // ===== OTHER USER ONLINE STATUS (TOP-LEVEL EFFECT) =====
