@@ -955,7 +955,7 @@ return (
     </div>
 
     {/* Sticky toolbar */}
-    <div className="sticky top-[64px] z-30 -mx-4 px-4 py-2 mb-3 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
+    <div className="sticky top-[calc(64px+var(--safe-top))] z-30 -mx-4 px-4 py-2 mb-3 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
       <div className="flex flex-wrap items-center gap-3">
         {/* Tabs */}
         <div className="inline-flex rounded-lg p-0.5 bg-gray-100">

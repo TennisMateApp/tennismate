@@ -2282,7 +2282,7 @@ if (isDesktop) {
 return (
   <div className="min-h-screen bg-[#F3F5F7] pb-28">
     {/* Top bar + segmented control */}
-    <div className="sticky top-0 z-30 bg-[#F3F5F7]">
+    <div className="sticky top-[var(--safe-top)] z-30 bg-[#F3F5F7]">
       <div className="mx-auto w-full max-w-xl px-3 sm:px-4 pt-4">
         <div className="relative flex items-center justify-between">
           {/* Back */}

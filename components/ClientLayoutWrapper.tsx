@@ -46,7 +46,7 @@ import { initNativePush, bindTokenToUserIfAvailable } from '@/lib/nativePush';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen'; //
-import { SafeAreaTop, SafeAreaBottom } from "@/components/SafeArea";
+import { SafeAreaBottom } from "@/components/SafeArea";
 import BackButtonHandler from "@/components/BackButtonHandler";
 import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { track, trackSetUserId } from "@/lib/track";
@@ -709,12 +709,11 @@ return (
     hideAllNav ? "pb-0" : ""
   )}
   style={
-    hideAllNav
+    hideAllNav || isDesktopWeb
       ? undefined
       : {
-          paddingBottom: isDesktopWeb
-            ? undefined
-            : "calc(5rem + env(safe-area-inset-bottom, 0px))",
+          paddingTop: "env(safe-area-inset-top, 0px)",
+          paddingBottom: "calc(5rem + env(safe-area-inset-bottom, 0px))",
         }
   }
 >

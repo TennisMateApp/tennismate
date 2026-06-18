@@ -342,7 +342,7 @@ export default function MatchHistoryDetailsPage() {
 
   return (
     <div className="min-h-screen pb-24" style={{ background: TM.bg }}>
-      <div className="sticky top-0 z-20 border-b border-black/5 bg-[#F3F5F7]/95 backdrop-blur">
+      <div className="sticky top-[var(--safe-top)] z-20 border-b border-black/5 bg-[#F3F5F7]/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between px-4 py-4 sm:px-6">
           <button
             type="button"

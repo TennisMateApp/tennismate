@@ -1060,7 +1060,7 @@ const [mobileViewportHeight, setMobileViewportHeight] = useState<number | null>(
 const [inputBarH, setInputBarH] = useState(56); // measured later
 const [inputBarMeasured, setInputBarMeasured] = useState(false);
 
-const headerTopOffset = Math.max(vvTopInset, 20);
+const headerTopOffset = Math.max(vvTopInset, embeddedDesktop ? 0 : 12);
 
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
 const [isOtherOnline, setIsOtherOnline] = useState(false);
@@ -3269,7 +3269,9 @@ useEffect(() => {
 <div
   className="relative z-20 border-b bg-white px-3"
   style={{
-    paddingTop: `${headerTopOffset}px`,
+    paddingTop: embeddedDesktop
+      ? `${headerTopOffset}px`
+      : `calc(env(safe-area-inset-top, 0px) + ${headerTopOffset}px)`,
   }}
 >
   <div className="min-h-[68px] flex items-center gap-3 py-2">

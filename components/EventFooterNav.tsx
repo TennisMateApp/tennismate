@@ -21,7 +21,7 @@ export default function EventFooterNav({ eventId }: { eventId: string }) {
   return (
     <nav
       aria-label="Event navigation"
-      className="fixed bottom-0 inset-x-0 z-30 border-t bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80"
+      className="fixed bottom-0 inset-x-0 z-30 border-t bg-white/95 safe-bottom safe-x backdrop-blur supports-[backdrop-filter]:bg-white/80"
     >
       <div className="mx-auto max-w-3xl">
         <ul className="grid grid-cols-3">

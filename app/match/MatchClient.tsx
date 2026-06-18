@@ -3195,7 +3195,7 @@ return (
 
 {/* Mobile header (matches screenshot vibe) */}
 <div
-  className="-mx-4 sm:-mx-6 px-4 sm:px-6 pt-3 pb-4 sticky top-0 z-20"
+  className="-mx-4 sm:-mx-6 px-4 sm:px-6 pt-3 pb-4 sticky top-[var(--safe-top)] z-20"
   style={{
     background:
       "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.78) 55%, #ffffff 100%)",
