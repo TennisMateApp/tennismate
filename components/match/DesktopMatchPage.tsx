@@ -155,6 +155,7 @@ setActivityFilter: (v: ActivityFilter) => void;
   sendingRequestUserIds: Set<string>;
   pendingAvailabilityInterestKeys: Set<string>;
   postcodePrefixPlayerCount: number | null;
+  highlightFirstMatchRequest: boolean;
 
   onLoadMore: () => void;
   onInvite: (match: any) => void;
@@ -197,6 +198,7 @@ setActivityFilter: (v: ActivityFilter) => void;
     sendingRequestUserIds,
     pendingAvailabilityInterestKeys,
     postcodePrefixPlayerCount,
+    highlightFirstMatchRequest,
 
     onLoadMore,
     onInvite,
@@ -501,14 +503,24 @@ const handleInvite = useCallback(
                               type="button"
                               onClick={() => onInvite(card)}
                               disabled={alreadySent || sending}
-                              className="mt-4 w-full rounded-full py-3 text-sm font-extrabold"
+                              className="mt-4 w-full rounded-full py-3 text-sm font-extrabold transition"
                               style={{
                                 background: alreadySent ? "rgba(11,61,46,0.10)" : TM.neon,
                                 color: alreadySent ? "rgba(11,61,46,0.60)" : TM.forest,
+                                boxShadow:
+                                  highlightFirstMatchRequest && !alreadySent
+                                    ? "0 0 0 4px rgba(57,255,20,0.20), 0 14px 34px rgba(57,255,20,0.24)"
+                                    : "0 10px 24px rgba(57,255,20,0.14)",
                                 opacity: sending ? 0.75 : 1,
                               }}
                             >
-                              {sending ? "Sending..." : alreadySent ? "Request Sent" : "I'm Interested"}
+                              {sending
+                                ? "Sending..."
+                                : alreadySent
+                                ? "Request Sent"
+                                : highlightFirstMatchRequest
+                                ? "Send Match Request"
+                                : "I'm Interested"}
                             </button>
                                 </>
                               );
@@ -534,8 +546,8 @@ const handleInvite = useCallback(
       </div>
     )}
 
-    <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4">
-{visibleMatches.map((p) => {
+    <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4" data-onboarding-target="recommended-matches">
+{visibleMatches.map((p, index) => {
   const activityBadge = getActivityBadge(p.lastActiveAt);
 
   return (
@@ -641,13 +653,23 @@ const handleInvite = useCallback(
           <button
             type="button"
             onClick={() => handleInvite(p)}
+            data-onboarding-target={index === 0 ? "best-match-invite" : undefined}
+            data-distance-km={index === 0 && typeof p.distance === "number" ? String(p.distance) : undefined}
+            data-availability-text={
+              index === 0 && Array.isArray(p.availability) && p.availability.length > 0
+                ? p.availability.slice(0, 2).join(" & ")
+                : undefined
+            }
             className="flex-1 rounded-xl py-2 text-sm font-extrabold"
             style={{
               background: TM.neon,
               color: TM.forest,
+              boxShadow: highlightFirstMatchRequest
+                ? "0 0 0 4px rgba(57,255,20,0.20), 0 12px 28px rgba(57,255,20,0.22)"
+                : undefined,
             }}
           >
-            Invite to Play
+            {highlightFirstMatchRequest ? "Send Match Request" : "Invite to Play"}
           </button>
 
           <button

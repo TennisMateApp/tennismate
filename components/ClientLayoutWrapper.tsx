@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useRef } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   User,
   MessageCircle,
@@ -54,6 +54,19 @@ import Image from "next/image";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { cn } from "@/lib/utils";
 import { initMixpanel, identifyUser, trackEvent } from "@/lib/mixpanel";
+import OnboardingTour from "@/components/onboarding/OnboardingTour";
+import PwaInstallPrompt from "@/components/pwa/PwaInstallPrompt";
+import {
+  clearBrowserOnboardingState,
+  isOnboardingDebugEnabled,
+  useOnboardingProgress,
+} from "@/lib/useOnboardingProgress";
+
+declare global {
+  interface Window {
+    restartTennisMateOnboarding?: () => Promise<void>;
+  }
+}
 
 
 const TM = {
@@ -182,12 +195,52 @@ const [showProfilePrompt, setShowProfilePrompt] = useState(false);
 
 const router = useRouter();
 const pathname = usePathname() || "";
+const searchParams = useSearchParams();
 
 console.log("[LayoutWrapper] render start", { pathname });
 
 const isDesktop = useIsDesktop(1024);
 const isApp = Capacitor.isNativePlatform();
 const isDesktopWeb = isDesktop && !isApp;
+const userCreatedAtMs = user?.metadata?.creationTime
+  ? new Date(user.metadata.creationTime).getTime()
+  : null;
+const isNewUserForOnboarding =
+  userCreatedAtMs == null || Date.now() - userCreatedAtMs < 14 * 24 * 60 * 60 * 1000;
+const onboardingEligible =
+  Boolean(user?.emailVerified) && profileComplete === true && isNewUserForOnboarding;
+const onboarding = useOnboardingProgress(user?.uid, { enabled: onboardingEligible });
+
+useEffect(() => {
+  if (!isOnboardingDebugEnabled()) return;
+  if (!user?.uid) return;
+
+  window.restartTennisMateOnboarding = async () => {
+    clearBrowserOnboardingState();
+    await onboarding.restartActivationTour();
+  };
+
+  return () => {
+    delete window.restartTennisMateOnboarding;
+  };
+}, [onboarding.restartActivationTour, user?.uid]);
+
+useEffect(() => {
+  if (!isOnboardingDebugEnabled()) return;
+  if (!user?.uid) return;
+  if (!pathname.startsWith("/home") && !pathname.startsWith("/match")) return;
+  if (searchParams.get("restartOnboarding") !== "1") return;
+
+  const params = new URLSearchParams(searchParams.toString());
+  params.delete("restartOnboarding");
+  const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+
+  void (async () => {
+    clearBrowserOnboardingState();
+    await onboarding.restartActivationTour();
+    router.replace(nextUrl, { scroll: false });
+  })();
+}, [onboarding.restartActivationTour, pathname, router, searchParams, user?.uid]);
 
 
 useEffect(() => {
@@ -748,6 +801,27 @@ return (
     )}
   {children}
 </main>
+
+{user &&
+  onboarding.shouldShow &&
+  !PUBLIC_ROUTES.has(pathname || "") &&
+  !pathname.startsWith("/verify-email") &&
+  !hideFeedback &&
+  !hideNavFeedback && (
+    <OnboardingTour
+      tour={onboarding.activationTour}
+      shouldShow={onboarding.shouldShow}
+      onSkip={() => void onboarding.skip()}
+      onStepChange={(step) => onboarding.setActivationTourStep(step)}
+    />
+  )}
+
+{user &&
+  !onboarding.shouldShow &&
+  !PUBLIC_ROUTES.has(pathname || "") &&
+  !pathname.startsWith("/verify-email") && (
+    <PwaInstallPrompt onboardingComplete={onboarding.isComplete} />
+  )}
 
 
 

@@ -38,6 +38,10 @@ import { getNearbyPlayers } from "@/lib/nearbyPlayersClient";
 import AgeGateModal from "@/components/AgeGateModal";
 import { useRequireBirthYear } from "@/lib/useRequireBirthYear";
 import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
+import { useOnboardingProgress } from "@/lib/useOnboardingProgress";
+import NotificationPrompt from "@/components/notifications/NotificationPrompt";
+import { shouldShowNotificationPrompt } from "@/lib/notificationPromptState";
+import { registerTennisMateNotifications } from "@/lib/registerNotifications";
 
 
 
@@ -45,11 +49,11 @@ import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
 
 
 interface Player {
-  // ✅ "id" SHOULD be the UID / players docId
+  // âœ… "id" SHOULD be the UID / players docId
   id: string;
   userId?: string;
 
-  // ✅ debug-only fields (safe to leave in; won’t break anything)
+  // âœ… debug-only fields (safe to leave in; wonâ€™t break anything)
   docId?: string | null;
   dataId?: string | null;
   
@@ -287,10 +291,10 @@ const getLastActiveMeta = (ts: any): LastActiveMeta => {
   const hrs = Math.floor(mins / 60);
   const days = Math.floor(hrs / 24);
 
-  // ✅ Hide if older than 3 days
+  // âœ… Hide if older than 3 days
   if (days > 3) return null;
 
-  // ✅ CTA tiers
+  // âœ… CTA tiers
 if (mins <= 5) return { label: "ONLINE NOW", level: "hot" };
 if (mins < 30) return { label: `ACTIVE ${mins}M AGO`, level: "hot" };
   if (mins < 120) return { label: `Active ${mins}m ago`, level: "warm" };
@@ -372,7 +376,7 @@ const getActivityAgoLabel = (ts: any): string => {
   if (mins < 60) return `Active ${mins} mins ago`;
   if (hrs < 24) return `Active ${hrs} hours ago`;
 
-  // 👇 THIS is where your code goes
+  // ðŸ‘‡ THIS is where your code goes
   if (days === 1) return "Active yesterday";
   return `Active ${days} days ago`;
 };
@@ -645,6 +649,16 @@ export default function MatchPage() {
   const [recommendedMatches, setRecommendedMatches] = useState<RecommendedMatchPlayer[]>([]);
   const [recommendedMatchLoading, setRecommendedMatchLoading] = useState(false);
   const isDesktop = useIsDesktop();
+  const userCreatedAtMs = user?.metadata?.creationTime
+    ? new Date(user.metadata.creationTime).getTime()
+    : null;
+  const isNewUserForOnboarding =
+    userCreatedAtMs == null || Date.now() - userCreatedAtMs < 14 * 24 * 60 * 60 * 1000;
+  const onboarding = useOnboardingProgress(user?.uid, {
+    enabled: Boolean(user?.emailVerified && myProfile?.profileComplete === true && isNewUserForOnboarding),
+  });
+  const [firstRequestSuccessVisible, setFirstRequestSuccessVisible] = useState(false);
+  const [matchRequestNotificationPromptOpen, setMatchRequestNotificationPromptOpen] = useState(false);
   const [matchSurface, setMatchSurface] = useState<"players" | "availability">("players");
   const [availabilityRequestOpen, setAvailabilityRequestOpen] = useState(false);
   const [availabilityDraftSaved, setAvailabilityDraftSaved] = useState(false);
@@ -1310,12 +1324,12 @@ const loadBlockedMatchUserIds = useCallback(async (currentUid: string) => {
 const refreshMatches = useCallback(async () => {
   if (!auth.currentUser) return;
 
-  // ✅ throttle refresh frequency (do this BEFORE locking the ref)
+  // âœ… throttle refresh frequency (do this BEFORE locking the ref)
   if (lastUpdated && Date.now() - lastUpdated < REFRESH_MIN_MS) {
     return;
   }
 
-  // ✅ prevent duplicate refresh calls while one is already running
+  // âœ… prevent duplicate refresh calls while one is already running
   if (refreshingRef.current) return;
   refreshingRef.current = true;
 
@@ -1715,14 +1729,14 @@ useEffect(() => {
 
 const [sendingIds, setSendingIds] = useState<Set<string>>(new Set());
 
-// ✅ Always use AUTH UID for match_requests (matches production)
+// âœ… Always use AUTH UID for match_requests (matches production)
 const uidOf = (p: any): string | null => {
   if (!p) return null;
 
   // if already a uid string
   if (typeof p === "string") return p.trim() || null;
 
-  // ✅ prefer explicit auth uid fields
+  // âœ… prefer explicit auth uid fields
   const uid = p?.userId || p?.uid;
 
   // fallback only if your players doc id == auth uid
@@ -2097,6 +2111,40 @@ useEffect(() => {
   };
 }, [user?.uid, loading, params]);
 
+const maybeShowAfterMatchRequestNotificationPrompt = () => {
+  if (matchRequestNotificationPromptOpen) return;
+  if (onboarding.shouldShow) return;
+  if (!shouldShowNotificationPrompt("after_match_request_sent")) return;
+
+  setMatchRequestNotificationPromptOpen(true);
+};
+
+const closeMatchRequestNotificationPrompt = () => {
+  setMatchRequestNotificationPromptOpen(false);
+};
+
+const handleEnableMatchRequestNotifications = async () => {
+  try {
+    await registerTennisMateNotifications();
+  } catch (error) {
+    console.warn("[MatchPage] notification registration failed", error);
+  } finally {
+    closeMatchRequestNotificationPrompt();
+  }
+};
+
+const matchRequestNotificationPrompt = (
+  <NotificationPrompt
+    variant="after_match_request_sent"
+    mode="toast"
+    isOpen={matchRequestNotificationPromptOpen}
+    onEnable={() => {
+      void handleEnableMatchRequestNotifications();
+    }}
+    onDismiss={closeMatchRequestNotificationPrompt}
+  />
+);
+
   // don't double-submit the same card
 const handleMatchRequest = async (target: Player | string) => {
   if (!myProfile || !user) return false;
@@ -2143,7 +2191,7 @@ const handleMatchRequest = async (target: Player | string) => {
         ? (target as any).availabilityInstanceId
         : null;
 
-    // ✅ Create match request doc
+    // âœ… Create match request doc
 // Stage 1 player_relationships: create the match request and link it to
 // player_relationships/{pairId}. Other interaction collections migrate later.
 console.debug("[MatchPage] before createMatchRequestWithRelationship", {
@@ -2249,9 +2297,14 @@ trackEvent("match_request_sent", {
   targetSkillBand: matchPlayer?.skillBand ?? null,
 });
 
-console.log("[TM] ✅ match_requests created:", ref.id, { toUid });
+if (!onboarding.checklist.firstMatchRequestSent) {
+  await onboarding.markFirstMatchRequestSent(ref.id);
+  setFirstRequestSuccessVisible(true);
+}
 
-    // ✅ Update local state so UI immediately shows "sent"
+console.log("[TM] match_requests created:", ref.id, { toUid });
+
+    // âœ… Update local state so UI immediately shows "sent"
 setSentRequests((prev) => {
   const next = new Set(prev);
   next.add(toUid);
@@ -2269,17 +2322,19 @@ setBlockedMatchUserIds((prev) => {
   return next;
 });
 
-    // ✅ Update localStorage cache so hideContacted works instantly
+    // âœ… Update localStorage cache so hideContacted works instantly
     if (auth.currentUser?.uid) {
       const merged = new Set(sentRequests);
       merged.add(toUid);
       writeSentCache(auth.currentUser.uid, merged);
     }
 
+    maybeShowAfterMatchRequestNotificationPrompt();
+
     return true;
   } catch (err: any) {
     console.error("Failed to send match request:", err);
-    alert(`❌ Could not send request: ${err?.message ?? String(err)}`);
+    alert(`âŒ Could not send request: ${err?.message ?? String(err)}`);
     return false;
   } finally {
     setSendingIds((s) => {
@@ -2686,6 +2741,21 @@ const visibleMatches = useMemo(
   [sortedMatches, visibleCount]
 );
 
+const shouldHighlightFirstMatchRequest =
+  onboarding.shouldShow &&
+  onboarding.activationTour.currentStep === "bestMatchInvite" &&
+  matchSurface === "players";
+
+useEffect(() => {
+  if (!user?.uid || matchSurface !== "players" || visibleMatches.length === 0) return;
+  void onboarding.markViewedRecommendedPlayers();
+}, [matchSurface, onboarding.markViewedRecommendedPlayers, user?.uid, visibleMatches.length]);
+
+useEffect(() => {
+  if (!shouldHighlightFirstMatchRequest) return;
+  void onboarding.markFirstMatchRequestPromptShown();
+}, [onboarding.markFirstMatchRequestPromptShown, shouldHighlightFirstMatchRequest]);
+
 useEffect(() => {
   if (!user?.uid || visibleMatches.length === 0) return;
 
@@ -2828,13 +2898,13 @@ const TM = {
 };
 
 const TILE_STYLE = {
-  background: "#F1F3F5",                  // ✅ light grey card
+  background: "#F1F3F5",                  // âœ… light grey card
   border: "1px solid rgba(15,23,42,0.10)", // subtle border
   boxShadow: "0 6px 18px rgba(15,23,42,0.08)",
 };
 
 const selectStyle: React.CSSProperties = {
-  backgroundColor: "rgba(0,0,0,0.62)", // ✅ darker = clearer
+  backgroundColor: "rgba(0,0,0,0.62)", // âœ… darker = clearer
   border: "1px solid rgba(255,255,255,0.18)",
   color: "rgba(234,247,240,0.95)",
   outline: "none",
@@ -2890,7 +2960,7 @@ if (myProfileHidden) {
       <div className="rounded-2xl border bg-white p-5 shadow-sm">
         <h1 className="text-xl font-semibold">Match Me is turned off</h1>
         <p className="mt-2 text-sm text-gray-700">
-          Your profile is hidden — turn it back on to use Match Me.
+          Your profile is hidden â€” turn it back on to use Match Me.
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -2946,6 +3016,12 @@ if (isDesktop) {
         <div className="flex items-start gap-6">
           <TMDesktopSidebar player={myProfile} />
           <div className="flex-1 min-w-0">
+            {firstRequestSuccessVisible && (
+              <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-950">
+                Great start — you’ve sent your first match request. We’ll notify you when someone responds.
+              </div>
+            )}
+
             <DesktopMatchPage
   loading={loading}
   myProfileHidden={myProfileHidden}
@@ -2983,6 +3059,7 @@ if (isDesktop) {
   sendingRequestUserIds={sendingIds}
   pendingAvailabilityInterestKeys={pendingAvailabilityInterestKeys}
   postcodePrefixPlayerCount={postcodePrefixPlayerCount}
+  highlightFirstMatchRequest={shouldHighlightFirstMatchRequest}
   profileOpenId={profileOpenId}
   setProfileOpenId={setProfileOpenId}
 />
@@ -2991,6 +3068,7 @@ if (isDesktop) {
       </div>
 
       {recommendedMatchOverlay}
+      {matchRequestNotificationPrompt}
 
       {availabilityRequestOpen && (
         <div className="fixed inset-0 z-[10000]">
@@ -3369,7 +3447,7 @@ return (
       <div
         className="rounded-2xl p-3 shadow-2xl"
         style={{
-          // ✅ darker “card” so controls pop (fixes washed-out white)
+          // âœ… darker â€œcardâ€ so controls pop (fixes washed-out white)
           background: "rgba(11,61,46,0.94)", // TM.forest with opacity
           border: "1px solid rgba(255,255,255,0.12)",
           backdropFilter: "blur(14px)",
@@ -3435,10 +3513,10 @@ return (
                 style={selectStyle}
               >
                 <option value="" style={optionStyle}>Any</option>
-                <option value="18-24" style={optionStyle}>18–24</option>
-                <option value="25-34" style={optionStyle}>25–34</option>
-                <option value="35-44" style={optionStyle}>35–44</option>
-                <option value="45-54" style={optionStyle}>45–54</option>
+                <option value="18-24" style={optionStyle}>18â€“24</option>
+                <option value="25-34" style={optionStyle}>25â€“34</option>
+                <option value="35-44" style={optionStyle}>35â€“44</option>
+                <option value="45-54" style={optionStyle}>45â€“54</option>
                 <option value="55+" style={optionStyle}>55+</option>
               </select>
             </div>
@@ -3514,6 +3592,7 @@ return (
 
 
 {recommendedMatchOverlay}
+{matchRequestNotificationPrompt}
 
 {justVerified && (
   <div
@@ -3573,7 +3652,7 @@ return (
         style={{ background: "#071B15" }} // TM.forestDark
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* ✅ Taller than before, but capped so it doesn't feel full screen */}
+        {/* âœ… Taller than before, but capped so it doesn't feel full screen */}
         <div
           style={{
             height: "min(88dvh, 820px)",   // tweak: 84dvh/780px if you want smaller
@@ -3988,15 +4067,24 @@ return (
               type="button"
               onClick={() => handleMatchRequest(card as any)}
               disabled={alreadySent || sending}
-              className="mt-4 w-full rounded-full py-3.5 text-[14px] font-extrabold"
+              className="mt-4 w-full rounded-full py-3.5 text-[14px] font-extrabold transition"
               style={{
                 background: alreadySent ? "rgba(11,61,46,0.10)" : TM.neon,
                 color: alreadySent ? "rgba(11,61,46,0.60)" : TM.forest,
-                boxShadow: "0 10px 30px rgba(57,255,20,0.18)",
+                boxShadow:
+                  shouldHighlightFirstMatchRequest && !alreadySent
+                    ? "0 0 0 4px rgba(57,255,20,0.22), 0 14px 34px rgba(57,255,20,0.26)"
+                    : "0 10px 30px rgba(57,255,20,0.18)",
                 opacity: sending ? 0.75 : 1,
               }}
             >
-              {sending ? "Sending..." : alreadySent ? "Request Sent" : "I'm Interested"}
+              {sending
+                ? "Sending..."
+                : alreadySent
+                ? "Request Sent"
+                : shouldHighlightFirstMatchRequest
+                ? "Send Match Request"
+                : "I'm Interested"}
             </button>
                                 </>
                               );
@@ -4022,7 +4110,13 @@ return (
   </div>
 )}
 
-    <ul className="space-y-3">
+{firstRequestSuccessVisible && (
+  <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-950">
+    Great start — you’ve sent your first match request. We’ll notify you when someone responds.
+  </div>
+)}
+
+    <ul className="space-y-3" data-onboarding-target="recommended-matches">
 {visibleMatches.map((match, index) => {
   const avatarSrc = match.photoThumbURL || match.photoURL || null;
   const initials = (match.name || "?").trim().charAt(0).toUpperCase();
@@ -4151,7 +4245,7 @@ style={{
           style={{ color: "rgba(15,23,42,0.65)" }}
         >
           {distText ? distText : ""}
-          {distText && pcText ? " • " : ""}
+          {distText && pcText ? " â€¢ " : ""}
           {pcText ? pcText : ""}
         </span>
       </div>
@@ -4178,7 +4272,7 @@ style={{
       border: "1px solid rgba(57,255,20,0.20)",
     }}
   >
-    ✅ Request Sent
+    âœ… Request Sent
   </div>
 ) : (
   <button
@@ -4192,6 +4286,9 @@ style={{
     }}
     disabled={sendingIds.has(toUid)}
     data-tour={index === 0 ? "send-request" : undefined}
+    data-onboarding-target={index === 0 ? "best-match-invite" : undefined}
+    data-distance-km={index === 0 && typeof match.distance === "number" ? String(match.distance) : undefined}
+    data-availability-text={index === 0 ? formatAvailability(match.availability) : undefined}
     className="w-full rounded-full py-3.5 text-[14px] font-extrabold disabled:opacity-60"
     style={{
       background: TM.neon,
@@ -4199,7 +4296,7 @@ style={{
       boxShadow: "0 10px 30px rgba(57,255,20,0.18)",
     }}
   >
-    {sendingIds.has(toUid) ? "Sending…" : "Invite to Play"}
+    {sendingIds.has(toUid) ? "Sendingâ€¦" : "Invite to Play"}
   </button>
 )}
     </div>
@@ -4239,7 +4336,7 @@ style={{
       disabled={refreshing}
       className="mt-6 px-4 py-2.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
     >
-      {refreshing ? "Loading…" : "Load more"}
+      {refreshing ? "Loadingâ€¦" : "Load more"}
     </button>
   </div>
 )}

@@ -44,6 +44,12 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import DesktopMatches from "@/components/matches/DesktopMatches";
 import { trackEvent } from "@/lib/mixpanel";
 import { createMatchRequestWithRelationship, getPairId } from "@/lib/playerRelationships";
+import NotificationPrompt from "@/components/notifications/NotificationPrompt";
+import {
+  markNotificationPromptDismissed,
+  shouldShowNotificationPrompt,
+} from "@/lib/notificationPromptState";
+import { registerTennisMateNotifications } from "@/lib/registerNotifications";
 
 
 // --- Helpers ---
@@ -532,6 +538,8 @@ const [deleteTarget, setDeleteTarget] = useState<DeleteMatchTarget | null>(null)
 const [deleteBusy, setDeleteBusy] = useState(false);
 const [deleteError, setDeleteError] = useState<string | null>(null);
 const [successToast, setSuccessToast] = useState<string | null>(null);
+const [incomingRequestNotificationPromptOpen, setIncomingRequestNotificationPromptOpen] =
+  useState(false);
 
 const [profileOverlayUserId, setProfileOverlayUserId] = useState<string | null>(null);
 
@@ -2274,6 +2282,37 @@ const visibleHistoryGroups = useMemo(() => {
 }, [currentUserId, oppCache, sortBy, visibleHistoryMatches]);
 
 const isTabLoading = tab === "history" ? historyLoading : loading;
+const hasVisibleIncomingPendingRequest = Boolean(
+  currentUserId &&
+    tab === "pending" &&
+    !isTabLoading &&
+    visibleMatches.some((match) => isPendingStatus(match.status) && match.opponentId === currentUserId)
+);
+const anotherPromptVisible = Boolean(chatPrompt || deleteTarget || profileOverlayUserId);
+
+useEffect(() => {
+  if (!hasVisibleIncomingPendingRequest) return;
+  if (incomingRequestNotificationPromptOpen) return;
+  if (anotherPromptVisible) return;
+  if (!shouldShowNotificationPrompt("incoming_match_request")) return;
+
+  setIncomingRequestNotificationPromptOpen(true);
+}, [anotherPromptVisible, hasVisibleIncomingPendingRequest, incomingRequestNotificationPromptOpen]);
+
+const closeIncomingRequestNotificationPrompt = () => {
+  setIncomingRequestNotificationPromptOpen(false);
+};
+
+const handleEnableIncomingRequestNotifications = async () => {
+  try {
+    await registerTennisMateNotifications();
+  } catch (error) {
+    console.warn("[MatchesPage] notification registration failed", error);
+  } finally {
+    markNotificationPromptDismissed("incoming_match_request");
+    closeIncomingRequestNotificationPrompt();
+  }
+};
 
 if (isDesktop) {
   return <DesktopMatches />;
@@ -2477,6 +2516,16 @@ return (
           {successToast}
         </div>
       )}
+
+      <NotificationPrompt
+        variant="incoming_match_request"
+        mode="modal"
+        isOpen={incomingRequestNotificationPromptOpen && !anotherPromptVisible}
+        onEnable={() => {
+          void handleEnableIncomingRequestNotifications();
+        }}
+        onDismiss={closeIncomingRequestNotificationPrompt}
+      />
 
       {deleteTarget && (
         <div

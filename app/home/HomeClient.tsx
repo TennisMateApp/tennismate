@@ -35,6 +35,13 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { trackEvent } from "@/lib/mixpanel";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import { getNearbyPlayers } from "@/lib/nearbyPlayersClient";
+import NotificationPrompt from "@/components/notifications/NotificationPrompt";
+import {
+  markNotificationPromptDismissed,
+  shouldShowNotificationPrompt,
+} from "@/lib/notificationPromptState";
+import { registerTennisMateNotifications } from "@/lib/registerNotifications";
+import { useOnboardingProgress } from "@/lib/useOnboardingProgress";
 
 
 const TM = {
@@ -69,16 +76,19 @@ function ActionTile({
   subtitle,
   icon,
   onClick,
+  onboardingTarget,
 }: {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
   onClick: () => void;
+  onboardingTarget?: string;
 }) {
 
   return (
     <button
       onClick={onClick}
+      data-onboarding-target={onboardingTarget}
      className={cn(
   "group relative w-full overflow-hidden rounded-3xl border text-left transition",
   "active:scale-[0.985] focus:outline-none focus:ring-2 focus:ring-offset-2",
@@ -642,8 +652,9 @@ const showDesktopWeb = !isApp && isDesktop;
   const [uid, setUid] = useState<string | null>(null);
   const [openInviteId, setOpenInviteId] = useState<string | null>(null);
 
-  const [openPlayerId, setOpenPlayerId] = useState<string | null>(null);
+const [openPlayerId, setOpenPlayerId] = useState<string | null>(null);
 const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
+const [homeNotificationBannerOpen, setHomeNotificationBannerOpen] = useState(true);
 
 const homeTrackedRef = useRef(false);
   
@@ -657,6 +668,39 @@ const [acceptedInviteEvents, setAcceptedInviteEvents] = useState<CalendarEvent[]
 const [acceptedInviteEventsLoading, setAcceptedInviteEventsLoading] = useState(true);
 const [oppByUid, setOppByUid] = useState<Record<string, OpponentProfile>>(() => loadOpponentProfileCache());
 const fetchingNamesRef = useRef<Set<string>>(new Set());
+const onboarding = useOnboardingProgress(uid, { enabled: Boolean(uid) });
+const shouldShowHomeNotificationBanner =
+  homeNotificationBannerOpen &&
+  onboarding.isComplete &&
+  !onboarding.shouldShow &&
+  shouldShowNotificationPrompt("home_banner");
+
+const closeHomeNotificationBanner = () => {
+  setHomeNotificationBannerOpen(false);
+};
+
+const handleEnableHomeNotifications = async () => {
+  try {
+    await registerTennisMateNotifications();
+  } catch (error) {
+    console.warn("[Home] notification registration failed", error);
+  } finally {
+    markNotificationPromptDismissed("home_banner");
+    closeHomeNotificationBanner();
+  }
+};
+
+const homeNotificationBanner = (
+  <NotificationPrompt
+    variant="home_banner"
+    mode="banner"
+    isOpen={shouldShowHomeNotificationBanner}
+    onEnable={() => {
+      void handleEnableHomeNotifications();
+    }}
+    onDismiss={closeHomeNotificationBanner}
+  />
+);
 
 const oppByUidRef = useRef<Record<string, OpponentProfile>>({});
 useEffect(() => {
@@ -1174,6 +1218,7 @@ if (showDesktopWeb) {
       myCalendarEvents={nextUpcomingEvents}
       myCalendarEventsLoading={myCalendarEventsLoading || acceptedInviteEventsLoading}
       homeBootstrapping={homeBootstrapping}
+      notificationBanner={homeNotificationBanner}
     />
   );
 }
@@ -1225,6 +1270,12 @@ if (showDesktopWeb) {
 
           <NotificationBell />
         </div>
+
+        {shouldShowHomeNotificationBanner && (
+          <div className="mt-4">
+            {homeNotificationBanner}
+          </div>
+        )}
 
 {/* Active near you */}
 <div className="mt-4">
@@ -1299,7 +1350,7 @@ if (showDesktopWeb) {
 </div>
 
 {/* Next Match (single card like reference) */}
-<div className="mt-6">
+<div className="mt-6" data-onboarding-target="next-game">
   <div className="mb-2 flex items-center justify-between">
     <div className="text-sm font-extrabold text-black/85">Next Game</div>
 
@@ -1433,7 +1484,7 @@ const isRematch =
 </div>
 
 {/* My Matches (horizontal scroll) */}
-<div className="mt-6">
+<div className="mt-6" data-onboarding-target="tennis-mates">
   <div className="mb-2 flex items-center justify-between">
     <div className="text-sm font-extrabold text-black/85">My TennisMates</div>
 
@@ -1605,6 +1656,7 @@ style={{
   subtitle="Find a partner now"
   icon={<Swords className="h-5 w-5" style={{ color: TM.neon }} />}
   onClick={() => router.push('/match')}
+  onboardingTarget="match-me"
 />
 
 
@@ -1613,6 +1665,7 @@ style={{
   subtitle="Games & social hits"
   icon={<CalendarDays className="h-5 w-5" style={{ color: TM.neon }} />}
   onClick={() => router.push('/events')}
+  onboardingTarget="quick-actions"
 />
 
 
