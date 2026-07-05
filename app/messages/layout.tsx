@@ -22,7 +22,7 @@ export default function MessagesLayout({ children }: { children: ReactNode }) {
   if (isDesktop === null) return null;
 
   return isDesktop ? (
-      <div className="h-screen min-h-0">
+      <div className="h-dvh min-h-0">
         <MessagesClient
           selectedConversationId={selectedConversationId}
           activeThread={

@@ -440,7 +440,7 @@ return (
     DESKTOP (md and up)
     ========================= */}
 <div className="hidden lg:block">
-  <div className="h-screen min-h-0 overflow-hidden" style={{ background: "#F7FAF8" }}>
+  <div className="h-dvh min-h-0 overflow-hidden" style={{ background: "#F7FAF8" }}>
     <div className="h-full w-full px-6 py-6 2xl:px-10">
       <div className="grid h-full min-h-0 grid-cols-[300px_minmax(360px,420px)_minmax(0,1fr)] gap-6">
         {/* Sidebar (same as Home) */}

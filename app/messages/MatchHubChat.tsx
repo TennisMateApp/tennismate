@@ -1059,6 +1059,7 @@ const [vvTopInset, setVvTopInset] = useState(0);
 const [mobileViewportHeight, setMobileViewportHeight] = useState<number | null>(null);
 const [inputBarH, setInputBarH] = useState(56); // measured later
 const [inputBarMeasured, setInputBarMeasured] = useState(false);
+const [isComposerFocused, setIsComposerFocused] = useState(false);
 
 const headerTopOffset = Math.max(vvTopInset, embeddedDesktop ? 0 : 12);
 
@@ -1082,6 +1083,8 @@ const [showMatchPrompt, setShowMatchPrompt] = useState(false);
 const [rematchPromptInvite, setRematchPromptInvite] = useState<RematchPrefill | null>(null);
 const [rematchPromptBusy, setRematchPromptBusy] = useState(false);
 const rematchViewedRef = useRef<Set<string>>(new Set());
+const isTypingCompact =
+  !embeddedDesktop && activeTab === "chat" && isComposerFocused;
 
 const profileTargetId = useMemo(() => {
   if (isEventChat) return null;
@@ -3054,8 +3057,36 @@ useEffect(() => {
   const el = inputRef.current;
   if (!el) return;
   el.style.height = "0px";
-  el.style.height = Math.min(el.scrollHeight, 160) + "px";
-}, [input]);
+  el.style.height = Math.min(el.scrollHeight, isTypingCompact ? 96 : 160) + "px";
+}, [input, isTypingCompact]);
+
+useEffect(() => {
+  if (embeddedDesktop) return;
+
+  const prevBodyOverflow = document.body.style.overflow;
+  const prevHtmlOverflow = document.documentElement.style.overflow;
+  const prevBodyOverscroll = document.body.style.overscrollBehavior;
+  const prevHtmlOverscroll = document.documentElement.style.overscrollBehavior;
+
+  document.body.style.overflow = "hidden";
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.overscrollBehavior = "none";
+  document.documentElement.style.overscrollBehavior = "none";
+
+  return () => {
+    document.body.style.overflow = prevBodyOverflow;
+    document.documentElement.style.overflow = prevHtmlOverflow;
+    document.body.style.overscrollBehavior = prevBodyOverscroll;
+    document.documentElement.style.overscrollBehavior = prevHtmlOverscroll;
+  };
+}, [embeddedDesktop]);
+
+useEffect(() => {
+  if (!isTypingCompact) return;
+
+  const raf = requestAnimationFrame(() => scrollToBottom(false));
+  return () => cancelAnimationFrame(raf);
+}, [isTypingCompact]);
 
 useEffect(() => {
   // Focus once when the page loads (or when conversation changes),
@@ -3133,6 +3164,7 @@ useEffect(() => {
   const canShowNextMatchAction = !isEventChat && !!user?.uid && !!otherUserId;
   const showMatchHubToolbar =
     activeTab === "chat" &&
+    !isTypingCompact &&
     (canShowLastMatchAction || canShowNextMatchAction);
   const nextMatchSuggestions = availabilityOverlap?.suggestions || [];
   const visibleNextMatchSuggestions = nextMatchSuggestions.slice(0, 3);
@@ -3252,11 +3284,18 @@ useEffect(() => {
   // ===== RENDER =====
   return (
    <div
-    className={embeddedDesktop ? "flex h-full min-h-0 flex-col bg-white overflow-hidden" : "flex min-h-0 flex-col bg-white overflow-hidden"}
+    className={
+      embeddedDesktop
+        ? "flex h-full min-h-0 flex-col bg-white overflow-hidden"
+        : "flex h-dvh min-h-0 flex-col bg-white overflow-hidden"
+    }
     style={
       embeddedDesktop
         ? undefined
-        : { height: mobileViewportHeight ? `${mobileViewportHeight}px` : "100dvh" }
+        : {
+            height: mobileViewportHeight ? `${mobileViewportHeight}px` : "100dvh",
+            maxHeight: mobileViewportHeight ? `${mobileViewportHeight}px` : "100dvh",
+          }
     }
   >
     {/* Header */}
@@ -3268,7 +3307,7 @@ useEffect(() => {
       : `calc(env(safe-area-inset-top, 0px) + ${headerTopOffset}px)`,
   }}
 >
-  <div className="min-h-[68px] flex items-center gap-3 py-2">
+  <div className={`${isTypingCompact ? "min-h-[52px] py-1" : "min-h-[68px] py-2"} flex items-center gap-3`}>
     {/* Back */}
     {!embeddedDesktop && (
       <button
@@ -3336,7 +3375,7 @@ useEffect(() => {
           })()}
     </div>
 
-    {!isEventChat && (
+    {!isTypingCompact && !isEventChat && (
       <div className="mt-1">
         {isOtherOnline ? (
           <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-green-700">
@@ -3349,7 +3388,7 @@ useEffect(() => {
       </div>
     )}
 
-    {typingUsers.length > 0 && (
+    {!isTypingCompact && typingUsers.length > 0 && (
       <div className="text-[11px] text-gray-500 mt-1">
         {typingUsers.length === 1
           ? `${profiles[typingUsers[0]]?.name || "Someone"} is typing…`
@@ -3362,6 +3401,7 @@ useEffect(() => {
 </button>
 
     {/* Right actions */}
+    {!isTypingCompact && (
     <div className="relative flex items-center gap-2">
 <button
   type="button"
@@ -3394,6 +3434,7 @@ useEffect(() => {
         </div>
       )}
     </div>
+    )}
   </div>
 </div>
 
@@ -3606,7 +3647,7 @@ useEffect(() => {
   </div>
 )}
 
-{user?.uid && otherUserId && !isEventChat && hubMatches.length > 0 && (
+{user?.uid && otherUserId && !isEventChat && !isTypingCompact && hubMatches.length > 0 && (
   <div className="relative z-10 bg-white px-3 pt-2 pb-2 sm:px-4">
     <div
       className="rounded-2xl px-3 py-3 text-white shadow-sm sm:px-4"
@@ -3641,7 +3682,7 @@ useEffect(() => {
   </div>
 )}
 
-{!isEventChat && (
+{!isEventChat && !isTypingCompact && (
   <div className="relative z-10 grid grid-cols-3 border-b bg-white px-4">
     {[
       { id: "chat" as const, label: "Chat", icon: MessageSquare },
@@ -3894,7 +3935,7 @@ style={{
   ref={inputBarRef}
   className="shrink-0 border-t bg-white px-3"
   style={{
-    paddingBottom: "calc(env(safe-area-inset-bottom) + 10px)",
+    paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
     paddingTop: 10,
   }}
 >
@@ -3941,6 +3982,10 @@ style={{
         className="w-full resize-none bg-transparent outline-none text-[16px] leading-snug"
         placeholder="Type a message..."
         value={input}
+        onFocus={() => {
+          setIsComposerFocused(true);
+          requestAnimationFrame(() => scrollToBottom(false));
+        }}
         onChange={(e) => {
           setInput(e.target.value);
           updateTypingStatus(true);
@@ -3951,7 +3996,10 @@ style={{
             sendMessage();
           }
         }}
-        onBlur={() => updateTypingStatus(false)}
+        onBlur={() => {
+          setIsComposerFocused(false);
+          updateTypingStatus(false);
+        }}
       />
     </div>
 
@@ -4084,7 +4132,7 @@ style={{
     <div
   className="w-full max-w-lg rounded-2xl bg-white shadow-xl overflow-hidden flex flex-col"
   style={{
-    maxHeight: "calc(100svh - 48px)",
+    maxHeight: "calc(100dvh - 48px)",
   }}
 >
   
