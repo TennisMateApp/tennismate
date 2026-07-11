@@ -122,6 +122,21 @@ const DEFAULT_SYSTEM_AVATAR = "/images/default-avatar.jpg";
 type MatchHubTab = "chat" | "matches" | "profile";
 type MatchHubActionSheet = "lastMatch" | null;
 
+function isIOSViewportPlatform() {
+  if (typeof window === "undefined") return false;
+
+  const nav = window.navigator;
+  const platform = nav.platform || "";
+  const ua = nav.userAgent || "";
+  const maxTouchPoints = nav.maxTouchPoints || 0;
+
+  return (
+    /iPad|iPhone|iPod/.test(platform) ||
+    /iPad|iPhone|iPod/.test(ua) ||
+    (platform === "MacIntel" && maxTouchPoints > 1)
+  );
+}
+
 type HubMatch = {
   id: string;
   source: string;
@@ -1060,6 +1075,7 @@ const [mobileViewportHeight, setMobileViewportHeight] = useState<number | null>(
 const [inputBarH, setInputBarH] = useState(56); // measured later
 const [inputBarMeasured, setInputBarMeasured] = useState(false);
 const [isComposerFocused, setIsComposerFocused] = useState(false);
+const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
 const headerTopOffset = Math.max(vvTopInset, embeddedDesktop ? 0 : 12);
 
@@ -1084,7 +1100,7 @@ const [rematchPromptInvite, setRematchPromptInvite] = useState<RematchPrefill | 
 const [rematchPromptBusy, setRematchPromptBusy] = useState(false);
 const rematchViewedRef = useRef<Set<string>>(new Set());
 const isTypingCompact =
-  !embeddedDesktop && activeTab === "chat" && isComposerFocused;
+  !embeddedDesktop && activeTab === "chat" && (isComposerFocused || isKeyboardOpen);
 
 const profileTargetId = useMemo(() => {
   if (isEventChat) return null;
@@ -2057,21 +2073,35 @@ setShowMatchPrompt(
     };
   }, []);
 
-  // ===== VISUAL VIEWPORT (mobile keyboards) =====
+  // ===== VISUAL VIEWPORT (iOS mobile keyboards) =====
   useEffect(() => {
+  if (typeof window === "undefined") return;
+
   const vv = window.visualViewport;
-  if (!vv) return;
+  const isIOS = isIOSViewportPlatform();
+
+  if (!isIOS || !vv) {
+    // Android Chrome already behaves correctly with h-dvh and focus-based compact mode.
+    // Avoid applying iOS visualViewport math there because it can introduce layout jumps.
+    setVvTopInset(0);
+    setVvBottomInset(0);
+    setMobileViewportHeight(null);
+    setIsKeyboardOpen(false);
+    return;
+  }
 
   const computeInset = () => {
+    const visibleHeight = Math.max(320, vv.height);
     const topInset = Math.max(0, vv.offsetTop);
-    const bottomInset = Math.max(
-      0,
-      window.innerHeight - (vv.height + vv.offsetTop)
-    );
+    const keyboardDelta = Math.max(0, window.innerHeight - visibleHeight);
+    const bottomInset = Math.max(0, window.innerHeight - (visibleHeight + vv.offsetTop));
 
+    // iOS Safari/PWA keeps layout viewport and visual viewport out of sync while the
+    // keyboard animates. On iOS, visualViewport.height is the reliable visible area.
     setVvTopInset(topInset);
     setVvBottomInset(bottomInset);
-    setMobileViewportHeight(Math.max(320, vv.height));
+    setMobileViewportHeight(visibleHeight);
+    setIsKeyboardOpen(keyboardDelta > 80);
   };
 
   computeInset();
