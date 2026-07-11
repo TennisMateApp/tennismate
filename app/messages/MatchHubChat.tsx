@@ -137,6 +137,11 @@ function isIOSViewportPlatform() {
   );
 }
 
+function isMobileViewport() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia?.("(max-width: 767px)")?.matches ?? window.innerWidth < 768;
+}
+
 type HubMatch = {
   id: string;
   source: string;
@@ -1458,6 +1463,8 @@ const scrollToBottom = (smooth = false) => {
   });
 };
 
+const shouldAutoFocusComposer = () => embeddedDesktop || !isMobileViewport();
+
 useEffect(() => {
   hasInitialScrolledRef.current = false;
   pendingAutoScrollRef.current = null;
@@ -1658,6 +1665,8 @@ useEffect(() => {
 }, [debouncedCourtSearch]);
 
   const focusWithoutScroll = () => {
+    if (!shouldAutoFocusComposer()) return;
+
     const el = inputRef.current;
     if (!el) return;
     try { el.focus({ preventScroll: true }); } catch { el.focus(); }
@@ -3119,8 +3128,9 @@ useEffect(() => {
 }, [isTypingCompact]);
 
 useEffect(() => {
-  // Focus once when the page loads (or when conversation changes),
-  // without hijacking subsequent taps/clicks.
+  // Desktop can focus once when the conversation changes. On mobile, opening the
+  // keyboard during mount races Android viewport settlement and can clip the chat.
+  // Mobile keyboards should open only after the user explicitly taps the composer.
   focusWithoutScroll();
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [conversationID]);
