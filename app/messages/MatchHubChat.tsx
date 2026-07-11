@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import debounce from "lodash.debounce";
 import {
@@ -135,6 +135,11 @@ function isIOSViewportPlatform() {
     /iPad|iPhone|iPod/.test(ua) ||
     (platform === "MacIntel" && maxTouchPoints > 1)
   );
+}
+
+function isAndroidViewportPlatform() {
+  if (typeof window === "undefined") return false;
+  return /Android/i.test(window.navigator.userAgent || "");
 }
 
 function isMobileViewport() {
@@ -2082,16 +2087,15 @@ setShowMatchPrompt(
     };
   }, []);
 
-  // ===== VISUAL VIEWPORT (iOS mobile keyboards) =====
+  // ===== VISUAL VIEWPORT (mobile keyboards) =====
   useEffect(() => {
   if (typeof window === "undefined") return;
 
   const vv = window.visualViewport;
   const isIOS = isIOSViewportPlatform();
+  const isAndroid = isAndroidViewportPlatform();
 
-  if (!isIOS || !vv) {
-    // Android Chrome already behaves correctly with h-dvh and focus-based compact mode.
-    // Avoid applying iOS visualViewport math there because it can introduce layout jumps.
+  if (!vv || (!isIOS && !isAndroid)) {
     setVvTopInset(0);
     setVvBottomInset(0);
     setMobileViewportHeight(null);
@@ -2104,13 +2108,33 @@ setShowMatchPrompt(
     const topInset = Math.max(0, vv.offsetTop);
     const keyboardDelta = Math.max(0, window.innerHeight - visibleHeight);
     const bottomInset = Math.max(0, window.innerHeight - (visibleHeight + vv.offsetTop));
+    const keyboardVisible = keyboardDelta > 80;
 
     // iOS Safari/PWA keeps layout viewport and visual viewport out of sync while the
     // keyboard animates. On iOS, visualViewport.height is the reliable visible area.
-    setVvTopInset(topInset);
-    setVvBottomInset(bottomInset);
-    setMobileViewportHeight(visibleHeight);
-    setIsKeyboardOpen(keyboardDelta > 80);
+    if (isIOS) {
+      setVvTopInset(topInset);
+      setVvBottomInset(bottomInset);
+      setMobileViewportHeight(visibleHeight);
+      setIsKeyboardOpen(keyboardVisible);
+      return;
+    }
+
+    // Android Chrome generally works with h-dvh when closed. When the keyboard opens,
+    // visualViewport.height is the actual visible content area, so temporarily sizing
+    // the flex root to it keeps the in-flow composer above the keyboard.
+    if (isAndroid && isComposerFocused && keyboardVisible) {
+      setVvTopInset(topInset);
+      setVvBottomInset(bottomInset);
+      setMobileViewportHeight(visibleHeight);
+      setIsKeyboardOpen(true);
+      return;
+    }
+
+    setVvTopInset(0);
+    setVvBottomInset(0);
+    setMobileViewportHeight(null);
+    setIsKeyboardOpen(false);
   };
 
   computeInset();
@@ -2123,7 +2147,7 @@ setShowMatchPrompt(
     vv.removeEventListener("scroll", computeInset);
     window.removeEventListener("resize", computeInset);
   };
-}, []);
+}, [isComposerFocused]);
 
  useEffect(() => {
   // If the textarea is focused (keyboard up), always keep latest visible.
@@ -3333,9 +3357,12 @@ useEffect(() => {
       embeddedDesktop
         ? undefined
         : {
-            height: mobileViewportHeight ? `${mobileViewportHeight}px` : "100dvh",
-            maxHeight: mobileViewportHeight ? `${mobileViewportHeight}px` : "100dvh",
-          }
+            "--mobile-visible-height": mobileViewportHeight
+              ? `${mobileViewportHeight}px`
+              : "100dvh",
+            height: "var(--mobile-visible-height)",
+            maxHeight: "var(--mobile-visible-height)",
+          } as CSSProperties
     }
   >
     {/* Header */}
@@ -3763,7 +3790,7 @@ useEffect(() => {
     wasNearBottomOnTabLeaveRef.current = nearBottom;
     setShowScrollDown(!nearBottom);
   }}
-  className="flex-1 overflow-y-auto overscroll-contain px-3 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
+  className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pt-3 pb-2 bg-gradient-to-b from-emerald-50/40 to-white"
 >
   {/* ⬇️ Anchor short threads to the bottom */}
   <div className="min-h-full flex flex-col justify-end">
