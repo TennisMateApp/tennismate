@@ -19,6 +19,8 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { getSuggestedCourtsForInvite } from "@/lib/suggestedCourtsClient";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import { trackEvent } from "@/lib/mixpanel";
+import { trackEvent as trackAnalyticsEvent } from "@/lib/analytics";
+import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 import { shouldTrackRematchInviteAccepted } from "@/lib/rematchAnalytics";
 import {
   createRematchInviteFromPrevious,
@@ -1452,6 +1454,7 @@ const forceNextSnapshotScrollRef = useRef(false);
 const wasNearBottomOnTabLeaveRef = useRef(true);
 const chatScrollTopRef = useRef(0);
 const pendingChatTabReturnRef = useRef(false);
+const conversationOpenedTrackedRef = useRef<string | null>(null);
 
 const isNearBottom = () => {
   const el = listRef.current;
@@ -1479,6 +1482,17 @@ useEffect(() => {
   pendingChatTabReturnRef.current = false;
   setShowScrollDown(false);
 }, [conversationID]);
+
+useEffect(() => {
+  if (!conversationID || !user?.uid) return;
+  if (conversationOpenedTrackedRef.current === conversationID) return;
+  conversationOpenedTrackedRef.current = conversationID;
+
+  void trackAnalyticsEvent(ANALYTICS_EVENTS.CONVERSATION_OPENED, {
+    conversation_context: isEventChat ? "event" : "one_to_one",
+    relationship_status: isEventChat ? "event_chat" : "matched",
+  });
+}, [conversationID, isEventChat, user?.uid]);
 
 
 
@@ -1524,6 +1538,11 @@ useEffect(() => {
     setRematchContext(rematch);
     setInviteStep(flow === "rematch" ? "details" : "time");
     setNextMatchTimeMode(nextMatchSuggestions.length ? "suggested" : "custom");
+    void trackAnalyticsEvent(ANALYTICS_EVENTS.MATCH_SCHEDULING_STARTED, {
+      source: flow === "rematch" ? "rematch" : "conversation",
+      time_source: nextMatchSuggestions.length ? "suggested" : "custom",
+      availability_overlap: Boolean(availabilityOverlap?.slots?.length),
+    });
 
     if (flow === "rematch" && rematch) {
       setInviteDateTimeFromISO(rematch.startISO);
@@ -2644,6 +2663,10 @@ return () => unsub();
       console.log("[ChatPage] parent conversation update success", {
         conversationID: String(conversationID),
       });
+      void trackAnalyticsEvent(ANALYTICS_EVENTS.MESSAGE_SENT, {
+        conversation_context: isEventChat ? "event" : "one_to_one",
+        message_type: "text",
+      });
     } catch (error) {
       console.error("[ChatPage] parent conversation update failed", {
         conversationID: String(conversationID),
@@ -2963,6 +2986,16 @@ await updateDoc(msgRef, { inviteId });
       [`typing.${user.uid}`]: false,
     });
 
+    void trackAnalyticsEvent(ANALYTICS_EVENTS.MATCH_TIME_SUGGESTED, {
+      source: inviteFlow === "rematch" ? "rematch" : "conversation",
+      time_source: nextMatchTimeMode === "suggested" ? "suggested" : "custom",
+      availability_overlap: Boolean(availabilityOverlap?.slots?.length),
+    });
+    void trackAnalyticsEvent(ANALYTICS_EVENTS.MESSAGE_SENT, {
+      conversation_context: "one_to_one",
+      message_type: "system_action",
+    });
+
     setShowInvite(false);
   };
 
@@ -3048,6 +3081,15 @@ const respondToInvite = async (messageId: string, status: "accepted" | "declined
     updatedAt: serverTimestamp(),
   });
 
+  void trackAnalyticsEvent(
+    status === "accepted"
+      ? ANALYTICS_EVENTS.MATCH_INVITE_ACCEPTED
+      : ANALYTICS_EVENTS.MATCH_INVITE_DECLINED,
+    {
+      source: isRematchInvite ? "rematch" : "conversation",
+    }
+  );
+
   const acceptedInviteId = String(msg?.inviteId || messageId);
 
   if (
@@ -3100,6 +3142,9 @@ if (!participantOk) return;
         type: "invite_booking_confirmed",
       },
       updatedAt: serverTimestamp(),
+    });
+    void trackAnalyticsEvent(ANALYTICS_EVENTS.MATCH_CONFIRMED, {
+      source: "conversation",
     });
   };
 

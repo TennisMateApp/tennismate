@@ -42,6 +42,11 @@ import { useOnboardingProgress } from "@/lib/useOnboardingProgress";
 import NotificationPrompt from "@/components/notifications/NotificationPrompt";
 import { shouldShowNotificationPrompt } from "@/lib/notificationPromptState";
 import { registerTennisMateNotifications } from "@/lib/registerNotifications";
+import {
+  analyticsDistanceBand,
+  trackEvent as trackAnalyticsEvent,
+} from "@/lib/analytics";
+import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 
 
 
@@ -717,6 +722,7 @@ const [dismissedPlayerIds, setDismissedPlayerIds] = useState<Set<string>>(new Se
 const [recommendationImpressions, setRecommendationImpressions] = useState<Record<string, MatchRecommendationImpression>>({});
 const recommendationImpressionWriteRef = useRef<Set<string>>(new Set());
 const recommendationRotationSeedRef = useRef(`${Date.now()}-${Math.random()}`);
+const recommendationsViewedTrackedRef = useRef(false);
 
 
 const REFRESH_MIN_MS = 2 * 60 * 1000; // 2 minutes
@@ -2162,6 +2168,16 @@ const handleMatchRequest = async (target: Player | string) => {
   // Don't double-submit
   if (sendingIds.has(toUid)) return false;
 
+  const candidateForAnalytics = typeof target === "string" ? null : target;
+  const hasRecommendationReasons =
+    Array.isArray((candidateForAnalytics as any)?.recommendationReasons) &&
+    (candidateForAnalytics as any).recommendationReasons.length > 0;
+  void trackAnalyticsEvent(ANALYTICS_EVENTS.MATCH_INVITE_STARTED, {
+    source: hasRecommendationReasons ? "recommended_match" : "match_page",
+    distance_band: analyticsDistanceBand(candidateForAnalytics?.distance),
+    availability_overlap: Boolean(candidateForAnalytics?.availability?.length),
+  });
+
   setSendingIds((s) => new Set(s).add(toUid));
 
   try {
@@ -2246,6 +2262,16 @@ console.debug("[MatchPage] after createMatchRequestWithRelationship", {
   matchRequestId: ref.id,
   fromUserId: user.uid,
   toUserId: toUid,
+});
+
+void trackAnalyticsEvent(ANALYTICS_EVENTS.MATCH_INVITE_SENT, {
+  source:
+    Array.isArray((matchPlayer as any)?.recommendationReasons) &&
+    (matchPlayer as any).recommendationReasons.length > 0
+      ? "recommended_match"
+      : "match_page",
+  distance_band: analyticsDistanceBand(matchPlayer?.distance),
+  availability_overlap: Boolean(matchPlayer?.availability?.length),
 });
 
 try {
@@ -2740,6 +2766,28 @@ const visibleMatches = useMemo(
   () => sortedMatches.slice(0, visibleCount),
   [sortedMatches, visibleCount]
 );
+
+useEffect(() => {
+  if (loading) return;
+  if (recommendationsViewedTrackedRef.current) return;
+  if (visibleMatches.length === 0) return;
+
+  recommendationsViewedTrackedRef.current = true;
+  void trackAnalyticsEvent(ANALYTICS_EVENTS.MATCH_RECOMMENDATIONS_VIEWED, {
+    recommendation_count: visibleMatches.length,
+    source: recommendedMatches.length > 0 ? "notification_recommendation" : "match_page",
+  });
+}, [loading, recommendedMatches.length, visibleMatches.length]);
+
+useEffect(() => {
+  if (!profileOpenId) return;
+  void trackAnalyticsEvent(ANALYTICS_EVENTS.PLAYER_PROFILE_VIEWED, {
+    profile_source: "match_page",
+    distance_band: "unknown",
+    skill_difference_band: "unknown",
+    availability_overlap: false,
+  });
+}, [profileOpenId]);
 
 const shouldHighlightFirstMatchRequest =
   onboarding.shouldShow &&

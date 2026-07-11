@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { Viewport } from "next";
 import ClientLayoutWrapper from "@/components/ClientLayoutWrapper";
 import AuthGate from "@/components/AuthGate";
+import AnalyticsRouteTracker from "@/components/analytics/AnalyticsRouteTracker";
 
 export const metadata = {
   title: "TennisMate",
@@ -34,6 +35,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
 
       <body className="m-0 min-h-[100dvh] overflow-x-hidden">
+        <AnalyticsRouteTracker />
         <AuthGate>
           <ClientLayoutWrapper>{children}</ClientLayoutWrapper>
         </AuthGate>

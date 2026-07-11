@@ -49,11 +49,17 @@ import { SplashScreen } from '@capacitor/splash-screen'; //
 import { SafeAreaBottom } from "@/components/SafeArea";
 import BackButtonHandler from "@/components/BackButtonHandler";
 import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
-import { track, trackSetUserId } from "@/lib/track";
+import { track } from "@/lib/track";
 import Image from "next/image";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { cn } from "@/lib/utils";
 import { initMixpanel, identifyUser, trackEvent } from "@/lib/mixpanel";
+import {
+  analyticsNotificationStatus,
+  analyticsSkillBand,
+  clearAnalyticsUser,
+  identifyAnalyticsUser,
+} from "@/lib/analytics";
 import OnboardingTour from "@/components/onboarding/OnboardingTour";
 import PwaInstallPrompt from "@/components/pwa/PwaInstallPrompt";
 import {
@@ -114,6 +120,13 @@ function isPlayerProfileUsable(playerData: any) {
     typeof playerData.postcode === "string" &&
     playerData.postcode.trim().length > 0
   );
+}
+
+function stateFromPostcode(postcode?: unknown) {
+  const first = String(postcode || "").trim().charAt(0);
+  if (first === "3") return "VIC";
+  if (first === "2") return "NSW";
+  return "unknown";
 }
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
@@ -190,6 +203,8 @@ const [showProfilePrompt, setShowProfilePrompt] = useState(false);
   const [showVerify, setShowVerify] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const profileTrackedRef = useRef(false);
+  const analyticsUserRef = useRef<string | null>(null);
+  const analyticsUserPropertiesRef = useRef<string | null>(null);
 
 
 
@@ -243,15 +258,6 @@ useEffect(() => {
 }, [onboarding.restartActivationTour, pathname, router, searchParams, user?.uid]);
 
 
-useEffect(() => {
-  if (!pathname) return;
-
-  void track("page_view", {
-    page_path: pathname,
-    page_location: typeof window !== "undefined" ? window.location.href : undefined,
-    page_title: typeof document !== "undefined" ? document.title : undefined,
-  });
-}, [pathname]);
 
 
 
@@ -392,18 +398,15 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
     setUser(u);
 
     profileTrackedRef.current = false;
-    void trackSetUserId(u.uid);
+    if (analyticsUserRef.current && analyticsUserRef.current !== u.uid) {
+      void clearAnalyticsUser();
+      analyticsUserPropertiesRef.current = null;
+    }
+    analyticsUserRef.current = u.uid;
 
-    identifyUser(u.uid, {
-      email: u.email ?? undefined,
-    });
+    identifyUser(u.uid);
 
   // ✅ Track login only once per browser session (prevents firing on every refresh)
-  const loginKey = `ga_login_tracked_${u.uid}`;
-  if (typeof window !== "undefined" && !sessionStorage.getItem(loginKey)) {
-   void track("login", { method: "firebase" });
-    sessionStorage.setItem(loginKey, "1");
-  }
  
 
           // ✅ Initialize native push for Android app runtime
@@ -429,6 +432,21 @@ unsubPlayer = onSnapshot(playerRef, async (docSnap) => {
     setPlayerBirthYear(typeof data.birthYear === "number" ? data.birthYear : null);
     setProfileComplete(data.profileComplete === true);
     setProfileGateReady(true);
+    const analyticsProperties = {
+      state: stateFromPostcode(data.postcode),
+      skillBand: analyticsSkillBand(data.skillBand || data.skillBandLabel || data.skillLevel),
+      notificationStatus: analyticsNotificationStatus(),
+      accountStatus: data.profileComplete === true ? "profile_complete" : "profile_incomplete",
+    };
+    const analyticsPropertiesKey = JSON.stringify(analyticsProperties);
+    if (
+      analyticsUserRef.current !== u.uid ||
+      analyticsUserPropertiesRef.current !== analyticsPropertiesKey
+    ) {
+      analyticsUserRef.current = u.uid;
+      analyticsUserPropertiesRef.current = analyticsPropertiesKey;
+      void identifyAnalyticsUser(u.uid, analyticsProperties);
+    }
   } else {
     setPhotoURL(null);
     setPhotoThumbURL(null);
@@ -491,8 +509,10 @@ if (hasNewer && inbound) {
 } else {
   setAuthReady(true);
   profileTrackedRef.current = false;
-  void trackSetUserId(null);
   void track("logout");
+  void clearAnalyticsUser();
+  analyticsUserRef.current = null;
+  analyticsUserPropertiesRef.current = null;
 
   setUser(null);
   setPhotoURL(null);

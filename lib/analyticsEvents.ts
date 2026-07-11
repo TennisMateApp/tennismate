@@ -1,0 +1,28 @@
+export const ANALYTICS_EVENTS = {
+  LOGIN_COMPLETED: "login_completed",
+  APP_PAGE_VIEW: "app_page_view",
+  MATCH_RECOMMENDATIONS_VIEWED: "match_recommendations_viewed",
+  PLAYER_PROFILE_VIEWED: "player_profile_viewed",
+  MATCH_INVITE_STARTED: "match_invite_started",
+  MATCH_INVITE_SENT: "match_invite_sent",
+  MATCH_INVITE_ACCEPTED: "match_invite_accepted",
+  MATCH_INVITE_DECLINED: "match_invite_declined",
+  CONVERSATION_OPENED: "conversation_opened",
+  MESSAGE_SENT: "message_sent",
+  MATCH_SCHEDULING_STARTED: "match_scheduling_started",
+  MATCH_TIME_SUGGESTED: "match_time_suggested",
+  MATCH_CONFIRMED: "match_confirmed",
+  SCORE_ENTRY_STARTED: "score_entry_started",
+  SCORE_SUBMITTED: "score_submitted",
+  ONBOARDING_STARTED: "onboarding_started",
+  ONBOARDING_STEP_VIEWED: "onboarding_step_viewed",
+  ONBOARDING_COMPLETED: "onboarding_completed",
+  NOTIFICATION_PROMPT_SHOWN: "notification_prompt_shown",
+  NOTIFICATION_PROMPT_ACCEPTED: "notification_prompt_accepted",
+  NOTIFICATION_PROMPT_DISMISSED: "notification_prompt_dismissed",
+  DIRECTORY_SEARCH_PERFORMED: "directory_search_performed",
+  EVENT_VIEWED: "event_viewed",
+  EVENT_JOIN_REQUESTED: "event_join_requested",
+} as const;
+
+export type AnalyticsEventName = (typeof ANALYTICS_EVENTS)[keyof typeof ANALYTICS_EVENTS];

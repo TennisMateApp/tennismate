@@ -8,6 +8,8 @@ import {
   markNotificationPromptShown,
   type NotificationPromptVariant,
 } from "@/lib/notificationPromptState";
+import { trackEvent } from "@/lib/analytics";
+import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 
 type NotificationPromptMode = "modal" | "banner" | "toast";
 
@@ -72,6 +74,16 @@ const COPY_BY_VARIANT: Record<NotificationPromptVariant, NotificationPromptCopy>
   },
 };
 
+const PROMPT_LOCATION_BY_VARIANT: Record<NotificationPromptVariant, string> = {
+  onboarding_complete: "onboarding_complete",
+  after_match_request_sent: "match_request_sent",
+  incoming_match_request: "match_request_received",
+  incoming_message: "message_received",
+  match_request_accepted: "match_request_accepted",
+  event_joined: "event_joined",
+  home_banner: "home_reminder",
+};
+
 function modeClasses(mode: NotificationPromptMode) {
   if (mode === "banner") {
     return {
@@ -113,6 +125,10 @@ export default function NotificationPrompt({
     if (hasRenderedThisPromptRef.current) return;
     hasRenderedThisPromptRef.current = true;
     markNotificationPromptShown(variant);
+    void trackEvent(ANALYTICS_EVENTS.NOTIFICATION_PROMPT_SHOWN, {
+      prompt_location: PROMPT_LOCATION_BY_VARIANT[variant],
+      prompt_version: "v1",
+    });
   }, [canShow, variant]);
 
   useEffect(() => {
@@ -124,7 +140,19 @@ export default function NotificationPrompt({
 
   const handleDismiss = () => {
     markNotificationPromptDismissed(variant);
+    void trackEvent(ANALYTICS_EVENTS.NOTIFICATION_PROMPT_DISMISSED, {
+      prompt_location: PROMPT_LOCATION_BY_VARIANT[variant],
+      prompt_version: "v1",
+    });
     onDismiss?.();
+  };
+
+  const handleEnable = () => {
+    void trackEvent(ANALYTICS_EVENTS.NOTIFICATION_PROMPT_ACCEPTED, {
+      prompt_location: PROMPT_LOCATION_BY_VARIANT[variant],
+      prompt_version: "v1",
+    });
+    onEnable();
   };
 
   const content = (
@@ -142,7 +170,7 @@ export default function NotificationPrompt({
         {!isDenied && (
           <button
             type="button"
-            onClick={onEnable}
+            onClick={handleEnable}
             className="rounded-full px-4 py-2 text-sm font-extrabold"
             style={{ background: "#39FF14", color: "#0B3D2E" }}
           >

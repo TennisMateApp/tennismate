@@ -4,7 +4,7 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 import { getMessaging, isSupported as isMessagingSupported } from "firebase/messaging";
-import { getAnalytics, isSupported as isAnalyticsSupported, type Analytics } from "firebase/analytics";
+import type { Analytics } from "firebase/analytics";
 
 // ✅ Firebase config
 export const firebaseConfig = {
@@ -43,6 +43,14 @@ if (typeof window !== "undefined") {
 // ✅ Analytics (async safe getter + cache)
 let analyticsCache: Analytics | null = null;
 let analyticsInitPromise: Promise<Analytics | null> | null = null;
+let analyticsRuntimePromise: Promise<typeof import("firebase/analytics") | null> | null = null;
+
+function getAnalyticsRuntime() {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (analyticsRuntimePromise) return analyticsRuntimePromise;
+  analyticsRuntimePromise = import("firebase/analytics").catch(() => null);
+  return analyticsRuntimePromise;
+}
 
 export function getAnalyticsSafe(): Promise<Analytics | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
@@ -53,10 +61,13 @@ export function getAnalyticsSafe(): Promise<Analytics | null> {
 
   analyticsInitPromise = (async () => {
     try {
-      const supported = await isAnalyticsSupported();
+      const runtime = await getAnalyticsRuntime();
+      if (!runtime) return null;
+
+      const supported = await runtime.isSupported();
       if (!supported) return null;
 
-      analyticsCache = getAnalytics(app);
+      analyticsCache = runtime.getAnalytics(app);
 
       // ✅ temporary sanity log (remove later)
       console.log("✅ GA analytics initialised", firebaseConfig.measurementId);

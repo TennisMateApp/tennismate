@@ -7,6 +7,8 @@ import Link from "next/link";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 
 import DesktopSignIn from "../../components/signIn/DesktopSignIn";
+import { trackEvent } from "@/lib/analytics";
+import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 
 
 export default function LoginPage() {
@@ -81,6 +83,9 @@ useEffect(() => {
       ]);
 
       await signInWithEmailAndPassword(auth, email, password);
+      void trackEvent(ANALYTICS_EVENTS.LOGIN_COMPLETED, {
+        login_method: "email_password",
+      });
       router.replace(next);
     } catch (err: any) {
       const code = err?.code || "";
@@ -129,6 +134,9 @@ useEffect(() => {
         provider.setCustomParameters({ prompt: "select_account" });
         await signInWithPopup(auth, provider);
       }
+      void trackEvent(ANALYTICS_EVENTS.LOGIN_COMPLETED, {
+        login_method: "google",
+      });
 
       await auth.currentUser?.reload();
 

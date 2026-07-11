@@ -6,6 +6,8 @@ import NotificationPrompt from "@/components/notifications/NotificationPrompt";
 import { shouldShowNotificationPrompt } from "@/lib/notificationPromptState";
 import { registerTennisMateNotifications } from "@/lib/registerNotifications";
 import type { ActivationTourStep } from "@/lib/useOnboardingProgress";
+import { trackEvent } from "@/lib/analytics";
+import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 
 type TourState = {
   status?: string;
@@ -251,11 +253,32 @@ export default function OnboardingTour({ tour, shouldShow, onSkip, onStepChange 
   const [cardHeight, setCardHeight] = useState(DEFAULT_CARD_HEIGHT);
   const [ready, setReady] = useState(false);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
+  const viewedStepsRef = useRef<Set<ActivationTourStep>>(new Set());
+  const startedTrackedRef = useRef(false);
 
   const cardStyle = useMemo(
     () => (config ? getCardStyle(config.cardPosition, cardHeight) : undefined),
     [cardHeight, config]
   );
+
+  useEffect(() => {
+    if (!shouldShow || !config || step === "completed") return;
+
+    if (!startedTrackedRef.current) {
+      startedTrackedRef.current = true;
+      void trackEvent(ANALYTICS_EVENTS.ONBOARDING_STARTED, {
+        tour_version: "activation_v1",
+      });
+    }
+
+    if (viewedStepsRef.current.has(step)) return;
+    viewedStepsRef.current.add(step);
+    void trackEvent(ANALYTICS_EVENTS.ONBOARDING_STEP_VIEWED, {
+      step_name: step,
+      step_number: STEP_ORDER.indexOf(step) + 1,
+      tour_version: "activation_v1",
+    });
+  }, [config, shouldShow, step]);
 
   useEffect(() => {
     const el = cardRef.current;
@@ -424,6 +447,9 @@ export default function OnboardingTour({ tour, shouldShow, onSkip, onStepChange 
   const finishAfterNotificationPrompt = async () => {
     setShowNotificationPrompt(false);
     await onStepChange("completed");
+    void trackEvent(ANALYTICS_EVENTS.ONBOARDING_COMPLETED, {
+      tour_version: "activation_v1",
+    });
   };
 
   const handleEnableNotifications = async () => {

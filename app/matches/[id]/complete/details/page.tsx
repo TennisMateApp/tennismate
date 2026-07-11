@@ -16,6 +16,8 @@ import {
   upsertMatchScoreRelationship,
   withRelationshipFields,
 } from "@/lib/playerRelationships";
+import { trackEvent } from "@/lib/analytics";
+import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 
 type Player = {
   id: string;
@@ -271,6 +273,13 @@ const [matchComments, setMatchComments] = useState("");
     })();
   }, [matchId]);
 
+  useEffect(() => {
+    if (!matchId) return;
+    void trackEvent(ANALYTICS_EVENTS.SCORE_ENTRY_STARTED, {
+      completion_source: fromInvite ? "invite" : "match_detail",
+    });
+  }, [fromInvite, matchId]);
+
   const handleSubmit = async () => {
     if (!playerA || !playerB) return;
 
@@ -420,6 +429,12 @@ if (relationshipPairId) {
         await setDoc(doc(db, "players", winnerId), { badges: { loveHold: true } }, { merge: true });
       }
     }
+
+    void trackEvent(ANALYTICS_EVENTS.SCORE_SUBMITTED, {
+      match_format: type || "unknown",
+      set_count: clean.length,
+      completion_source: fromInvite ? "invite" : "match_detail",
+    });
 
     router.push(
   fromInvite
