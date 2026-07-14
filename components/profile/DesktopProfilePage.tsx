@@ -105,7 +105,7 @@ async function logFirestoreCall<T>(label: string, operation: () => Promise<T>): 
 
 type MatchStats = { matches: number; completed: number; wins: number };
 
-type ProfileData = {
+export type ProfileData = {
   name: string;
   postcode: string;
   skillBand: SkillBand | "";
@@ -228,7 +228,11 @@ function BadgePill(props: { title: string; subtitle: string; locked?: boolean; i
   );
 }
 
-export default function DesktopProfilePage() {
+type DesktopProfilePageProps = {
+  initialProfile?: ProfileData | null;
+};
+
+export default function DesktopProfilePage({ initialProfile = null }: DesktopProfilePageProps) {
   const router = useRouter();
 
     const searchParams = useSearchParams();
@@ -242,8 +246,7 @@ const [deletingAccount, setDeletingAccount] = useState(false);
 const [deleteError, setDeleteError] = useState<string | null>(null);
 
 
-  const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<ProfileData>({
+  const emptyProfile: ProfileData = {
     name: "",
     postcode: "",
     skillBand: "",
@@ -254,7 +257,9 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
     birthYear: "",
     gender: "",
     availability: [],
-  });
+  };
+  const [loading, setLoading] = useState(!initialProfile);
+  const [profile, setProfile] = useState<ProfileData>(initialProfile ?? emptyProfile);
 
   const [matchStats, setMatchStats] = useState<MatchStats>({
     matches: 0,

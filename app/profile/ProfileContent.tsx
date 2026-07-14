@@ -34,6 +34,7 @@ import {
   resolveProfilePhoto,
   withPhotoCacheBust,
 } from "@/lib/profilePhoto";
+import { buildEditablePlayerProfileUpdate } from "@/lib/editablePlayerProfile";
 
 
 const TM = {
@@ -160,7 +161,7 @@ export default function ProfileContent() {
   const [bioExpanded, setBioExpanded] = useState(false);
 
   const originalPostcodeRef = React.useRef<string>("");
-  const exitingEditModeRef = React.useRef(false);
+  const saveInFlightRef = React.useRef(false);
 
 const [formData, setFormData] = useState({
   name: "",
@@ -394,21 +395,6 @@ originalPostcodeRef.current = String(privateData.postcode || data.postcode || ""
 
   useEffect(() => {
     const wantsEdit = searchParams.get("edit") === "true";
-    console.log("[ProfileContent] edit search param effect", {
-      wantsEdit,
-      search: searchParams.toString(),
-      exitingEditMode: exitingEditModeRef.current,
-    });
-
-    if (exitingEditModeRef.current && wantsEdit) {
-      console.log("[ProfileContent] suppressing stale edit=true while exiting edit mode");
-      return;
-    }
-
-    if (!wantsEdit) {
-      exitingEditModeRef.current = false;
-    }
-
     setEditMode(wantsEdit);
   }, [searchParams]);
 
@@ -681,6 +667,10 @@ if (firstDigit !== "2" && firstDigit !== "3") {
   setSaving(true);
   setStatus("Saving...");
 
+  let playerPayloadKeys: string[] = [];
+  let playerDocumentExists: boolean | null = null;
+  let legacySensitiveKeysPresent: string[] = [];
+
   try {
     let nextLat: number | null = null;
     let nextLng: number | null = null;
@@ -714,27 +704,20 @@ if (croppedImage) {
   await cleanupLegacyProfilePhotos(storage, uid);
 }
 
-const badges = Array.isArray(formData.badges) ? formData.badges : [];
-
-const playerPayload = {
+const playerPayload = buildEditablePlayerProfileUpdate({
+  name: formData.name || "",
   postcode: newPostcode,
-  badges,
+  bio: formData.bio || "",
+  availability: formData.availability || [],
   gender: formData.gender || null,
+  isMatchable: !!formData.isMatchable,
   skillBand: formData.skillBand || null,
   skillBandLabel: toSkillLabel(formData.skillBand),
   skillRating: formData.rating === "" ? null : formData.rating,
-  utr: formData.rating === "" ? null : formData.rating,
   skillLevel: coarseFromBand(formData.skillBand),
   photoURL,
   photoThumbURL,
-  name: formData.name || "",
-  nameLower: (formData.name || "").toLowerCase(),
-  bio: formData.bio || "",
-  availability: formData.availability || [],
-  timestamp: serverTimestamp(),
-  profileComplete: true,
-  isMatchable: !!formData.isMatchable,
-};
+});
 
 const privatePlayerPayload = {
   email,
@@ -752,17 +735,26 @@ const userPayload = {
   updatedAt: serverTimestamp(),
 };
 
+const playerRef = doc(db, "players", uid);
+playerPayloadKeys = Object.keys(playerPayload).sort();
+if (process.env.NODE_ENV !== "production") {
+  const currentPlayerSnap = await getDoc(playerRef);
+  playerDocumentExists = currentPlayerSnap.exists();
+  legacySensitiveKeysPresent = Object.keys(currentPlayerSnap.data() ?? {})
+    .filter((key) => ["email", "birthYear", "lat", "lng", "geohash"].includes(key))
+    .sort();
+  console.info("[ProfileContent] player profile write", {
+    authenticatedUid: currentAuthUser.uid,
+    targetDocumentUid: uid,
+    payloadKeys: playerPayloadKeys,
+    documentExists: playerDocumentExists,
+    legacySensitiveKeysPresent,
+  });
+}
+
 await Promise.all([
   logFirestoreCall(`setDoc players/${uid} profile merge`, () =>
-    setDoc(
-      doc(db, "players", uid),
-      {
-        ...playerPayload,
-        avatar: photoThumbURL || photoURL || null,
-        photoUpdatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    )
+    setDoc(playerRef, playerPayload, { merge: true })
   ),
   logFirestoreCall(`setDoc players_private/${uid} profile merge`, () =>
     setDoc(doc(db, "players_private", uid), privatePlayerPayload, { merge: true })
@@ -794,8 +786,15 @@ setPreviewURL(photoThumbURL || photoURL);
 
     setStatus("✅ Profile saved successfully!");
     return true;
-  } catch (e) {
-    console.error(e);
+  } catch (e: any) {
+    console.error("[ProfileContent] profile save failed", {
+      authenticatedUid: auth.currentUser?.uid ?? null,
+      targetDocumentUid: user?.uid ?? null,
+      payloadKeys: playerPayloadKeys,
+      documentExists: playerDocumentExists,
+      legacySensitiveKeysPresent,
+      code: e?.code ?? null,
+    });
     setStatus("❌ Error saving profile.");
     return false;
   } finally {
@@ -813,35 +812,17 @@ const handleSubmit = async (e: React.FormEvent) => {
 };
 
 const handleSaveAndExitEditMode = async () => {
-  console.log("[ProfileContent] before saveProfile", {
-    editMode,
-    search: searchParams.toString(),
-    href: typeof window !== "undefined" ? window.location.href : null,
-  });
+  if (saveInFlightRef.current) return;
+  saveInFlightRef.current = true;
 
-  const ok = await saveProfile();
+  try {
+    const ok = await saveProfile();
+    if (!ok) return;
 
-  console.log("[ProfileContent] after saveProfile", {
-    ok,
-    editMode,
-    search: searchParams.toString(),
-    href: typeof window !== "undefined" ? window.location.href : null,
-  });
-
-  if (ok) {
-    exitingEditModeRef.current = true;
     setEditMode(false);
-
-    if (typeof window !== "undefined" && window.location.pathname === "/profile") {
-      window.history.replaceState(null, "", "/profile");
-      console.log("[ProfileContent] window.history.replaceState /profile complete", {
-        href: window.location.href,
-      });
-    }
-
-    console.log("[ProfileContent] before router.replace /profile");
     router.replace("/profile", { scroll: false });
-    console.log("[ProfileContent] after router.replace /profile");
+  } finally {
+    saveInFlightRef.current = false;
   }
 };
 

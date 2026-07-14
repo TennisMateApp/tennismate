@@ -30,6 +30,8 @@ import type { ChangeEvent } from "react";
 import { geohashForLocation } from "geofire-common";
 import { httpsCallable } from "firebase/functions";
 import { getFunctionsClient } from "@/lib/getFunctionsClient";
+import type { ProfileData } from "@/components/profile/DesktopProfilePage";
+import { buildEditablePlayerProfileUpdate } from "@/lib/editablePlayerProfile";
 
 const TM = {
   forest: "#0B3D2E",
@@ -96,11 +98,16 @@ async function logFirestoreCall<T>(label: string, operation: () => Promise<T>): 
   }
 }
 
-export default function DesktopProfileEditPage() {
+type DesktopProfileEditPageProps = {
+  onProfileSaved?: (profile: ProfileData) => void;
+};
+
+export default function DesktopProfileEditPage({ onProfileSaved }: DesktopProfileEditPageProps) {
   const router = useRouter();
   console.log("[DesktopProfileEditPage] render start");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const saveInFlightRef = useRef(false);
   const [status, setStatus] = useState("");
 
     const [deletingAccount, setDeletingAccount] = useState(false);
@@ -323,6 +330,7 @@ const handleRemovePhoto = async () => {
 
 
   const saveProfile = async () => {
+    if (saveInFlightRef.current) return;
     if (!user) return;
     const currentAuthUser = auth.currentUser;
     if (!currentAuthUser) return setStatus("Please sign in again before saving your profile.");
@@ -354,8 +362,13 @@ const handleRemovePhoto = async () => {
     const oldPostcode = (originalPostcodeRef.current || "").trim();
     const postcodeChanged = newPostcode !== oldPostcode;
 
+    saveInFlightRef.current = true;
     setSaving(true);
     setStatus("Saving...");
+
+    let playerPayloadKeys: string[] = [];
+    let playerDocumentExists: boolean | null = null;
+    let legacySensitiveKeysPresent: string[] = [];
 
     try {
       let nextLat: number | null = null;
@@ -383,27 +396,20 @@ if (croppedImage) {
   await cleanupLegacyProfilePhotos(storage, uid);
 }
 
-const playerPayload = {
+const playerPayload = buildEditablePlayerProfileUpdate({
   name: formData.name || "",
   postcode: newPostcode,
   bio: formData.bio || "",
   availability: formData.availability || [],
   gender: formData.gender || null,
   isMatchable: !!formData.isMatchable,
-  badges: Array.isArray(formData.badges) ? formData.badges : [],
-
   skillBand: formData.skillBand || null,
   skillBandLabel: toSkillLabel(formData.skillBand),
   skillRating: formData.rating === "" ? null : formData.rating,
-  utr: formData.rating === "" ? null : formData.rating,
   skillLevel: coarseFromBand(formData.skillBand),
-
   photoURL,
   photoThumbURL,
-  nameLower: (formData.name || "").toLowerCase(),
-  timestamp: serverTimestamp(),
-  profileComplete: true,
-};
+});
 
 const privatePlayerPayload = {
   email,
@@ -421,17 +427,26 @@ const userPayload = {
   updatedAt: serverTimestamp(),
 };
 
+const playerRef = doc(db, "players", uid);
+playerPayloadKeys = Object.keys(playerPayload).sort();
+if (process.env.NODE_ENV !== "production") {
+  const currentPlayerSnap = await getDoc(playerRef);
+  playerDocumentExists = currentPlayerSnap.exists();
+  legacySensitiveKeysPresent = Object.keys(currentPlayerSnap.data() ?? {})
+    .filter((key) => ["email", "birthYear", "lat", "lng", "geohash"].includes(key))
+    .sort();
+  console.info("[DesktopProfileEditPage] player profile write", {
+    authenticatedUid: currentAuthUser.uid,
+    targetDocumentUid: uid,
+    payloadKeys: playerPayloadKeys,
+    documentExists: playerDocumentExists,
+    legacySensitiveKeysPresent,
+  });
+}
+
 await Promise.all([
   logFirestoreCall(`setDoc players/${uid} profile merge`, () =>
-    setDoc(
-      doc(db, "players", uid),
-      {
-        ...playerPayload,
-        avatar: photoThumbURL || photoURL || null,
-        photoUpdatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    )
+    setDoc(playerRef, playerPayload, { merge: true })
   ),
   logFirestoreCall(`setDoc players_private/${uid} profile merge`, () =>
     setDoc(doc(db, "players_private", uid), privatePlayerPayload, { merge: true })
@@ -460,11 +475,31 @@ setPreviewURL(photoThumbURL || photoURL);
       originalPostcodeRef.current = newPostcode;
 
       setStatus("✅ Saved!");
-      router.push("/profile");
-    } catch (e) {
-      console.error(e);
+      onProfileSaved?.({
+        name: formData.name || "",
+        postcode: newPostcode,
+        skillBand: formData.skillBand,
+        rating: formData.rating,
+        bio: formData.bio || "",
+        photoURL: photoThumbURL || photoURL,
+        badges: Array.isArray(formData.badges) ? formData.badges : [],
+        birthYear: formData.birthYear,
+        gender: formData.gender || "",
+        availability: formData.availability || [],
+      });
+      router.replace("/profile", { scroll: false });
+    } catch (e: any) {
+      console.error("[DesktopProfileEditPage] profile save failed", {
+        authenticatedUid: auth.currentUser?.uid ?? null,
+        targetDocumentUid: user?.uid ?? null,
+        payloadKeys: playerPayloadKeys,
+        documentExists: playerDocumentExists,
+        legacySensitiveKeysPresent,
+        code: e?.code ?? null,
+      });
       setStatus("❌ Error saving profile.");
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
   };
