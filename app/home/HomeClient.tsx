@@ -44,6 +44,10 @@ import {
 import { registerTennisMateNotifications } from "@/lib/registerNotifications";
 import { useOnboardingProgress } from "@/lib/useOnboardingProgress";
 import { getEventFilledSpots } from "@/lib/eventCapacity";
+import {
+  getCalendarEntryDisplayTitle,
+  isTennisEventCalendarEntry,
+} from "@/lib/calendarEventPresentation";
 import UpcomingEventsSection, {
   type HomeDiscoveryEvent,
 } from "@/components/home/UpcomingEventsSection";
@@ -1446,6 +1450,8 @@ if (showDesktopWeb) {
 
       const opponentName = opp?.name || "Opponent";
       const opponentPhoto = opp?.photoThumbURL || opp?.photoURL || opp?.avatar || null;
+      const isTennisEvent = isTennisEventCalendarEntry(nextEvent);
+      const displayTitle = getCalendarEntryDisplayTitle(nextEvent, opponentName);
 
       const whenLabel = formatStartLikeCard(nextEvent.start);
       const whereLabel = nextEvent.courtName || nextEvent.location || "Court TBA";
@@ -1491,7 +1497,7 @@ const isRematch =
               </div>
 
               <div className="mt-2 text-[18px] font-extrabold truncate">
-                {opponentName}
+                {displayTitle}
               </div>
 
               <div className="mt-1 text-xs font-semibold text-black/60 truncate">
@@ -1500,17 +1506,21 @@ const isRematch =
             </div>
 
             <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full ring-2 ring-white/70 bg-white">
-              {opponentPhoto ? (
+              {isTennisEvent ? (
+                <div className="grid h-full w-full place-items-center bg-emerald-100 text-emerald-800">
+                  <CalendarDays className="h-6 w-6" />
+                </div>
+              ) : opponentPhoto ? (
                 <Image
                   src={opponentPhoto}
-                  alt={opponentName}
+                  alt={displayTitle}
                   fill
                   sizes="48px"
                   className="object-cover"
                 />
               ) : (
                 <div className="grid h-full w-full place-items-center text-[14px] font-extrabold text-black/60">
-                  {(opponentName || "O").trim().charAt(0).toUpperCase()}
+                  {(displayTitle || "O").trim().charAt(0).toUpperCase()}
                 </div>
               )}
             </div>

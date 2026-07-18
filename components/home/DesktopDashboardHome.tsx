@@ -10,6 +10,10 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import UpcomingEventsSection, {
   type HomeDiscoveryEvent,
 } from "@/components/home/UpcomingEventsSection";
+import {
+  getCalendarEntryDisplayTitle,
+  isTennisEventCalendarEntry,
+} from "@/lib/calendarEventPresentation";
 
 type ActivePlayer = {
   id: string;
@@ -414,6 +418,8 @@ const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
 
                       const opponentName = opp?.name || "Opponent";
                       const opponentPhoto = opp?.photoThumbURL || opp?.photoURL || opp?.avatar || null;
+                      const isTennisEvent = isTennisEventCalendarEntry(nextEvent);
+                      const displayTitle = getCalendarEntryDisplayTitle(nextEvent, opponentName);
 
                      const whenLabel = formatStartLikeCard(nextEvent.start);
 const whereLabel = nextEvent.courtName || nextEvent.location || "Court TBA";
@@ -449,7 +455,7 @@ const isRematch =
                               </div>
 
                               <div className="mt-2 text-[18px] font-extrabold text-black/90 truncate">
-                                {opponentName}
+                                {displayTitle}
                               </div>
 
                               <div className="mt-1 flex items-center gap-2 text-sm text-black/60 truncate">
@@ -461,17 +467,21 @@ const isRematch =
                             </div>
 
                             <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full ring-2 ring-white/70 bg-white">
-                              {opponentPhoto ? (
+                              {isTennisEvent ? (
+                                <div className="grid h-full w-full place-items-center bg-emerald-100 text-emerald-800">
+                                  <CalendarDays className="h-7 w-7" />
+                                </div>
+                              ) : opponentPhoto ? (
                                 <Image
                                   src={opponentPhoto}
-                                  alt={opponentName}
+                                  alt={displayTitle}
                                   fill
                                   sizes="56px"
                                   className="object-cover"
                                 />
                               ) : (
                                 <div className="grid h-full w-full place-items-center text-[16px] font-extrabold text-black/60">
-                                  {(opponentName || "O").trim().charAt(0).toUpperCase()}
+                                  {(displayTitle || "O").trim().charAt(0).toUpperCase()}
                                 </div>
                               )}
                             </div>
