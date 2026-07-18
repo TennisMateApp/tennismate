@@ -17,6 +17,7 @@ import {
   onSnapshot, // ✅ ADD THIS
   query,
   where,
+  orderBy,
   limit,
   getDocs,
   getDoc,
@@ -42,6 +43,9 @@ import {
 } from "@/lib/notificationPromptState";
 import { registerTennisMateNotifications } from "@/lib/registerNotifications";
 import { useOnboardingProgress } from "@/lib/useOnboardingProgress";
+import UpcomingEventsSection, {
+  type HomeDiscoveryEvent,
+} from "@/components/home/UpcomingEventsSection";
 
 
 const TM = {
@@ -646,6 +650,7 @@ const showDesktopWeb = !isApp && isDesktop;
   const [userName, setUserName] = useState('Player');
   const [levelLabel, setLevelLabel] = useState('AMATEUR');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [playerPostcode, setPlayerPostcode] = useState<string | null>(null);
 
   const [homeBootstrapping, setHomeBootstrapping] = useState(true);
 
@@ -660,6 +665,8 @@ const homeTrackedRef = useRef(false);
   
   const [nearbyActive, setNearbyActive] = useState<ActivePlayer[]>([]);
 const [nearbyActiveLoading, setNearbyActiveLoading] = useState(true);
+const [discoveryEvents, setDiscoveryEvents] = useState<HomeDiscoveryEvent[]>([]);
+const [discoveryEventsLoading, setDiscoveryEventsLoading] = useState(true);
 const [myMatches, setMyMatches] = useState<any[]>([]);
 const [myMatchesLoading, setMyMatchesLoading] = useState(true);
 const [myCalendarEvents, setMyCalendarEvents] = useState<CalendarEvent[]>([]);
@@ -764,6 +771,10 @@ useEffect(() => {
         (typeof p.ntrp === "string" && p.ntrp) ||
         null;
 
+      setPlayerPostcode(
+        typeof p.postcode === "string" && p.postcode.trim() ? p.postcode.trim() : null
+      );
+
       if (playerName) setUserName(playerName);
       setAvatarUrl(resolvedPhoto || null);
 
@@ -786,6 +797,67 @@ useEffect(() => {
   });
   return () => unsub();
 }, []);
+
+useEffect(() => {
+  if (!uid) {
+    setDiscoveryEvents([]);
+    setDiscoveryEventsLoading(false);
+    return;
+  }
+
+  setDiscoveryEventsLoading(true);
+  const eventsQuery = query(
+    collection(db, "events"),
+    where("status", "==", "open"),
+    where("start", ">=", new Date().toISOString()),
+    orderBy("start", "asc"),
+    limit(50)
+  );
+
+  const unsubscribe = onSnapshot(
+    eventsQuery,
+    (snapshot) => {
+      const now = Date.now();
+      const upcoming = snapshot.docs
+        .map((eventDoc) => ({
+          id: eventDoc.id,
+          ...(eventDoc.data() as Omit<HomeDiscoveryEvent, "id">),
+        }))
+        .filter((event) => {
+          const startMs = event.start ? Date.parse(event.start) : Number.NaN;
+          const participants = Array.isArray(event.participants) ? event.participants : [];
+          const filled =
+            typeof event.spotsFilled === "number" ? event.spotsFilled : participants.length;
+          const hasSpace =
+            typeof event.spotsTotal !== "number" || event.spotsTotal <= 0 || filled < event.spotsTotal;
+
+          return (
+            Number.isFinite(startMs) &&
+            startMs > now &&
+            hasSpace &&
+            (event.hostId === uid || !participants.includes(uid))
+          );
+        })
+        .sort((a, b) => {
+          const aLocal = Boolean(playerPostcode && a.court?.postcode === playerPostcode);
+          const bLocal = Boolean(playerPostcode && b.court?.postcode === playerPostcode);
+          if (aLocal !== bLocal) return aLocal ? -1 : 1;
+          return Date.parse(a.start || "") - Date.parse(b.start || "");
+        })
+        .slice(0, 6);
+
+      setDiscoveryEvents(upcoming);
+      setDiscoveryEventsLoading(false);
+    },
+    (error) => {
+      console.warn("[Home] Failed to load discovery events:", error);
+      setDiscoveryEvents([]);
+      setDiscoveryEventsLoading(false);
+    }
+  );
+
+  return () => unsubscribe();
+}, [uid, playerPostcode]);
 
 useEffect(() => {
   const overlay = searchParams.get("overlay");
@@ -1217,6 +1289,8 @@ if (showDesktopWeb) {
       nearbyActiveLoading={nearbyActiveLoading}
       myCalendarEvents={nextUpcomingEvents}
       myCalendarEventsLoading={myCalendarEventsLoading || acceptedInviteEventsLoading}
+      discoveryEvents={discoveryEvents}
+      discoveryEventsLoading={discoveryEventsLoading}
       homeBootstrapping={homeBootstrapping}
       notificationBanner={homeNotificationBanner}
     />
@@ -1482,6 +1556,12 @@ const isRematch =
     </div>
   )}
 </div>
+
+<UpcomingEventsSection
+  events={discoveryEvents}
+  loading={discoveryEventsLoading}
+  compact
+/>
 
 {/* My Matches (horizontal scroll) */}
 <div className="mt-6" data-onboarding-target="tennis-mates">

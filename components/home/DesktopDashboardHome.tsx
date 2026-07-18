@@ -7,6 +7,9 @@ import { GiTennisBall } from "react-icons/gi";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
+import UpcomingEventsSection, {
+  type HomeDiscoveryEvent,
+} from "@/components/home/UpcomingEventsSection";
 
 type ActivePlayer = {
   id: string;
@@ -63,6 +66,8 @@ type DesktopDashboardHomeProps = {
 
   myCalendarEvents: CalendarEvent[];
   myCalendarEventsLoading: boolean;
+  discoveryEvents: HomeDiscoveryEvent[];
+  discoveryEventsLoading: boolean;
 
   homeBootstrapping?: boolean;
   notificationBanner?: React.ReactNode;
@@ -82,6 +87,8 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
     nearbyActiveLoading,
     myCalendarEvents,
     myCalendarEventsLoading,
+    discoveryEvents,
+    discoveryEventsLoading,
     homeBootstrapping = false,
     notificationBanner,
   } = props;
@@ -505,6 +512,11 @@ const isRematch =
                     </div>
                   )}
                 </div>
+
+                <UpcomingEventsSection
+                  events={discoveryEvents}
+                  loading={discoveryEventsLoading}
+                />
 
                 {/* Quick Actions */}
                 <div className="mt-8 rounded-3xl border border-black/10 bg-white p-7 2xl:p-8">
