@@ -665,6 +665,7 @@ export default function MatchPage() {
   const [firstRequestSuccessVisible, setFirstRequestSuccessVisible] = useState(false);
   const [matchRequestNotificationPromptOpen, setMatchRequestNotificationPromptOpen] = useState(false);
   const [matchSurface, setMatchSurface] = useState<"players" | "availability">("players");
+  const [availabilityLastSeenMs, setAvailabilityLastSeenMs] = useState<number | null>(null);
   const [availabilityRequestOpen, setAvailabilityRequestOpen] = useState(false);
   const [availabilityDraftSaved, setAvailabilityDraftSaved] = useState(false);
   const [availabilitySaveError, setAvailabilitySaveError] = useState<string | null>(null);
@@ -683,6 +684,9 @@ export default function MatchPage() {
   });
   const [activeAvailabilityRecord, setActiveAvailabilityRecord] = useState<AvailabilityRecord | null>(null);
   const [browseAvailabilityRecords, setBrowseAvailabilityRecords] = useState<AvailabilityRecord[]>([]);
+  const availabilityPostcodePrefix = /^\d/.test(myProfile?.postcode?.trim() || "")
+    ? myProfile!.postcode.trim().charAt(0)
+    : "";
   
 
 
@@ -932,12 +936,6 @@ useEffect(() => {
   }
 
   const activeRef = doc(db, "availabilities", user.uid);
-  const browseQ = query(
-    collection(db, "availabilities"),
-    where("status", "==", "open"),
-    limit(30)
-  );
-
   const unsubActive = onSnapshot(
     activeRef,
     (snap) => {
@@ -959,12 +957,23 @@ useEffect(() => {
     }
   );
 
-  const unsubBrowse = onSnapshot(
-    browseQ,
-    async (snap) => {
+  let unsubBrowse = () => {};
+
+  if (availabilityPostcodePrefix) {
+    const browseQ = query(
+      collection(db, "availabilities"),
+      where("postcode", ">=", availabilityPostcodePrefix),
+      where("postcode", "<", `${availabilityPostcodePrefix}\uf8ff`),
+      limit(100)
+    );
+
+    unsubBrowse = onSnapshot(
+      browseQ,
+      async (snap) => {
       const next = snap.docs
         .map((d) => normalizeAvailabilityRecord(d.id, d.data()))
         .filter((item): item is AvailabilityRecord => !!item)
+        .filter((item) => item.status === "open")
         .filter((item) => item.userId !== user.uid)
         .filter((item) => !isAvailabilityExpired(item))
         .sort((a, b) => {
@@ -985,18 +994,93 @@ useEffect(() => {
         console.warn("[MatchPage] failed to enrich availability profiles", error);
         setBrowseAvailabilityRecords(next);
       }
-    },
-    (error) => {
-      console.error("[MatchPage] failed to subscribe to browse availabilities", error);
-      setAvailabilitySaveError("We couldn't load open availabilities just now.");
-    }
-  );
+      },
+      (error) => {
+        console.error("[MatchPage] failed to subscribe to browse availabilities", error);
+        setAvailabilitySaveError("We couldn't load open availabilities just now.");
+      }
+    );
+  } else {
+    setBrowseAvailabilityRecords([]);
+  }
 
   return () => {
     unsubActive();
     unsubBrowse();
   };
+}, [availabilityPostcodePrefix, user?.uid]);
+
+useEffect(() => {
+  if (!user?.uid) {
+    setAvailabilityLastSeenMs(null);
+    return;
+  }
+
+  return onSnapshot(
+    doc(db, "users", user.uid),
+    (snap) => {
+      const seenAt = snap.exists() ? toDateSafe(snap.data()?.availabilityLastSeenAt) : null;
+      setAvailabilityLastSeenMs(seenAt?.getTime() ?? 0);
+    },
+    (error) => {
+      console.warn("[MatchPage] failed to load availability seen state", error);
+      setAvailabilityLastSeenMs(0);
+    }
+  );
 }, [user?.uid]);
+
+const postcodeMatchedAvailabilityRecords = useMemo(
+  () =>
+    availabilityPostcodePrefix
+      ? browseAvailabilityRecords.filter((availability) =>
+          availability.postcode.trim().startsWith(availabilityPostcodePrefix)
+        )
+      : [],
+  [availabilityPostcodePrefix, browseAvailabilityRecords]
+);
+
+const newestAvailabilityCreatedAtMs = useMemo(
+  () =>
+    postcodeMatchedAvailabilityRecords.reduce(
+      (latest, availability) =>
+        Math.max(latest, toDateSafe(availability.createdAt)?.getTime() ?? 0),
+      0
+    ),
+  [postcodeMatchedAvailabilityRecords]
+);
+
+const hasNewAvailability =
+  availabilityLastSeenMs !== null &&
+  newestAvailabilityCreatedAtMs > availabilityLastSeenMs;
+
+useEffect(() => {
+  if (
+    matchSurface !== "availability" ||
+    !user?.uid ||
+    !hasNewAvailability ||
+    availabilityLastSeenMs === null
+  ) {
+    return;
+  }
+
+  setAvailabilityLastSeenMs(
+    Math.max(availabilityLastSeenMs, newestAvailabilityCreatedAtMs)
+  );
+
+  void setDoc(
+    doc(db, "users", user.uid),
+    { availabilityLastSeenAt: serverTimestamp() },
+    { merge: true }
+  ).catch((error) => {
+    console.warn("[MatchPage] failed to mark availabilities as seen", error);
+  });
+}, [
+  availabilityLastSeenMs,
+  hasNewAvailability,
+  matchSurface,
+  newestAvailabilityCreatedAtMs,
+  user?.uid,
+]);
 
 useEffect(() => {
   if (!user?.uid) {
@@ -2875,7 +2959,7 @@ const activeAvailability = useMemo(() => {
 }, [activeAvailabilityRecord, myProfile?.postcode]);
 
 const browseAvailabilityCards = useMemo(() => {
-  return browseAvailabilityRecords.map((availability) => {
+  return postcodeMatchedAvailabilityRecords.map((availability) => {
     const numeric =
       typeof (availability.skillRating ?? availability.utr) === "number"
         ? (availability.skillRating ?? availability.utr)!.toFixed(1)
@@ -2913,7 +2997,7 @@ const browseAvailabilityCards = useMemo(() => {
       note: availability.note,
     };
   });
-}, [browseAvailabilityRecords, myProfile?.lat, myProfile?.lng]);
+}, [postcodeMatchedAvailabilityRecords, myProfile?.lat, myProfile?.lng]);
 
 useEffect(() => {
   setVisibleCount(PAGE_SIZE);
@@ -3106,6 +3190,7 @@ if (isDesktop) {
   sentRequestUserIds={sentRequests}
   sendingRequestUserIds={sendingIds}
   pendingAvailabilityInterestKeys={pendingAvailabilityInterestKeys}
+  hasNewAvailability={hasNewAvailability}
   postcodePrefixPlayerCount={postcodePrefixPlayerCount}
   highlightFirstMatchRequest={shouldHighlightFirstMatchRequest}
   profileOpenId={profileOpenId}
@@ -3470,7 +3555,14 @@ return (
         : { background: "transparent", color: "rgba(11,61,46,0.62)" }
     }
   >
-    Availabilities
+    <span className="inline-flex items-center gap-1.5">
+      Actively Looking
+      {hasNewAvailability && matchSurface !== "availability" ? (
+        <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-white">
+          NEW
+        </span>
+      ) : null}
+    </span>
   </button>
 </div>
 
@@ -4006,35 +4098,7 @@ return (
           Tap to edit or cancel
         </div>
       </button>
-    ) : (
-      <div
-        className="rounded-3xl p-5 shadow-sm"
-        style={{
-          background: "#FFFFFF",
-          border: "1px solid rgba(15,23,42,0.10)",
-          boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
-        }}
-      >
-        <div className="text-[18px] font-black tracking-tight" style={{ color: TM.forest }}>
-          No live availability yet
-        </div>
-        <div className="mt-2 text-[14px]" style={{ color: "rgba(15,23,42,0.65)" }}>
-          Post when you want to play, then browse other open requests here.
-        </div>
-        <button
-          type="button"
-          onClick={() => setAvailabilityRequestOpen(true)}
-          className="mt-4 rounded-full px-4 py-3 text-[14px] font-extrabold"
-          style={{
-            background: TM.forest,
-            color: "#FFFFFF",
-            boxShadow: "0 10px 24px rgba(11,61,46,0.18)",
-          }}
-        >
-          Post Availability
-        </button>
-      </div>
-    )}
+    ) : null}
 
     <div className="px-1 text-[11px] font-extrabold uppercase tracking-[0.16em]" style={{ color: "rgba(11,61,46,0.55)" }}>
       Browse Open Requests

@@ -154,6 +154,7 @@ setActivityFilter: (v: ActivityFilter) => void;
   sentRequestUserIds: Set<string>;
   sendingRequestUserIds: Set<string>;
   pendingAvailabilityInterestKeys: Set<string>;
+  hasNewAvailability: boolean;
   postcodePrefixPlayerCount: number | null;
   highlightFirstMatchRequest: boolean;
 
@@ -197,6 +198,7 @@ setActivityFilter: (v: ActivityFilter) => void;
     sentRequestUserIds,
     sendingRequestUserIds,
     pendingAvailabilityInterestKeys,
+    hasNewAvailability,
     postcodePrefixPlayerCount,
     highlightFirstMatchRequest,
 
@@ -380,7 +382,14 @@ const handleInvite = useCallback(
                       : { background: "transparent", color: "rgba(11,61,46,0.62)" }
                   }
                 >
-                  Availabilities
+                  <span className="inline-flex items-center gap-1.5">
+                    Actively Looking
+                    {hasNewAvailability && matchSurface !== "availability" ? (
+                      <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-white">
+                        NEW
+                      </span>
+                    ) : null}
+                  </span>
                 </button>
               </div>
 
@@ -425,22 +434,7 @@ const handleInvite = useCallback(
                         Tap to edit or cancel
                       </div>
                     </button>
-                  ) : (
-                    <div className="rounded-3xl border bg-white p-6 shadow-sm">
-                      <div className="text-lg font-black text-[#0B3D2E]">No live availability yet</div>
-                      <div className="mt-2 text-sm text-black/60">
-                        Post a time you want to play and browse other open requests here.
-                      </div>
-                      <button
-                        type="button"
-                        onClick={onOpenAvailabilityRequest}
-                        className="mt-4 rounded-full px-4 py-3 text-sm font-extrabold"
-                        style={{ background: TM.forest, color: "#FFFFFF" }}
-                      >
-                        Post Availability
-                      </button>
-                    </div>
-                  )}
+                  ) : null}
 
                   <div>
                     <div className="mb-3 text-[11px] font-extrabold uppercase tracking-[0.16em] text-black/45">
