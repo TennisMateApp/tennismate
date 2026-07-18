@@ -1045,7 +1045,18 @@ if (isDesktop) {
             </div>
           </div>
 
-          {/* Location (NO MAP) */}
+          {/* Skill Level */}
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-100 text-green-900">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-gray-900">Skill Level</p>
+              <p className="text-sm text-gray-600">{formatSkillRange(event)}</p>
+            </div>
+          </div>
+
+          {/* Location */}
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-100 text-green-900">
               <MapPin className="h-5 w-5" />
@@ -1074,17 +1085,6 @@ if (isDesktop) {
 )}
             </div>
           </div>
-
-         {/* Skill Level */}
-<div className="flex items-start gap-3">
-  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-100 text-green-900">
-    <ShieldCheck className="h-5 w-5" />
-  </div>
-  <div className="min-w-0">
-    <p className="text-sm font-bold text-gray-900">Skill Level</p>
-    <p className="text-sm text-gray-600">{formatSkillRange(event)}</p>
-  </div>
-</div>
 
         </div>
       </div>
