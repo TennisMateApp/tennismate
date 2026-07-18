@@ -43,6 +43,7 @@ import { useIsDesktop } from "@/lib/useIsDesktop";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import DesktopEventDetailsPage from "@/components/events/DesktopEventDetailsPage";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
+import { countEventAttendees, getEventFilledSpots } from "@/lib/eventCapacity";
 
 
 function getSkill(profile?: any | null): number | null {
@@ -476,17 +477,14 @@ async function handleAccept(request: JoinRequest) {
 
       const data = eventSnap.data() as EventDoc;
       const total = data.spotsTotal ?? 0;
-      const currentFilled =
-        (typeof data.spotsFilled === "number"
-          ? data.spotsFilled
-          : (data.participants?.length ?? 0)) || 0;
+      const currentFilled = getEventFilledSpots(data);
 
       if (total && currentFilled >= total) throw new Error("Event is already full");
 
     const existing = Array.from(new Set(data.participants ?? []));
 const alreadyIn = existing.includes(request.userId);
 const nextParticipants = alreadyIn ? existing : [...existing, request.userId];
-const nextFilled = nextParticipants.length;
+const nextFilled = countEventAttendees(data.hostId, nextParticipants);
 const nextStatus = total && nextFilled >= total ? "full" : (data.status ?? "open");
 
 tx.update(eventRef, {
@@ -580,7 +578,7 @@ async function handleLeaveEvent() {
       if (!existing.includes(uid)) return;
 
       const nextParticipants = existing.filter(p => p !== uid);
-      const nextFilled = nextParticipants.length;
+      const nextFilled = countEventAttendees(data.hostId, nextParticipants);
       const total = data.spotsTotal ?? 0;
       const nextStatus = total && nextFilled < total && data.status === "full" ? "open" : data.status;
 
@@ -759,10 +757,7 @@ const status: "open" | "full" | "cancelled" | "completed" =
     : "open";
 const spotsTotalNum =
   typeof event.spotsTotal === "number" && event.spotsTotal > 0 ? event.spotsTotal : null;
-const filled =
-  typeof event.spotsFilled === "number"
-    ? event.spotsFilled
-    : (event.participants?.length ?? 0);
+const filled = getEventFilledSpots(event);
 
 const isHost = uid != null && uid === event.hostId;
 const isParticipant = uid != null && !!event.participants?.includes(uid);

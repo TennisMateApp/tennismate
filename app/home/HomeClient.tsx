@@ -43,6 +43,7 @@ import {
 } from "@/lib/notificationPromptState";
 import { registerTennisMateNotifications } from "@/lib/registerNotifications";
 import { useOnboardingProgress } from "@/lib/useOnboardingProgress";
+import { getEventFilledSpots } from "@/lib/eventCapacity";
 import UpcomingEventsSection, {
   type HomeDiscoveryEvent,
 } from "@/components/home/UpcomingEventsSection";
@@ -826,8 +827,7 @@ useEffect(() => {
         .filter((event) => {
           const startMs = event.start ? Date.parse(event.start) : Number.NaN;
           const participants = Array.isArray(event.participants) ? event.participants : [];
-          const filled =
-            typeof event.spotsFilled === "number" ? event.spotsFilled : participants.length;
+          const filled = getEventFilledSpots(event);
           const hasSpace =
             typeof event.spotsTotal !== "number" || event.spotsTotal <= 0 || filled < event.spotsTotal;
 

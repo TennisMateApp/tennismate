@@ -3,6 +3,7 @@
 import Link from "next/link";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import { Plus, CalendarDays, MapPin, Heart } from "lucide-react";
+import { getEventFilledSpots } from "@/lib/eventCapacity";
 
 export type Player = {
   name?: string;
@@ -21,6 +22,8 @@ export type DesktopEventItem = {
   end?: string;
   spotsTotal?: number;
   spotsFilled?: number;
+  hostId?: string;
+  participants?: string[];
   participantThumbs?: Player[];
 };
 
@@ -55,7 +58,7 @@ function typeTag(type?: string) {
 }
 
 function DesktopEventCard({ ev }: { ev: DesktopEventItem }) {
-  const filled = ev.spotsFilled ?? 0;
+  const filled = getEventFilledSpots(ev);
   const total = ev.spotsTotal ?? 0;
 
   return (

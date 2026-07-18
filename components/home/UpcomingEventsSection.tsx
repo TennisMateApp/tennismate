@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { CalendarDays, MapPin, Users } from "lucide-react";
+import { getEventFilledSpots } from "@/lib/eventCapacity";
 
 export type HomeDiscoveryEvent = {
   id: string;
@@ -46,12 +47,7 @@ function formatEventType(value?: string | null) {
 
 function spotsLabel(event: HomeDiscoveryEvent) {
   const total = typeof event.spotsTotal === "number" ? event.spotsTotal : 0;
-  const filled =
-    typeof event.spotsFilled === "number"
-      ? event.spotsFilled
-      : Array.isArray(event.participants)
-        ? event.participants.length
-        : 0;
+  const filled = getEventFilledSpots(event);
 
   if (total <= 0) return "Spaces available";
   const remaining = Math.max(0, total - filled);

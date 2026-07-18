@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import PlayerProfileView from "@/components/players/PlayerProfileView";
+import { getEventFilledSpots } from "@/lib/eventCapacity";
 
 
 export type EventDoc = {
@@ -234,10 +235,7 @@ export default function DesktopEventDetailsPage(props: {
     };
   }, [profileOpenId]);
 
-  const filled =
-    typeof event.spotsFilled === "number"
-      ? event.spotsFilled
-      : event.participants?.length ?? 0;
+  const filled = getEventFilledSpots(event);
 
   const total =
     typeof event.spotsTotal === "number" && event.spotsTotal > 0 ? event.spotsTotal : null;
@@ -812,5 +810,4 @@ export default function DesktopEventDetailsPage(props: {
   </div>
 );
 }
-
 

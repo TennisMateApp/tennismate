@@ -419,7 +419,7 @@ useEffect(() => {
   maxSkillLabel: toToSave,
 
   spotsTotal: players,
-  spotsFilled: 0,
+  spotsFilled: 1,
   status: "open",
 
   createdAt: serverTimestamp(),

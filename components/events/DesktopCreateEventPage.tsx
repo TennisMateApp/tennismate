@@ -393,7 +393,7 @@ useEffect(() => {
         minSkillLabel: skill === "" ? null : skill,
 
         spotsTotal: Number.isFinite(maxPlayers) ? Math.max(2, maxPlayers) : 4,
-        spotsFilled: 0,
+        spotsFilled: 1,
         participants: [],
 
         description: description.trim() === "" ? null : description.trim(),

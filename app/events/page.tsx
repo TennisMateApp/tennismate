@@ -17,6 +17,7 @@ import { auth, db } from "@/lib/firebaseConfig";
 import { CalendarDays, MapPin, Users, Plus, CircleCheck } from "lucide-react";
 import DesktopEventsPage from "@/components/events/DesktopEventsPage";
 import { useIsDesktop } from "@/lib/useIsDesktop";
+import { getEventFilledSpots } from "@/lib/eventCapacity";
 
 type EventItem = {
   id: string;
@@ -289,7 +290,7 @@ function EventCard({ ev }: { ev: EnrichedEvent }) {
   const start = ev.start ? new Date(ev.start) : null;
   const niceDate = start ? formatDateTime(start) : "TBA";
   const total = ev.spotsTotal ?? 0;
-  const filled = ev.spotsFilled ?? 0;
+  const filled = getEventFilledSpots(ev);
   const percent = total > 0 ? Math.min(100, Math.round((filled / total) * 100)) : 0;
 
   return (
