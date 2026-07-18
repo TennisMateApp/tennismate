@@ -135,6 +135,7 @@ export default function DirectoryPage() {
 
   const inSearch = searchTerm.trim().length >= 2;
   const qStr = searchTerm.trim().toLowerCase();
+  const searchField = /^\d+$/.test(qStr) ? "postcode" : "nameLower";
 
   const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
 
@@ -244,7 +245,7 @@ useEffect(() => {
     }
   };
 
-  // ----- search (prefix on nameLower) -----
+  // ----- search (prefix on nameLower or postcode) -----
   useEffect(() => {
     let cancelled = false;
 
@@ -262,7 +263,7 @@ useEffect(() => {
       try {
         const qy = query(
           collection(db, "players"),
-          orderBy("nameLower"),
+          orderBy(searchField),
           startAt(qStr),
           endAt(qStr + "\uf8ff"),
           limit(PAGE_SIZE)
@@ -287,7 +288,7 @@ useEffect(() => {
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [qStr, inSearch]);
+  }, [qStr, inSearch, searchField]);
 
   // ----- load more (search mode) -----
   const loadMoreSearch = async () => {
@@ -302,7 +303,7 @@ useEffect(() => {
         const bootstrapSnap = await getDocs(
           query(
             collection(db, "players"),
-            orderBy("nameLower"),
+            orderBy(searchField),
             startAt(qStr),
             endAt(qStr + "\uf8ff"),
             limit(PAGE_SIZE)
@@ -315,7 +316,7 @@ useEffect(() => {
 
       const qy = query(
         collection(db, "players"),
-        orderBy("nameLower"),
+        orderBy(searchField),
         startAfter(effectiveCursor),
         endAt(qStr + "\uf8ff"),
         limit(PAGE_SIZE)
