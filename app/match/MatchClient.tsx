@@ -4357,7 +4357,7 @@ style={{
           style={{ color: "rgba(15,23,42,0.65)" }}
         >
           {distText ? distText : ""}
-          {distText && pcText ? " â€¢ " : ""}
+          {distText && pcText ? " \u2022 " : ""}
           {pcText ? pcText : ""}
         </span>
       </div>
