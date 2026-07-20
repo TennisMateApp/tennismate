@@ -1,6 +1,14 @@
 "use client";
 
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useParams, useRouter } from "next/navigation";
 import debounce from "lodash.debounce";
 import {
@@ -63,6 +71,67 @@ const TM = {
   otherBubble: "#F1F3F5",       // their bubble
   neon: "#39FF14",
 };
+
+const MESSAGE_URL_PATTERN = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+
+function handleMessageLinkClick(
+  event: ReactMouseEvent<HTMLAnchorElement>,
+  href: string
+) {
+  const capacitorRuntime = (
+    window as typeof window & {
+      Capacitor?: { isNativePlatform?: () => boolean };
+    }
+  ).Capacitor;
+  if (!capacitorRuntime?.isNativePlatform?.()) return;
+
+  event.preventDefault();
+  void import("@capacitor/app-launcher")
+    .then(({ AppLauncher }) => AppLauncher.openUrl({ url: href }))
+    .catch((error) => {
+      console.warn("Could not open message link in the device browser", error);
+      window.open(href, "_blank", "noopener,noreferrer");
+    });
+}
+
+function renderMessageText(value: unknown): ReactNode {
+  const text = typeof value === "string" ? value : "";
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+
+  for (const match of text.matchAll(MESSAGE_URL_PATTERN)) {
+    const start = match.index ?? 0;
+    const rawMatch = match[0];
+    const linkText = rawMatch.replace(/[),.!?;:\]}]+$/, "");
+    const trailingText = rawMatch.slice(linkText.length);
+
+    if (start > cursor) nodes.push(text.slice(cursor, start));
+
+    if (linkText) {
+      const href = linkText.toLowerCase().startsWith("www.")
+        ? `https://${linkText}`
+        : linkText;
+      nodes.push(
+        <a
+          key={`${start}-${href}`}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="break-all font-semibold text-inherit underline decoration-current underline-offset-2"
+          onClick={(event) => handleMessageLinkClick(event, href)}
+        >
+          {linkText}
+        </a>
+      );
+    }
+
+    if (trailingText) nodes.push(trailingText);
+    cursor = start + rawMatch.length;
+  }
+
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes.length ? nodes : text;
+}
 
 function mapsUrlForAddress(address?: string | null) {
   const q = (address || "").trim();
@@ -3896,7 +3965,7 @@ const avatarURL = system
             <div className={system ? "max-w-[92%] sm:max-w-lg min-w-0" : "max-w-[86%] sm:max-w-md min-w-0"}>
   <div
   className={[
-    "px-4 py-3 text-[16px] leading-snug shadow-[0_2px_6px_rgba(0,0,0,0.06)] min-w-0 overflow-hidden",
+    "whitespace-pre-wrap break-words px-4 py-3 text-[16px] leading-snug shadow-[0_2px_6px_rgba(0,0,0,0.06)] min-w-0 overflow-hidden",
     isOther
       ? "rounded-[22px] rounded-bl-[10px]"
       : "rounded-[22px] rounded-br-[10px]",
@@ -3929,7 +3998,7 @@ style={{
 ) : msg.type === "system" && msg.systemType === "invite_cancelled" ? (
   <SystemInviteCancelled msg={msg} router={router} />
 ) : (
-  msg.text
+  renderMessageText(msg.text)
 )}
               </div>
 
