@@ -29,11 +29,9 @@ export async function ensureEventConversation(
       });
     } else {
       const cur = (snap.data() as any) || {};
-      const mergedParticipants = Array.from(
-        new Set([...(cur.participants || []), ...uniq])
-      );
 
-      // Always refresh context (keeps title in sync if event name changes)
+      // The event document is the source of truth for chat membership. This adds
+      // newly accepted attendees and removes anyone who has left the event.
       const newContext = {
         ...(cur.context || {}),
         type: "event",
@@ -42,7 +40,7 @@ export async function ensureEventConversation(
       };
 
       const updates: any = {
-        participants: mergedParticipants,
+        participants: uniq,
         context: newContext,
         updatedAt: now,
       };

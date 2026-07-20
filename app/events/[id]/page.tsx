@@ -316,8 +316,30 @@ useEffect(() => {
     return;
   }
 
+  // The thread ID is deterministic. Surface an existing event chat immediately,
+  // even if membership synchronization is temporarily rejected by deployed rules.
+  const expectedConversationId = `event_${id}`;
+  setConversationId(null);
+
   let cancelled = false;
   (async () => {
+    try {
+      const existingConversation = await getDoc(
+        doc(db, "conversations", expectedConversationId)
+      );
+      const context = existingConversation.exists()
+        ? existingConversation.data()?.context
+        : null;
+      const isThisEventConversation =
+        context?.type === "event" && context?.eventId === id;
+
+      if (isThisEventConversation && !cancelled) {
+        setConversationId(expectedConversationId);
+      }
+    } catch (e) {
+      console.warn("Could not check for existing event conversation", e);
+    }
+
     try {
       const convId = await ensureEventConversation(id, attendees, event.title);
       if (!cancelled) setConversationId(convId);
