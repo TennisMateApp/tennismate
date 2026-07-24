@@ -1,0 +1,61 @@
+{
+  "mode": "DRY_RUN",
+  "versions": {
+    "normalization": 2,
+    "duplicateClassification": 1,
+    "duplicateResolution": 1,
+    "format": 1
+  },
+  "sourceRecordsScanned": 36,
+  "recordsIncluded": 2,
+  "structurallyEligible": 2,
+  "structurallyIneligible": 0,
+  "canonicalEventsGenerated": 2,
+  "canonicalConflicts": 0,
+  "duplicateReviewGroups": 1,
+  "autoResolvedConfirmedGroups": 0,
+  "possibleGroupsPending": 1,
+  "scoringSurvivors": 0,
+  "excludedConfirmedDuplicates": 0,
+  "pendingPossibleDuplicateEvents": 2,
+  "expectedScoringEligibleEventCount": 0,
+  "expectedPlayerMatchContributions": 0,
+  "monthlyScoringEligibleCounts": {},
+  "dirtyMonths": [
+    "2026-07"
+  ],
+  "documentChanges": {
+    "wouldCreate": 2,
+    "wouldUpdate": 0,
+    "wouldExclude": 2,
+    "wouldDelete": 0
+  },
+  "duplicateGroups": [
+    {
+      "groupNumber": 1,
+      "classification": "POSSIBLE_SAME_MATCH",
+      "memberCount": 2,
+      "monthKeys": [
+        "2026-07"
+      ],
+      "activityTimestampsIdentical": true,
+      "completionTimeSeparationMinutes": 6,
+      "playedDatesMatch": true,
+      "conversationIdentifiersMatch": true,
+      "scoreFingerprintsMatch": false,
+      "winnerIdentifiers": "missing",
+      "locationFingerprintsMatch": true,
+      "sourceCompletionPaths": "same_or_missing",
+      "anyRequestId": false,
+      "anyInviteId": false,
+      "recommendedClassificationConfidence": "medium"
+    }
+  ],
+  "deterministicOutputChecksum": "2e1144d4fcdb4e521cb5c34047cc32a4bc4ac84d385fb9eede8066bc2637ce4c",
+  "generatedAt": "2026-07-13T03:27:27.453Z",
+  "filters": {
+    "month": "2026-07",
+    "limit": null,
+    "output": "../activity-backfill-phase13-july-2.json"
+  }
+}

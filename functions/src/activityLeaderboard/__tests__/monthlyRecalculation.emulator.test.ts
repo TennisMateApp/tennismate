@@ -1,0 +1,71 @@
+/* eslint-disable max-len, require-jsdoc, brace-style, block-spacing */
+import assert from "node:assert/strict";
+import {after, beforeEach, test} from "node:test";
+import {admin} from "../adminSdk";
+import {ActivityMonthLeaseConflictError, cleanupRetiredActivityGenerations, recalculateActivityMonth} from "../monthlyRecalculation";
+import {normalizeAndPersistMatchHistoryWrite} from "../persistence";
+import {PHASE2_JUNE_PILOT_CHECKSUM, reconstructHistoricalJunePilotAudit} from "../phase2RunAudit";
+
+if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("FIRESTORE_EMULATOR_HOST is required; production fallback is forbidden");
+const app = admin.initializeApp({projectId: "demo-tennismate-phase2"}, `phase2-${Date.now()}`); const db = app.firestore();
+async function clear(): Promise<void> { for (const collection of await db.listCollections()) await db.recursiveDelete(collection); }
+beforeEach(clear); after(async () => { await clear(); await app.delete(); });
+async function seed(id: string, players: [string, string], date: string): Promise<void> { await normalizeAndPersistMatchHistoryWrite(db, {sourceDocumentId: id, before: null, after: {players, completed: true, playedDate: date, matchRequestId: id}}); }
+async function pending(month = "2026-07"): Promise<void> { await db.doc(`activity_recalculation_requests/${month}`).set({monthKey: month, status: "pending"}); }
+
+test("real persistence events rebuild and rerun one deterministic generation", async () => {
+  await seed("one", ["a", "b"], "2026-07-01"); await seed("two", ["a", "c"], "2026-07-02"); await db.doc("players/a").set({name: "Player A", photoThumbURL: "https://public.example/a", postcode: "private-in-ranking", lat: -1, bio: "private-in-ranking"}); await pending();
+  const first = await recalculateActivityMonth(db, "2026-07", {runId: "run-one"}); const parent = (await db.doc("activity_leaderboards/2026-07").get()).data(); assert.equal(parent?.publishedGenerationId, first.generationId); assert.equal(parent?.rankingCount, 3); assert.equal((await db.collection(`activity_months/2026-07/generations/${first.generationId}/players`).get()).size, 3); assert.equal((await db.collection(`activity_leaderboards/2026-07/generations/${first.generationId}/rankings`).get()).size, 3); assert.equal((await db.doc("activity_recalculation_requests/2026-07").get()).data()?.status, "completed");
+  const firstAudit = (await db.doc("activity_phase2_runs/run-one").get()).data(); assert.equal(firstAudit?.status, "COMPLETED"); assert.equal(firstAudit?.triggerType, "scheduled"); assert.equal(firstAudit?.aggregatesCreated, 3); assert.equal(firstAudit?.rankingsCreated, 3); assert.equal(firstAudit?.failureCount, 0); assert.ok(firstAudit?.startedAt instanceof admin.firestore.Timestamp); assert.ok(firstAudit?.completedAt instanceof admin.firestore.Timestamp);
+  const aggregate = (await db.doc(`activity_months/2026-07/generations/${first.generationId}/players/a`).get()).data(); const ranking = (await db.doc(`activity_leaderboards/2026-07/generations/${first.generationId}/rankings/a`).get()).data(); assert.ok(aggregate?.updatedAt instanceof admin.firestore.Timestamp); assert.deepEqual(Object.keys(ranking || {}).sort(), ["avatarUrl", "displayName", "distinctOpponentCount", "eligibleActivityCount", "playerId", "points", "rank", "scoringActivityCount"].sort()); assert.equal(ranking?.displayName, "Player A"); assert.equal(ranking?.avatarUrl, "https://public.example/a");
+  await db.doc(`activity_months/2026-07/generations/${first.generationId}/players/stale`).set({stale: true}); await db.doc(`activity_leaderboards/2026-07/generations/${first.generationId}/rankings/stale`).set({stale: true}); await pending(); const second = await recalculateActivityMonth(db, "2026-07", {runId: "run-two"}); assert.equal(second.generationId, first.generationId); assert.equal(second.sourceChecksum, first.sourceChecksum); assert.equal((await db.collection(`activity_leaderboards/2026-07/generations/${first.generationId}/rankings`).get()).size, 3); const secondAudit = (await db.doc("activity_phase2_runs/run-two").get()).data(); assert.equal(secondAudit?.aggregatesCreated, 0); assert.equal(secondAudit?.aggregatesUpdated, 3); assert.equal(secondAudit?.rankingsCreated, 0); assert.equal(secondAudit?.rankingsUpdated, 3); assert.equal(secondAudit?.staleRowsRemoved, 2);
+});
+
+test("full rebuild atomically replaces stale published generation", async () => {
+  const started = new Date("2026-07-19T00:00:00Z"); await db.doc("activity_leaderboards/2026-07").set({status: "published", publishedGenerationId: "old"}); await db.doc("activity_leaderboards/2026-07/generations/old/rankings/stale").set({playerId: "stale", rank: 1}); await seed("one", ["a", "b"], "2026-07-01"); await pending(); const result = await recalculateActivityMonth(db, "2026-07", {runId: "replacement", now: () => started});
+  assert.notEqual(result.generationId, "old"); assert.equal((await db.doc("activity_leaderboards/2026-07").get()).data()?.publishedGenerationId, result.generationId); assert.equal((await db.doc(`activity_leaderboards/2026-07/generations/${result.generationId}/rankings/stale`).get()).exists, false); const retired = (await db.doc("activity_leaderboards/2026-07/generations/old").get()).data(); assert.equal(retired?.status, "retired"); assert.equal(retired?.deleteAfter.toDate().toISOString(), "2026-08-18T00:00:00.000Z"); assert.equal(await cleanupRetiredActivityGenerations(db, new Date("2026-08-19T00:00:00Z")), 1); assert.equal((await db.doc("activity_leaderboards/2026-07/generations/old").get()).exists, false); assert.equal((await db.doc(`activity_leaderboards/2026-07/generations/${result.generationId}`).get()).exists, true);
+});
+
+test("partial staging failure never publishes or completes", async () => {
+  await seed("one", ["a", "b"], "2026-07-01"); await pending(); await assert.rejects(() => recalculateActivityMonth(db, "2026-07", {runId: "partial", hooks: {afterStage: async () => {throw new Error("simulated failure");}}}), /simulated failure/);
+  assert.equal((await db.doc("activity_recalculation_requests/2026-07").get()).data()?.status, "failed"); assert.equal((await db.doc("activity_leaderboards/2026-07").get()).exists, false); const audit = (await db.doc("activity_phase2_runs/partial").get()).data(); assert.equal(audit?.status, "FAILED"); assert.equal(audit?.failureCount, 1); assert.equal(audit?.errorCategory, "Error");
+});
+
+test("active lease prevents concurrent worker publication", async () => {
+  await seed("one", ["a", "b"], "2026-07-01"); await pending(); let release!: () => void; const gate = new Promise<void>((resolve) => {release = resolve;}); let claimed!: () => void; const claim = new Promise<void>((resolve) => {claimed = resolve;}); const first = recalculateActivityMonth(db, "2026-07", {runId: "lease-owner", hooks: {afterClaim: async () => {claimed(); await gate;}}}); await claim;
+  assert.equal((await db.doc("activity_phase2_runs/lease-owner").get()).data()?.status, "RUNNING"); await assert.rejects(() => recalculateActivityMonth(db, "2026-07", {runId: "competitor"}), ActivityMonthLeaseConflictError); assert.equal((await db.doc("activity_phase2_runs/competitor").get()).exists, false); release(); await first; assert.equal((await db.doc("activity_recalculation_requests/2026-07").get()).data()?.status, "completed");
+});
+
+test("malformed scoring event fails closed", async () => {
+  await db.doc("activity_match_events/bad").set({canonicalMatchId: "bad", sourcePath: "match_history/bad", participantIds: ["same", "same"], activityAt: admin.firestore.Timestamp.fromDate(new Date("2026-07-01T00:00:00Z")), monthKey: "2026-07", eligible: true, eligibleForScoring: true, normalizationVersion: 2, sourceFingerprint: "bad", duplicateLookupKeys: [], duplicateEvidenceCodes: [], conflictingSourcePaths: [], conflictingSourceFingerprints: []}); await pending();
+  await assert.rejects(() => recalculateActivityMonth(db, "2026-07", {runId: "malformed"}), /exactly two distinct/); assert.equal((await db.doc("activity_recalculation_requests/2026-07").get()).data()?.status, "failed");
+});
+
+test("final audit failure cannot complete request or publish generation", async () => {
+  await seed("one", ["a", "b"], "2026-07-01"); await pending();
+  await assert.rejects(() => recalculateActivityMonth(db, "2026-07", {runId: "audit-failure", hooks: {beforeCompleteAuditWrite: async () => {throw new Error("simulated audit failure");}}}), /simulated audit failure/);
+  const request = (await db.doc("activity_recalculation_requests/2026-07").get()).data(); const audit = (await db.doc("activity_phase2_runs/audit-failure").get()).data();
+  assert.equal(request?.status, "failed"); assert.notEqual(request?.status, "completed"); assert.equal(audit?.status, "FAILED"); assert.equal((await db.doc("activity_leaderboards/2026-07").get()).exists, false);
+});
+
+test("same run attempt is idempotent and does not create another audit", async () => {
+  await seed("one", ["a", "b"], "2026-07-01"); await pending(); const first = await recalculateActivityMonth(db, "2026-07", {runId: "idempotent-run", triggerType: "pilot"}); const beforeRequest = await db.doc("activity_recalculation_requests/2026-07").get(); const beforeAudit = await db.doc("activity_phase2_runs/idempotent-run").get();
+  const retry = await recalculateActivityMonth(db, "2026-07", {runId: "idempotent-run", triggerType: "pilot"}); const afterRequest = await db.doc("activity_recalculation_requests/2026-07").get(); const afterAudit = await db.doc("activity_phase2_runs/idempotent-run").get();
+  assert.equal(retry.generationId, first.generationId); assert.equal(afterRequest.data()?.attempts, 1); assert.equal(afterRequest.updateTime.toMillis(), beforeRequest.updateTime.toMillis()); assert.equal(afterAudit.updateTime.toMillis(), beforeAudit.updateTime.toMillis()); assert.equal((await db.collection("activity_phase2_runs").get()).size, 1); assert.equal(afterAudit.data()?.triggerType, "pilot");
+});
+
+test("live audit record contains metrics but no private or source identifiers", async () => {
+  await seed("source-event-private", ["raw-player-a", "raw-player-b"], "2026-07-01"); await pending(); await recalculateActivityMonth(db, "2026-07", {runId: "privacy-safe-run", triggerType: "pilot"}); const audit = (await db.doc("activity_phase2_runs/privacy-safe-run").get()).data() || {};
+  assert.deepEqual(Object.keys(audit).sort(), ["aggregatesCreated", "aggregatesUpdated", "attemptCount", "calculationVersion", "completedAt", "errorCategory", "failureCount", "generationId", "month", "rankingsCreated", "rankingsUpdated", "recordOrigin", "runId", "scoringEventCount", "scoringVersion", "sourceChecksum", "sourceEventCount", "staleRowsRemoved", "startedAt", "status", "triggerType"].sort());
+  const serialized = JSON.stringify(audit); assert.doesNotMatch(serialized, /source-event-private|raw-player-a|raw-player-b|postcode|email|latitude|longitude|birth|availability|skill/i);
+});
+
+test("June historical audit reconstruction writes only one audit document", async () => {
+  const month = "2026-06"; const generationId = "v1-70ffe0d27bb85de3c7b2"; const runId = "phase2-pilot-2026-06-1784436876993"; const startedAt = admin.firestore.Timestamp.fromDate(new Date("2026-07-19T04:54:36.817Z")); const completedAt = admin.firestore.Timestamp.fromDate(new Date("2026-07-19T04:54:37.442Z"));
+  const generation = {monthKey: month, generationId, runId, status: "published", sourceChecksum: PHASE2_JUNE_PILOT_CHECKSUM, sourceEventCount: 1, scoringEventCount: 1, calculationVersion: 1, scoringVersion: 1};
+  await db.doc(`activity_recalculation_requests/${month}`).set({monthKey: month, status: "completed", attempts: 1, startedAt, completedAt, publishedGenerationId: generationId, actualChecksum: PHASE2_JUNE_PILOT_CHECKSUM, errorCategory: null}); await db.doc(`activity_months/${month}`).set({publishedGenerationId: generationId}); await db.doc(`activity_leaderboards/${month}`).set({publishedGenerationId: generationId}); await db.doc(`activity_months/${month}/generations/${generationId}`).set(generation); await db.doc(`activity_leaderboards/${month}/generations/${generationId}`).set(generation); await db.doc(`activity_months/${month}/generations/${generationId}/players/player`).set({eligibleActivityCount: 1}); await db.doc(`activity_leaderboards/${month}/generations/${generationId}/rankings/player`).set({rank: 1});
+  const requestBefore = await db.doc(`activity_recalculation_requests/${month}`).get(); const aggregateBefore = await db.doc(`activity_months/${month}/generations/${generationId}/players/player`).get(); const rankingBefore = await db.doc(`activity_leaderboards/${month}/generations/${generationId}/rankings/player`).get();
+  const preview = await reconstructHistoricalJunePilotAudit(db, {expectedChecksum: PHASE2_JUNE_PILOT_CHECKSUM, write: false}); assert.equal(preview.wouldCreate, true); assert.equal((await db.collection("activity_phase2_runs").get()).size, 0);
+  const created = await reconstructHistoricalJunePilotAudit(db, {expectedChecksum: PHASE2_JUNE_PILOT_CHECKSUM, write: true}); const audit = (await db.doc(created.path).get()).data(); assert.equal(created.wouldCreate, true); assert.equal(audit?.recordOrigin, "RECONSTRUCTED"); assert.equal(audit?.status, "COMPLETED"); assert.equal(audit?.aggregatesCreated, null); assert.equal(audit?.rankingsUpdated, null); assert.equal(audit?.failureCount, null); assert.ok(audit?.reconstructedAt instanceof admin.firestore.Timestamp); assert.equal(audit?.evidencePaths.length, 5);
+  const repeated = await reconstructHistoricalJunePilotAudit(db, {expectedChecksum: PHASE2_JUNE_PILOT_CHECKSUM, write: true}); assert.equal(repeated.wouldCreate, false); assert.equal((await db.collection("activity_phase2_runs").get()).size, 1); assert.equal((await db.doc(`activity_recalculation_requests/${month}`).get()).updateTime.toMillis(), requestBefore.updateTime.toMillis()); assert.equal((await db.doc(`activity_months/${month}/generations/${generationId}/players/player`).get()).updateTime.toMillis(), aggregateBefore.updateTime.toMillis()); assert.equal((await db.doc(`activity_leaderboards/${month}/generations/${generationId}/rankings/player`).get()).updateTime.toMillis(), rankingBefore.updateTime.toMillis());
+});

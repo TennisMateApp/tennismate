@@ -276,6 +276,7 @@ const fullBleedRoutes = [
   "/courts",
   "/coaches",
   "/profile",
+  "/activity-leaderboard",
 ];
 const isFullBleed = fullBleedRoutes.some((r) => pathname.startsWith(r));
 

@@ -1,0 +1,108 @@
+{
+  "mode": "READ_ONLY_PHASE3_PRODUCTION_VALIDATION",
+  "projectId": "tennismate-d8acb",
+  "generatedAt": "2026-07-19T07:24:27.307Z",
+  "pass": true,
+  "publishedMonthCount": 7,
+  "months": [
+    {
+      "month": "2025-12",
+      "pass": true,
+      "expectedRows": 2,
+      "publishedRows": 2,
+      "pointerPresent": true,
+      "generationPublished": true,
+      "exactPublicFieldAllowlist": true,
+      "malformedRows": 0,
+      "testAccountRows": 0,
+      "testAccountRanks": [],
+      "retiredGenerationCount": 0
+    },
+    {
+      "month": "2026-02",
+      "pass": true,
+      "expectedRows": 3,
+      "publishedRows": 3,
+      "pointerPresent": true,
+      "generationPublished": true,
+      "exactPublicFieldAllowlist": true,
+      "malformedRows": 0,
+      "testAccountRows": 0,
+      "testAccountRanks": [],
+      "retiredGenerationCount": 0
+    },
+    {
+      "month": "2026-03",
+      "pass": true,
+      "expectedRows": 12,
+      "publishedRows": 12,
+      "pointerPresent": true,
+      "generationPublished": true,
+      "exactPublicFieldAllowlist": true,
+      "malformedRows": 0,
+      "testAccountRows": 0,
+      "testAccountRanks": [],
+      "retiredGenerationCount": 0
+    },
+    {
+      "month": "2026-04",
+      "pass": true,
+      "expectedRows": 10,
+      "publishedRows": 10,
+      "pointerPresent": true,
+      "generationPublished": true,
+      "exactPublicFieldAllowlist": true,
+      "malformedRows": 0,
+      "testAccountRows": 0,
+      "testAccountRanks": [],
+      "retiredGenerationCount": 0
+    },
+    {
+      "month": "2026-05",
+      "pass": true,
+      "expectedRows": 4,
+      "publishedRows": 4,
+      "pointerPresent": true,
+      "generationPublished": true,
+      "exactPublicFieldAllowlist": true,
+      "malformedRows": 0,
+      "testAccountRows": 0,
+      "testAccountRanks": [],
+      "retiredGenerationCount": 0
+    },
+    {
+      "month": "2026-06",
+      "pass": true,
+      "expectedRows": 2,
+      "publishedRows": 2,
+      "pointerPresent": true,
+      "generationPublished": true,
+      "exactPublicFieldAllowlist": true,
+      "malformedRows": 0,
+      "testAccountRows": 0,
+      "testAccountRanks": [],
+      "retiredGenerationCount": 0
+    },
+    {
+      "month": "2026-07",
+      "pass": true,
+      "expectedRows": 2,
+      "publishedRows": 2,
+      "pointerPresent": true,
+      "generationPublished": true,
+      "exactPublicFieldAllowlist": true,
+      "malformedRows": 0,
+      "testAccountRows": 1,
+      "testAccountRanks": [
+        1
+      ],
+      "retiredGenerationCount": 0
+    }
+  ],
+  "privacy": {
+    "containsPlayerIds": false,
+    "containsDisplayNames": false,
+    "containsAvatarUrls": false,
+    "containsPrivateProfileFields": false
+  }
+}

@@ -21,6 +21,12 @@ import {
 import {
   updateMessageNotificationStateForMessage,
 } from "./messageNotifications";
+import { normalizeActivityOnMatchHistoryWrite } from "./activityLeaderboard/triggers";
+import { cleanupRetiredActivityGenerationsScheduled, recalculateDirtyActivityMonths } from "./activityLeaderboard/phase2Triggers";
+
+export { normalizeActivityOnMatchHistoryWrite };
+export { recalculateDirtyActivityMonths };
+export { cleanupRetiredActivityGenerationsScheduled };
 
 
 // ✅ Set correct region for Firestore: australia-southeast2

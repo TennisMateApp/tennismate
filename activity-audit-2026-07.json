@@ -1,0 +1,30 @@
+{
+  "mode": "READ_ONLY",
+  "generatedAt": "2026-07-12T11:15:30.404Z",
+  "filters": {
+    "month": "2026-07",
+    "limit": null,
+    "output": "../activity-audit-2026-07.json"
+  },
+  "totalRecordsScanned": 36,
+  "recordsIncluded": 2,
+  "eligibleRecords": 2,
+  "ineligibleRecords": 0,
+  "ineligibleByReason": {},
+  "recordsUsingPlayedDate": 2,
+  "recordsUsingCompletedAt": 0,
+  "missingActivityDates": 0,
+  "invalidActivityDates": 0,
+  "invalidParticipantCounts": 0,
+  "selfMatches": 0,
+  "completedRecordsMarkedNotPlayed": 0,
+  "playedDateCompletedAtMonthDisagreements": 0,
+  "dateMonthDisagreementsByTransition": {},
+  "duplicateCanonicalEventIds": 0,
+  "duplicateCandidateLogicalMatches": 1,
+  "monthlyCounts": {
+    "2026-07": 2
+  },
+  "earliestActivityAt": "2026-07-07T14:00:00.000Z",
+  "latestActivityAt": "2026-07-07T14:00:00.000Z"
+}

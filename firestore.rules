@@ -199,28 +199,60 @@ service cloud.firestore {
 
     function isEventHostFromResource() {
       return signedIn() && (
-        resource.data.hostId == request.auth.uid ||
-        resource.data.createdBy == request.auth.uid ||
-        resource.data.ownerId == request.auth.uid
+        resource.data.get("hostId", "") == request.auth.uid ||
+        resource.data.get("createdBy", "") == request.auth.uid ||
+        resource.data.get("ownerId", "") == request.auth.uid
       );
     }
 
     function eventHost(eventId) {
       let event = get(/databases/$(database)/documents/events/$(eventId)).data;
       return signedIn() && (
-        event.hostId == request.auth.uid ||
-        event.createdBy == request.auth.uid ||
-        event.ownerId == request.auth.uid
+        event.get("hostId", "") == request.auth.uid ||
+        event.get("createdBy", "") == request.auth.uid ||
+        event.get("ownerId", "") == request.auth.uid
       );
     }
 
     function eventParticipant(eventId) {
       let event = get(/databases/$(database)/documents/events/$(eventId)).data;
       return signedIn() && (
-        event.hostId == request.auth.uid ||
-        event.createdBy == request.auth.uid ||
-        event.ownerId == request.auth.uid ||
-        (event.participants is list && request.auth.uid in event.participants)
+        event.get("hostId", "") == request.auth.uid ||
+        event.get("createdBy", "") == request.auth.uid ||
+        event.get("ownerId", "") == request.auth.uid ||
+        request.auth.uid in participantsOf(event)
+      );
+    }
+
+    function hasEventConversationContext(data) {
+      let context = data.get("context", {});
+      return context.get("type", "") == "event";
+    }
+
+    function isEventConversation(data, conversationId) {
+      let context = data.get("context", {});
+      return hasEventConversationContext(data)
+        && context.get("eventId", "") is string
+        && conversationId == "event_" + context.get("eventId", "");
+    }
+
+    function eventConversationParticipantsMatch(data) {
+      let eventId = data.get("context", {}).get("eventId", "");
+      let event = get(/databases/$(database)/documents/events/$(eventId)).data;
+      let expectedParticipants = participantsOf(event).concat([event.hostId]);
+      return data.participants is list
+        && event.hostId is string
+        && data.participants.size() == data.participants.toSet().size()
+        && data.participants.toSet() == expectedParticipants.toSet();
+    }
+
+    function canAccessConversation(conversationId) {
+      let conversation = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
+      return signedIn() && (
+        (isEventConversation(conversation, conversationId)
+          && eventParticipant(conversation.context.eventId))
+        || (!hasEventConversationContext(conversation)
+          && request.auth.uid in participantsOf(conversation))
       );
     }
 
@@ -286,8 +318,8 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Server-generated Activity Leaderboard foundation. Reads remain disabled
-    // until a later phase publishes a supported frontend contract.
+    // Server-generated Activity Leaderboard data. Only the current published
+    // ranking generation has a signed-in client read contract.
     match /activity_match_events/{eventId} {
       allow read, write: if false;
     }
@@ -304,6 +336,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /activity_backfill_runs/{runId} {
+      allow read, write: if false;
+    }
+
+    match /activity_phase2_runs/{runId} {
+      allow read, write: if false;
+    }
+
     match /activity_months/{monthKey} {
       allow read, write: if false;
 
@@ -313,7 +353,26 @@ service cloud.firestore {
     }
 
     match /activity_leaderboards/{leaderboardId} {
-      allow read, write: if false;
+      allow read: if signedIn()
+        && resource.data.status == "published";
+      allow write: if false;
+
+      match /generations/{generationId} {
+        allow read: if signedIn()
+          && generationId == get(/databases/$(database)/documents/activity_leaderboards/$(leaderboardId)).data.publishedGenerationId
+          && resource.data.status == "published";
+        allow write: if false;
+
+        match /rankings/{playerId} {
+          allow read: if signedIn()
+            && generationId == get(/databases/$(database)/documents/activity_leaderboards/$(leaderboardId)).data.publishedGenerationId;
+          allow write: if false;
+        }
+
+        match /{document=**} {
+          allow read, write: if false;
+        }
+      }
 
       match /{document=**} {
         allow read, write: if false;
@@ -397,28 +456,47 @@ service cloud.firestore {
     }
 
 match /conversations/{conversationId} {
+  // The messages index uses an array-contains collection query. Keep parent
+  // conversation reads query-compatible; message content remains restricted
+  // by the nested rules below.
   allow read: if signedIn();
 
-  allow create: if isConversationParticipantOnCreate()
-    && request.resource.data.participants is list
-    && request.resource.data.participants.size() >= 2;
+  allow create: if (
+      isEventConversation(request.resource.data, conversationId)
+      && eventParticipant(request.resource.data.context.eventId)
+      && eventConversationParticipantsMatch(request.resource.data)
+    ) || (
+      !hasEventConversationContext(request.resource.data)
+      && isConversationParticipantOnCreate()
+      && request.resource.data.participants is list
+      && request.resource.data.participants.size() >= 2
+    );
 
-  allow update: if isConversationParticipant()
-    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["participants"]);
+  allow update: if (
+      isEventConversation(resource.data, conversationId)
+      && isEventConversation(request.resource.data, conversationId)
+      && request.resource.data.context.eventId == resource.data.context.eventId
+      && eventParticipant(resource.data.context.eventId)
+      && eventConversationParticipantsMatch(request.resource.data)
+    ) || (
+      !hasEventConversationContext(resource.data)
+      && isConversationParticipant()
+      && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["participants"])
+    );
 
   allow delete: if false;
   
 match /messages/{messageId} {
-  allow read: if signedIn();
+  allow read: if canAccessConversation(conversationId);
 
-  allow create: if signedIn()
+  allow create: if canAccessConversation(conversationId)
     && (
       request.resource.data.senderId == request.auth.uid ||
       request.resource.data.fromUserId == request.auth.uid ||
       request.resource.data.userId == request.auth.uid
     );
 
-  allow update: if signedIn()
+  allow update: if canAccessConversation(conversationId)
     && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
       "read",
       "readAt",

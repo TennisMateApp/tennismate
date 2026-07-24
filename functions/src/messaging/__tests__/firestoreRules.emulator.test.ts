@@ -2,7 +2,7 @@
 import {after, before, beforeEach, test} from "node:test";
 import {readFileSync} from "node:fs";
 import {assertFails, assertSucceeds, initializeTestEnvironment, RulesTestEnvironment} from "@firebase/rules-unit-testing";
-import {doc, getDoc, serverTimestamp, setDoc, updateDoc} from "firebase/firestore";
+import {collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where} from "firebase/firestore";
 
 const host = process.env.FIRESTORE_EMULATOR_HOST;
 let environment: RulesTestEnvironment;
@@ -92,14 +92,15 @@ test("only current event attendees can read and send event messages", {skip: !ho
   const outsiderDb = environment.authenticatedContext("outsider").firestore();
   const conversationPath = "conversations/event_private-event";
 
-  await assertSucceeds(getDoc(doc(participantDb, conversationPath)));
-  await assertFails(getDoc(doc(outsiderDb, conversationPath)));
-  await assertSucceeds(setDoc(doc(participantDb, conversationPath, "messages", "participant-message"), {
+  const participantMessage = doc(participantDb, conversationPath, "messages", "participant-message");
+  await assertSucceeds(setDoc(participantMessage, {
     senderId: "player-1",
     recipientId: null,
     text: "Hello everyone",
     timestamp: serverTimestamp(),
   }));
+  await assertSucceeds(getDoc(participantMessage));
+  await assertFails(getDoc(doc(outsiderDb, conversationPath, "messages", "participant-message")));
   await assertFails(setDoc(doc(outsiderDb, conversationPath, "messages", "outsider-message"), {
     senderId: "outsider",
     recipientId: null,
@@ -108,24 +109,38 @@ test("only current event attendees can read and send event messages", {skip: !ho
   }));
 });
 
-test("direct conversations remain available only to their participants", {skip: !host}, async () => {
+test("direct messages remain available only to their participants", {skip: !host}, async () => {
   await seed("conversations/player-1_player-2", {participants: ["player-1", "player-2"]});
   const participantDb = environment.authenticatedContext("player-1").firestore();
   const outsiderDb = environment.authenticatedContext("outsider").firestore();
   const conversationPath = "conversations/player-1_player-2";
 
-  await assertSucceeds(getDoc(doc(participantDb, conversationPath)));
-  await assertFails(getDoc(doc(outsiderDb, conversationPath)));
-  await assertSucceeds(setDoc(doc(participantDb, conversationPath, "messages", "participant-message"), {
+  const participantMessage = doc(participantDb, conversationPath, "messages", "participant-message");
+  await assertSucceeds(setDoc(participantMessage, {
     senderId: "player-1",
     recipientId: "player-2",
     text: "Hello",
     timestamp: serverTimestamp(),
   }));
+  await assertSucceeds(getDoc(participantMessage));
+  await assertFails(getDoc(doc(outsiderDb, conversationPath, "messages", "participant-message")));
   await assertFails(setDoc(doc(outsiderDb, conversationPath, "messages", "outsider-message"), {
     senderId: "outsider",
     recipientId: "player-2",
     text: "I should not be here",
     timestamp: serverTimestamp(),
   }));
+});
+
+test("the messages index can list the current user's conversations", {skip: !host}, async () => {
+  await seed("events/list-event", {hostId: "host", participants: ["player-1"], status: "open"});
+  await seed("conversations/event_list-event", eventConversation("list-event", ["host", "player-1"]));
+  await seed("conversations/player-1_player-2", {participants: ["player-1", "player-2"]});
+  const db = environment.authenticatedContext("player-1").firestore();
+
+  const snapshot = await assertSucceeds(getDocs(query(
+    collection(db, "conversations"),
+    where("participants", "array-contains", "player-1"),
+  )));
+  if (snapshot.size !== 2) throw new Error(`Expected 2 conversations, received ${snapshot.size}`);
 });

@@ -1,0 +1,244 @@
+{
+  "projectId": "tennismate-d8acb",
+  "mode": "WRITE",
+  "runId": "activity-20260719025418-a2afd18007",
+  "checksum": "a2afd180077d6564e4da43efd6b903ef74ae5c1a23a9bdfa26941f40e9a158d7",
+  "generatedAt": "2026-07-19T02:54:30.294Z",
+  "sourceRecordCount": 37,
+  "sourceWatermark": "e34d6f22142a2124ef4531985c17e888b49206c1a2f91476878c8ae33f777cd4",
+  "normalizationVersion": 2,
+  "duplicateClassificationVersion": 1,
+  "duplicateResolutionVersion": 1,
+  "backfillFormatVersion": 1,
+  "planned": {
+    "creates": 36,
+    "updates": 1,
+    "unchanged": 0,
+    "noDeletes": true,
+    "potentialStaleOrOrphaned": 0
+  },
+  "counts": {
+    "structurallyEligible": 28,
+    "structurallyIneligible": 9,
+    "duplicateReviewGroups": 5,
+    "autoResolvedConfirmedGroups": 3,
+    "possibleGroupsPending": 2,
+    "scoringSurvivors": 21,
+    "excludedDuplicates": 3,
+    "pendingDuplicateEvents": 4,
+    "canonicalConflicts": 0,
+    "monthlyEvents": {
+      "2025-12": 1,
+      "2026-02": 2,
+      "2026-03": 9,
+      "2026-04": 5,
+      "2026-05": 2,
+      "2026-06": 1,
+      "2026-07": 1
+    },
+    "dirtyMonths": [
+      "2025-12",
+      "2026-02",
+      "2026-03",
+      "2026-04",
+      "2026-05",
+      "2026-06",
+      "2026-07"
+    ]
+  },
+  "failuresByCategory": [],
+  "processingDurationMs": 13158,
+  "actual": {
+    "processed": 37,
+    "created": 36,
+    "updated": 1,
+    "unchanged": 0
+  },
+  "rollbackPreparation": [
+    {
+      "eventRefHash": "363478aa1f32dabd",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "a6f4583b8e30cf9d",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "b29ae1c9bbf68cee",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "8aea0faabc108b7f",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "440478184752c799",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "5be554e8dd8cbcdf",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "a703f27c51e108da",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "67fbaad9c86e082c",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "a163f0dc6b7a07f0",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "dd22ac7061c6976b",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "a537e428ac57e535",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "8e40715fb6e3a5a0",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "892252dc621905c3",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "6cae8a50069c033a",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "8942882d330cbaaa",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "e0a5ad455c385153",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "161eda91e030173f",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "d00efee06822d2b5",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "758f1d3f6ecec318",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "d12f9bc4f3cfec34",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "90c14d16820a2c61",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "a509babb2fed8db8",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "3b61eae92ddd07b3",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "45cb5749952356a1",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "49770751552599f9",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "4a85d63665fd7235",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "932a0c27e2280610",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "b9f2b113d8a5c2ec",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "b53f19cab5a4235f",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "d1c74a6dba38ac9c",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "a22b7389de7de1d5",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "fb300dee5425c95c",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "e887aa8a6f469c21",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "ffd702174aaad193",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "6a5645aa050ad69e",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "3bd75e4dff6c9c4d",
+      "action": "DELETE_CREATED",
+      "previousStateChecksum": null
+    },
+    {
+      "eventRefHash": "8e66a16349df9d2e",
+      "action": "RESTORE_REQUIRED",
+      "previousStateChecksum": "37c1d79e4d26a0669fddfef7cdd2083e5177014248e6bcf265dc1a19f883d4b8"
+    }
+  ]
+}

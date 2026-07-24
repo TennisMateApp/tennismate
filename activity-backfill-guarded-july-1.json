@@ -1,0 +1,39 @@
+{
+  "projectId": "tennismate-d8acb",
+  "mode": "PREVIEW",
+  "runId": "activity-20260719015257-77f59f1f5d",
+  "checksum": "77f59f1f5d902d88b4df79509b08e8acbfa3a7380c9f924a6510c7d5cca97e19",
+  "generatedAt": "2026-07-19T01:52:57.675Z",
+  "sourceRecordCount": 37,
+  "sourceWatermark": "e34d6f22142a2124ef4531985c17e888b49206c1a2f91476878c8ae33f777cd4",
+  "normalizationVersion": 2,
+  "duplicateClassificationVersion": 1,
+  "duplicateResolutionVersion": 1,
+  "backfillFormatVersion": 1,
+  "planned": {
+    "creates": 2,
+    "updates": 1,
+    "unchanged": 0,
+    "noDeletes": true,
+    "potentialStaleOrOrphaned": 0
+  },
+  "counts": {
+    "structurallyEligible": 3,
+    "structurallyIneligible": 0,
+    "duplicateReviewGroups": 1,
+    "autoResolvedConfirmedGroups": 0,
+    "possibleGroupsPending": 1,
+    "scoringSurvivors": 1,
+    "excludedDuplicates": 0,
+    "pendingDuplicateEvents": 2,
+    "canonicalConflicts": 0,
+    "monthlyEvents": {
+      "2026-07": 1
+    },
+    "dirtyMonths": [
+      "2026-07"
+    ]
+  },
+  "failuresByCategory": [],
+  "processingDurationMs": 1550
+}

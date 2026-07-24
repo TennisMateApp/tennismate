@@ -1,0 +1,64 @@
+{
+  "projectId": "tennismate-d8acb",
+  "mode": "RECONCILE",
+  "runId": "activity-20260719025735-a2afd18007",
+  "checksum": "a2afd180077d6564e4da43efd6b903ef74ae5c1a23a9bdfa26941f40e9a158d7",
+  "generatedAt": "2026-07-19T02:57:35.117Z",
+  "sourceRecordCount": 37,
+  "sourceWatermark": "e34d6f22142a2124ef4531985c17e888b49206c1a2f91476878c8ae33f777cd4",
+  "normalizationVersion": 2,
+  "duplicateClassificationVersion": 1,
+  "duplicateResolutionVersion": 1,
+  "backfillFormatVersion": 1,
+  "planned": {
+    "creates": 0,
+    "updates": 0,
+    "unchanged": 37,
+    "noDeletes": true,
+    "potentialStaleOrOrphaned": 0
+  },
+  "counts": {
+    "structurallyEligible": 28,
+    "structurallyIneligible": 9,
+    "duplicateReviewGroups": 5,
+    "autoResolvedConfirmedGroups": 3,
+    "possibleGroupsPending": 2,
+    "scoringSurvivors": 21,
+    "excludedDuplicates": 3,
+    "pendingDuplicateEvents": 4,
+    "canonicalConflicts": 0,
+    "monthlyEvents": {
+      "2025-12": 1,
+      "2026-02": 2,
+      "2026-03": 9,
+      "2026-04": 5,
+      "2026-05": 2,
+      "2026-06": 1,
+      "2026-07": 1
+    },
+    "dirtyMonths": [
+      "2025-12",
+      "2026-02",
+      "2026-03",
+      "2026-04",
+      "2026-05",
+      "2026-06",
+      "2026-07"
+    ]
+  },
+  "failuresByCategory": [],
+  "processingDurationMs": 1443,
+  "reconciliation": {
+    "exactMatchCount": 37,
+    "missingRecordsCount": 0,
+    "unexpectedRecordsCount": 0,
+    "mismatchedRecordsCount": 0,
+    "versionMismatches": 0,
+    "scoringEligibilityMismatches": 0,
+    "duplicateResolutionMismatches": 0,
+    "dirtyMonthMismatches": 0,
+    "expectedChecksum": "a2afd180077d6564e4da43efd6b903ef74ae5c1a23a9bdfa26941f40e9a158d7",
+    "storedStateChecksum": "a2afd180077d6564e4da43efd6b903ef74ae5c1a23a9bdfa26941f40e9a158d7",
+    "matches": true
+  }
+}

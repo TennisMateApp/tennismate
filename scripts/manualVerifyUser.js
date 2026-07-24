@@ -1,7 +1,7 @@
 const admin = require("firebase-admin");
 const serviceAccount = require("../serviceAccountKey.json");
 
-const UID = "cJP6OyLswneVoJWKXbNwlLjl2AK2";
+const UID = "r0lARP1myFZbdynw9wfHQmtubRq1";
 
 function logUser(label, userRecord) {
   console.log(`${label}:`, {

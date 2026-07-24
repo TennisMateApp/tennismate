@@ -1,0 +1,141 @@
+{
+  "mode": "DRY_RUN",
+  "versions": {
+    "normalization": 2,
+    "duplicateClassification": 1,
+    "duplicateResolution": 1,
+    "format": 1
+  },
+  "sourceRecordsScanned": 36,
+  "recordsIncluded": 36,
+  "structurallyEligible": 27,
+  "structurallyIneligible": 9,
+  "canonicalEventsGenerated": 36,
+  "canonicalConflicts": 0,
+  "duplicateReviewGroups": 5,
+  "autoResolvedConfirmedGroups": 3,
+  "possibleGroupsPending": 2,
+  "scoringSurvivors": 20,
+  "excludedConfirmedDuplicates": 3,
+  "pendingPossibleDuplicateEvents": 4,
+  "expectedScoringEligibleEventCount": 20,
+  "expectedPlayerMatchContributions": 40,
+  "monthlyScoringEligibleCounts": {
+    "2025-12": 1,
+    "2026-02": 2,
+    "2026-03": 9,
+    "2026-04": 5,
+    "2026-05": 2,
+    "2026-06": 1
+  },
+  "dirtyMonths": [
+    "2025-12",
+    "2026-02",
+    "2026-03",
+    "2026-04",
+    "2026-05",
+    "2026-06",
+    "2026-07"
+  ],
+  "documentChanges": {
+    "wouldCreate": 36,
+    "wouldUpdate": 0,
+    "wouldExclude": 7,
+    "wouldDelete": 0
+  },
+  "duplicateGroups": [
+    {
+      "groupNumber": 1,
+      "classification": "CONFIRMED_SAME_MATCH",
+      "memberCount": 2,
+      "status": "AUTO_RESOLVED",
+      "monthKeys": [
+        "2026-03"
+      ],
+      "reasonCodes": [
+        "CONFIRMED_AUTHORITATIVE_LINK",
+        "PREFERRED_LIFECYCLE_DATA",
+        "EARLIEST_ACTIVITY",
+        "EARLIEST_SOURCE_COMPLETION",
+        "LEXICOGRAPHIC_SOURCE_PATH"
+      ]
+    },
+    {
+      "groupNumber": 2,
+      "classification": "CONFIRMED_SAME_MATCH",
+      "memberCount": 2,
+      "status": "AUTO_RESOLVED",
+      "monthKeys": [
+        "2026-04"
+      ],
+      "reasonCodes": [
+        "CONFIRMED_AUTHORITATIVE_LINK",
+        "PREFERRED_LIFECYCLE_DATA",
+        "EARLIEST_ACTIVITY",
+        "EARLIEST_SOURCE_COMPLETION",
+        "LEXICOGRAPHIC_SOURCE_PATH"
+      ]
+    },
+    {
+      "groupNumber": 3,
+      "classification": "CONFIRMED_SAME_MATCH",
+      "memberCount": 2,
+      "status": "AUTO_RESOLVED",
+      "monthKeys": [
+        "2026-03"
+      ],
+      "reasonCodes": [
+        "CONFIRMED_AUTHORITATIVE_LINK",
+        "PREFERRED_LIFECYCLE_DATA",
+        "EARLIEST_ACTIVITY",
+        "EARLIEST_SOURCE_COMPLETION",
+        "LEXICOGRAPHIC_SOURCE_PATH"
+      ]
+    },
+    {
+      "groupNumber": 4,
+      "classification": "POSSIBLE_SAME_MATCH",
+      "memberCount": 2,
+      "monthKeys": [
+        "2026-07"
+      ],
+      "activityTimestampsIdentical": true,
+      "completionTimeSeparationMinutes": 6,
+      "playedDatesMatch": true,
+      "conversationIdentifiersMatch": true,
+      "scoreFingerprintsMatch": false,
+      "winnerIdentifiers": "missing",
+      "locationFingerprintsMatch": true,
+      "sourceCompletionPaths": "same_or_missing",
+      "anyRequestId": false,
+      "anyInviteId": false,
+      "recommendedClassificationConfidence": "medium"
+    },
+    {
+      "groupNumber": 5,
+      "classification": "POSSIBLE_SAME_MATCH",
+      "memberCount": 2,
+      "monthKeys": [
+        "2026-04"
+      ],
+      "activityTimestampsIdentical": true,
+      "completionTimeSeparationMinutes": 1,
+      "playedDatesMatch": true,
+      "conversationIdentifiersMatch": true,
+      "scoreFingerprintsMatch": true,
+      "winnerIdentifiers": "match",
+      "locationFingerprintsMatch": true,
+      "sourceCompletionPaths": "same_or_missing",
+      "anyRequestId": false,
+      "anyInviteId": false,
+      "recommendedClassificationConfidence": "medium"
+    }
+  ],
+  "deterministicOutputChecksum": "622f3f48497776a2ebe92104e8381febb62e218d545e25df396ad48c3b9639da",
+  "generatedAt": "2026-07-13T03:46:45.892Z",
+  "filters": {
+    "month": null,
+    "limit": null,
+    "output": "../activity-backfill-phase13-final-all-1.json"
+  }
+}

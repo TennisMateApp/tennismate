@@ -51,6 +51,7 @@ import {
 import UpcomingEventsSection, {
   type HomeDiscoveryEvent,
 } from "@/components/home/UpcomingEventsSection";
+import LeaderboardEntryCard from "@/components/activityLeaderboard/LeaderboardEntryCard";
 
 
 const TM = {
@@ -1735,6 +1736,10 @@ style={{
   )}
 </div>
 
+
+        <div className="mt-6">
+          <LeaderboardEntryCard compact />
+        </div>
 
         {/* Quick Actions */}
         <div className="mt-6">

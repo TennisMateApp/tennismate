@@ -1,0 +1,52 @@
+{
+  "projectId": "tennismate-d8acb",
+  "mode": "RECONCILE",
+  "runId": "activity-20260719020122-77f59f1f5d",
+  "checksum": "77f59f1f5d902d88b4df79509b08e8acbfa3a7380c9f924a6510c7d5cca97e19",
+  "generatedAt": "2026-07-19T02:01:22.447Z",
+  "sourceRecordCount": 37,
+  "sourceWatermark": "e34d6f22142a2124ef4531985c17e888b49206c1a2f91476878c8ae33f777cd4",
+  "normalizationVersion": 2,
+  "duplicateClassificationVersion": 1,
+  "duplicateResolutionVersion": 1,
+  "backfillFormatVersion": 1,
+  "planned": {
+    "creates": 2,
+    "updates": 1,
+    "unchanged": 0,
+    "noDeletes": true,
+    "potentialStaleOrOrphaned": 0
+  },
+  "counts": {
+    "structurallyEligible": 3,
+    "structurallyIneligible": 0,
+    "duplicateReviewGroups": 1,
+    "autoResolvedConfirmedGroups": 0,
+    "possibleGroupsPending": 1,
+    "scoringSurvivors": 1,
+    "excludedDuplicates": 0,
+    "pendingDuplicateEvents": 2,
+    "canonicalConflicts": 0,
+    "monthlyEvents": {
+      "2026-07": 1
+    },
+    "dirtyMonths": [
+      "2026-07"
+    ]
+  },
+  "failuresByCategory": [],
+  "processingDurationMs": 1392,
+  "reconciliation": {
+    "exactMatchCount": 0,
+    "missingRecordsCount": 2,
+    "unexpectedRecordsCount": 0,
+    "mismatchedRecordsCount": 1,
+    "versionMismatches": 1,
+    "scoringEligibilityMismatches": 1,
+    "duplicateResolutionMismatches": 1,
+    "dirtyMonthMismatches": 0,
+    "expectedChecksum": "77f59f1f5d902d88b4df79509b08e8acbfa3a7380c9f924a6510c7d5cca97e19",
+    "storedStateChecksum": "579841f4e85f62e857f8b5cb8bf148c782f9b4deac3472d16d8f7eda3582db6a",
+    "matches": false
+  }
+}

@@ -1,15 +1,16 @@
 {
   "compileOnSave": true,
-  "include": ["src"],
+  "include": ["src/**/*.ts"],
   "exclude": [
     "node_modules",
     ".next",
-    "functions/**"   // ⬅️ Prevents Next.js from compiling backend Cloud Functions
+    "src/**/__tests__/**"
   ],
   "compilerOptions": {
     "module": "NodeNext",
     "noImplicitReturns": true,
     "outDir": "lib",
+    "rootDir": "src",
     "sourceMap": true,
     "strict": true,
     "target": "es2017",

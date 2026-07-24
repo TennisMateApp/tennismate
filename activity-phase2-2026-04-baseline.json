@@ -1,0 +1,115 @@
+{
+  "mode": "READ_ONLY_MAY_PHASE2_VERIFICATION",
+  "generatedAt": "2026-07-19T06:14:27.293Z",
+  "projectId": "tennismate-d8acb",
+  "month": "2026-04",
+  "preview": {
+    "sourceEvents": 8,
+    "scoringEvents": 5,
+    "aggregateRows": 10,
+    "leaderboardRows": 10,
+    "pendingDuplicates": 2,
+    "confirmedExclusions": 1,
+    "canonicalConflicts": 0,
+    "malformedScoringEvents": 0,
+    "checksum": "e48d9282fdab9c5d9f5bc4ec441a159b94b91dc6087502bc6eccdf9b79815215",
+    "generationId": "v1-e48d9282fdab9c5d9f5b"
+  },
+  "request": {
+    "path": "activity_recalculation_requests/2026-04",
+    "status": "pending",
+    "attempts": 0,
+    "publishedGenerationId": null
+  },
+  "publication": {
+    "monthParentExists": false,
+    "leaderboardParentExists": false,
+    "monthPointer": null,
+    "leaderboardPointer": null,
+    "pointersMatch": false,
+    "aggregateRows": 0,
+    "leaderboardRows": 0,
+    "aggregateDiscrepancies": 0,
+    "aggregateMismatchFields": [],
+    "leaderboardDiscrepancies": 0,
+    "staleAggregateRows": 0,
+    "missingAggregateRows": 10,
+    "staleLeaderboardRows": 0,
+    "missingLeaderboardRows": 10,
+    "totalPoints": 0
+  },
+  "audit": {
+    "count": 0,
+    "path": null,
+    "runId": null,
+    "status": null,
+    "triggerType": null,
+    "recordOrigin": null,
+    "startedAt": null,
+    "completedAt": null,
+    "counts": {
+      "sourceEventCount": null,
+      "scoringEventCount": null,
+      "aggregatesCreated": null,
+      "aggregatesUpdated": null,
+      "rankingsCreated": null,
+      "rankingsUpdated": null,
+      "staleRowsRemoved": null,
+      "attemptCount": null,
+      "failureCount": null
+    },
+    "checksum": null,
+    "generationId": null,
+    "calculationVersion": null,
+    "scoringVersion": null,
+    "exactApprovedFields": false,
+    "rawIdentifierMatches": 0,
+    "matchesExpected": false
+  },
+  "scopes": {
+    "requests": {
+      "may": {
+        "documentCount": 1,
+        "contentHash": "2a52b56e016d887fa88c0e2bd3db0c2c85c6380528f51e21c01c56ff1331c1e7"
+      },
+      "other": {
+        "documentCount": 6,
+        "contentHash": "665a71b6c5a2001da57c9f0576edde95b82d93f6eb956884491894c5c7d14f48"
+      }
+    },
+    "activityMatchEvents": {
+      "documentCount": 37,
+      "contentHash": "0d4a310ae21daa0c87909399c7245d96e073e3a2d827b6c1a21859ceee4374e0"
+    },
+    "activityMonths": {
+      "may": {
+        "documentCount": 0,
+        "contentHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "other": {
+        "documentCount": 33,
+        "contentHash": "5fd841d9361f811c792cfb98ffc0ab2b23b11a03c70fe0e870ba3e0f975bbb03"
+      }
+    },
+    "activityLeaderboards": {
+      "may": {
+        "documentCount": 0,
+        "contentHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "other": {
+        "documentCount": 33,
+        "contentHash": "7442013c704b56f504058037f10a0a37babcb842bdf75e320d5835fe48962dc3"
+      }
+    },
+    "phase2Runs": {
+      "may": {
+        "documentCount": 0,
+        "contentHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "other": {
+        "documentCount": 5,
+        "contentHash": "f81f89857307970c26571ea303c6e8167f2357af033b7d988abe0a8ce8edf692"
+      }
+    }
+  }
+}

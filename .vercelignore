@@ -1,2 +1,14 @@
 functions/**
 courtsuggestions/**
+.env*
+*service-account*.json
+serviceAccountKey.json
+activity-*.json
+firebase-debug*.log
+firestore-debug*.log
+firebase.phase*.json
+android/**
+ios/**
+docs/**
+tests/**
+exports/**

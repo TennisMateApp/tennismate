@@ -1,0 +1,228 @@
+{
+  "mode": "READ_ONLY_POST_RUN_VERIFICATION",
+  "projectId": "tennismate-d8acb",
+  "generatedAt": "2026-07-19T05:05:48.339Z",
+  "activityCollections": [
+    "activity_backfill_runs",
+    "activity_duplicate_reviews",
+    "activity_leaderboards",
+    "activity_match_events",
+    "activity_months",
+    "activity_recalculation_requests"
+  ],
+  "pilotRunRecord": {
+    "dedicatedRunCollections": [],
+    "dedicatedRunRecordFound": false,
+    "publicationRecordPath": "activity_leaderboards/2026-06/generations/v1-70ffe0d27bb85de3c7b2",
+    "lifecycleRecordPath": "activity_recalculation_requests/2026-06",
+    "runId": "phase2-pilot-2026-06-1784436876993",
+    "storedStatus": "published",
+    "startedAt": "2026-07-19T04:54:36.817Z",
+    "completedAt": "2026-07-19T04:54:37.442Z",
+    "generationId": "v1-70ffe0d27bb85de3c7b2",
+    "sourceChecksum": "70ffe0d27bb85de3c7b25ad3c56e180f0c21119cd8ea076b3b9f3d345c2a629a",
+    "createdAggregateRowsInferredFromEmptyPreRunState": 2,
+    "createdRankingRowsInferredFromEmptyPreRunState": 2,
+    "updatedGeneratedRowsInferredFromEmptyPreRunState": 0,
+    "errorCategory": null
+  },
+  "requests": {
+    "june": {
+      "path": "activity_recalculation_requests/2026-06",
+      "monthKey": "2026-06",
+      "status": "completed",
+      "attempts": 1,
+      "startedAt": "2026-07-19T04:54:36.817Z",
+      "completedAt": "2026-07-19T04:54:37.442Z",
+      "publishedGenerationId": "v1-70ffe0d27bb85de3c7b2",
+      "checksum": "70ffe0d27bb85de3c7b25ad3c56e180f0c21119cd8ea076b3b9f3d345c2a629a",
+      "aggregateCount": 2,
+      "rankingCount": 2,
+      "errorCategory": null
+    },
+    "all": [
+      {
+        "path": "activity_recalculation_requests/2025-12",
+        "monthKey": "2025-12",
+        "status": "pending",
+        "attempts": 0,
+        "startedAt": null,
+        "completedAt": null,
+        "publishedGenerationId": null,
+        "checksum": null,
+        "aggregateCount": null,
+        "rankingCount": null,
+        "errorCategory": null
+      },
+      {
+        "path": "activity_recalculation_requests/2026-02",
+        "monthKey": "2026-02",
+        "status": "pending",
+        "attempts": 0,
+        "startedAt": null,
+        "completedAt": null,
+        "publishedGenerationId": null,
+        "checksum": null,
+        "aggregateCount": null,
+        "rankingCount": null,
+        "errorCategory": null
+      },
+      {
+        "path": "activity_recalculation_requests/2026-03",
+        "monthKey": "2026-03",
+        "status": "pending",
+        "attempts": 0,
+        "startedAt": null,
+        "completedAt": null,
+        "publishedGenerationId": null,
+        "checksum": null,
+        "aggregateCount": null,
+        "rankingCount": null,
+        "errorCategory": null
+      },
+      {
+        "path": "activity_recalculation_requests/2026-04",
+        "monthKey": "2026-04",
+        "status": "pending",
+        "attempts": 0,
+        "startedAt": null,
+        "completedAt": null,
+        "publishedGenerationId": null,
+        "checksum": null,
+        "aggregateCount": null,
+        "rankingCount": null,
+        "errorCategory": null
+      },
+      {
+        "path": "activity_recalculation_requests/2026-05",
+        "monthKey": "2026-05",
+        "status": "pending",
+        "attempts": 0,
+        "startedAt": null,
+        "completedAt": null,
+        "publishedGenerationId": null,
+        "checksum": null,
+        "aggregateCount": null,
+        "rankingCount": null,
+        "errorCategory": null
+      },
+      {
+        "path": "activity_recalculation_requests/2026-06",
+        "monthKey": "2026-06",
+        "status": "completed",
+        "attempts": 1,
+        "startedAt": "2026-07-19T04:54:36.817Z",
+        "completedAt": "2026-07-19T04:54:37.442Z",
+        "publishedGenerationId": "v1-70ffe0d27bb85de3c7b2",
+        "checksum": "70ffe0d27bb85de3c7b25ad3c56e180f0c21119cd8ea076b3b9f3d345c2a629a",
+        "aggregateCount": 2,
+        "rankingCount": 2,
+        "errorCategory": null
+      },
+      {
+        "path": "activity_recalculation_requests/2026-07",
+        "monthKey": "2026-07",
+        "status": "pending",
+        "attempts": 0,
+        "startedAt": null,
+        "completedAt": null,
+        "publishedGenerationId": null,
+        "checksum": null,
+        "aggregateCount": null,
+        "rankingCount": null,
+        "errorCategory": null
+      }
+    ],
+    "otherPendingCount": 6,
+    "otherNonPendingCount": 0
+  },
+  "aggregates": {
+    "parentPath": "activity_months/2026-06",
+    "generationMetadataPath": "activity_months/2026-06/generations/v1-70ffe0d27bb85de3c7b2",
+    "count": 2,
+    "documents": [
+      {
+        "path": "activity_months/2026-06/generations/v1-70ffe0d27bb85de3c7b2/players/SkAO1osScAR1HNNf97BMgLmkvN33",
+        "eligibleActivityCount": 1,
+        "scoringActivityCount": 1,
+        "distinctOpponentCount": 1,
+        "points": 15,
+        "metricsMatch": true,
+        "forbiddenFieldsPresent": []
+      },
+      {
+        "path": "activity_months/2026-06/generations/v1-70ffe0d27bb85de3c7b2/players/w3CzPUO9ZqMUy192hagGMOlljio1",
+        "eligibleActivityCount": 1,
+        "scoringActivityCount": 1,
+        "distinctOpponentCount": 1,
+        "points": 15,
+        "metricsMatch": true,
+        "forbiddenFieldsPresent": []
+      }
+    ]
+  },
+  "leaderboard": {
+    "parentPath": "activity_leaderboards/2026-06",
+    "generationMetadataPath": "activity_leaderboards/2026-06/generations/v1-70ffe0d27bb85de3c7b2",
+    "count": 2,
+    "documents": [
+      {
+        "path": "activity_leaderboards/2026-06/generations/v1-70ffe0d27bb85de3c7b2/rankings/SkAO1osScAR1HNNf97BMgLmkvN33",
+        "rank": 1,
+        "points": 15,
+        "eligibleActivityCount": 1,
+        "scoringActivityCount": 1,
+        "distinctOpponentCount": 1,
+        "metricsMatch": true,
+        "profileSnapshotMatchesCurrentPublicProfile": true,
+        "exactApprovedFieldSet": true,
+        "forbiddenFieldsPresent": []
+      },
+      {
+        "path": "activity_leaderboards/2026-06/generations/v1-70ffe0d27bb85de3c7b2/rankings/w3CzPUO9ZqMUy192hagGMOlljio1",
+        "rank": 1,
+        "points": 15,
+        "eligibleActivityCount": 1,
+        "scoringActivityCount": 1,
+        "distinctOpponentCount": 1,
+        "metricsMatch": true,
+        "profileSnapshotMatchesCurrentPublicProfile": true,
+        "exactApprovedFieldSet": true,
+        "forbiddenFieldsPresent": []
+      }
+    ]
+  },
+  "publication": {
+    "monthPublishedGenerationId": "v1-70ffe0d27bb85de3c7b2",
+    "leaderboardPublishedGenerationId": "v1-70ffe0d27bb85de3c7b2",
+    "expectedGenerationId": "v1-70ffe0d27bb85de3c7b2",
+    "generationMatches": true,
+    "monthGenerationCount": 1,
+    "leaderboardGenerationCount": 1,
+    "retiredGenerations": [],
+    "stalePublishedRowCount": 0,
+    "missingPublishedRowCount": 0
+  },
+  "reconciliation": {
+    "sourceEventCount": 1,
+    "scoringEventCount": 1,
+    "aggregateDocumentCount": 2,
+    "leaderboardDocumentCount": 2,
+    "totalPublishedPoints": 30,
+    "calculatedChecksum": "70ffe0d27bb85de3c7b25ad3c56e180f0c21119cd8ea076b3b9f3d345c2a629a",
+    "expectedChecksum": "70ffe0d27bb85de3c7b25ad3c56e180f0c21119cd8ea076b3b9f3d345c2a629a",
+    "checksumMatches": true,
+    "aggregateDiscrepancyCount": 0,
+    "leaderboardDiscrepancyCount": 0,
+    "stalePublishedRowCount": 0,
+    "missingPublishedRowCount": 0
+  },
+  "isolation": {
+    "aggregateMonthParentPaths": [
+      "activity_months/2026-06"
+    ],
+    "leaderboardMonthParentPaths": [
+      "activity_leaderboards/2026-06"
+    ]
+  }
+}

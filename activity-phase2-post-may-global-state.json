@@ -1,0 +1,134 @@
+{
+  "mode": "READ_ONLY_PHASE2_AUDIT_ISOLATION",
+  "generatedAt": "2026-07-19T05:59:17.998Z",
+  "projectId": "tennismate-d8acb",
+  "targetPath": "activity_phase2_runs/phase2-pilot-2026-06-1784436876993",
+  "requests": {
+    "scope": {
+      "documentCount": 7,
+      "contentHash": "abb3a87996e49e25d266900ec0fa22c4b7fd8f89887f3a8c84fb0d1ad4a4ff85",
+      "publicPaths": []
+    },
+    "documents": [
+      {
+        "path": "activity_recalculation_requests/2025-12",
+        "status": "pending",
+        "attempts": 0,
+        "updateTime": "2026-07-19T02:54:26.054Z",
+        "contentHash": "75d6195baaff84a11d1e820ec110303e6f9d27c3b4ec208d296cb87247b0cf90"
+      },
+      {
+        "path": "activity_recalculation_requests/2026-02",
+        "status": "pending",
+        "attempts": 0,
+        "updateTime": "2026-07-19T02:54:25.589Z",
+        "contentHash": "17614f1b5aebf9c7648755be36aa6ec28ec57415c2dbc6315fed7a5de7f4b087"
+      },
+      {
+        "path": "activity_recalculation_requests/2026-03",
+        "status": "pending",
+        "attempts": 0,
+        "updateTime": "2026-07-19T02:54:29.850Z",
+        "contentHash": "442b036012d56294f2929a74955352c8056c61f0c1794dc635c3d63ef96cd550"
+      },
+      {
+        "path": "activity_recalculation_requests/2026-04",
+        "status": "pending",
+        "attempts": 0,
+        "updateTime": "2026-07-19T02:54:29.238Z",
+        "contentHash": "ebbabdf805c16a1a6775c15384ee26a72c5246676239ab6e949062029d7bf03d"
+      },
+      {
+        "path": "activity_recalculation_requests/2026-05",
+        "status": "completed",
+        "attempts": 1,
+        "updateTime": "2026-07-19T05:56:18.629Z",
+        "contentHash": "8718d8d8cd3935dbc886979368eda380eca85a091a20979b70e0825faaf01b0a"
+      },
+      {
+        "path": "activity_recalculation_requests/2026-06",
+        "status": "completed",
+        "attempts": 1,
+        "updateTime": "2026-07-19T04:54:37.458Z",
+        "contentHash": "988a0415bbe3f4bd0fe25d0a27321a13a8bcf3b65ebad3fc2efa96d3cd7a154c"
+      },
+      {
+        "path": "activity_recalculation_requests/2026-07",
+        "status": "pending",
+        "attempts": 0,
+        "updateTime": "2026-07-19T02:54:30.015Z",
+        "contentHash": "70dcf5a6e0515644016dd24bab075a9ca31df418c9c2444a235e6a8e8dfce24b"
+      }
+    ]
+  },
+  "activityMatchEvents": {
+    "documentCount": 37,
+    "contentHash": "0d4a310ae21daa0c87909399c7245d96e073e3a2d827b6c1a21859ceee4374e0",
+    "publicPaths": []
+  },
+  "activityMonths": {
+    "documentCount": 10,
+    "contentHash": "9e4abe03c2befdd9d21ff18c21f83f84bff930c39d75c2d6f514bec99d18710f",
+    "publicPaths": [
+      "activity_months/2026-05",
+      "activity_months/2026-06"
+    ]
+  },
+  "activityLeaderboards": {
+    "documentCount": 10,
+    "contentHash": "3d0f6f570eb76544f16e601b4141d9caf1cd28eb07b4cdb7a7b665bb75f346e5",
+    "publicPaths": [
+      "activity_leaderboards/2026-05",
+      "activity_leaderboards/2026-06"
+    ]
+  },
+  "phase2Runs": {
+    "documentCount": 2,
+    "contentHash": "1c96f7b3c8cc0bc9a89e94ef011cf3f356d312a02547b43dd57c8cd4c9fdc864",
+    "publicPaths": []
+  },
+  "targetAudit": {
+    "exists": true,
+    "approvedFieldsOnly": true,
+    "forbiddenFieldCount": 0,
+    "rawPlayerOrEventIdentifierMatchCount": 0,
+    "adminTimestamp": true,
+    "record": {
+      "aggregatesCreated": null,
+      "aggregatesUpdated": null,
+      "attemptCount": 1,
+      "calculationVersion": 1,
+      "completedAt": {
+        "timestamp": "2026-07-19T04:54:37.442Z"
+      },
+      "errorCategory": null,
+      "evidencePaths": [
+        "activity_recalculation_requests/2026-06",
+        "activity_months/2026-06",
+        "activity_months/2026-06/generations/v1-70ffe0d27bb85de3c7b2",
+        "activity_leaderboards/2026-06",
+        "activity_leaderboards/2026-06/generations/v1-70ffe0d27bb85de3c7b2"
+      ],
+      "failureCount": null,
+      "generationId": "v1-70ffe0d27bb85de3c7b2",
+      "month": "2026-06",
+      "rankingsCreated": null,
+      "rankingsUpdated": null,
+      "recordOrigin": "RECONSTRUCTED",
+      "reconstructedAt": {
+        "timestamp": "2026-07-19T05:38:58.895Z"
+      },
+      "runId": "phase2-pilot-2026-06-1784436876993",
+      "scoringEventCount": 1,
+      "scoringVersion": 1,
+      "sourceChecksum": "70ffe0d27bb85de3c7b25ad3c56e180f0c21119cd8ea076b3b9f3d345c2a629a",
+      "sourceEventCount": 1,
+      "staleRowsRemoved": null,
+      "startedAt": {
+        "timestamp": "2026-07-19T04:54:36.817Z"
+      },
+      "status": "COMPLETED",
+      "triggerType": "pilot"
+    }
+  }
+}

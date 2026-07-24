@@ -1,0 +1,9 @@
+export const ACTIVITY_TIME_ZONE = "Australia/Melbourne" as const;
+export const NORMALIZATION_VERSION = 2 as const;
+export const DUPLICATE_CLASSIFICATION_VERSION = 1 as const;
+export const DUPLICATE_RESOLUTION_VERSION = 1 as const;
+export const ACTIVITY_BACKFILL_FORMAT_VERSION = 1 as const;
+export const MANUAL_DUPLICATE_DECISION_VERSION = 1 as const;
+export const DIRTY_EVENT_ID_SAMPLE_LIMIT = 20;
+export const DUPLICATE_REVIEW_ARRAY_LIMIT = 20;
+export const DUPLICATE_CANDIDATE_QUERY_LIMIT = 20;

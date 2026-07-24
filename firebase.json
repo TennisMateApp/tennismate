@@ -1,5 +1,11 @@
 {
   "emulators": {
+    "firestore": {
+      "port": 8188
+    },
+    "auth": {
+      "port": 9198
+    },
     "dataconnect": {
       "dataDir": "dataconnect/.dataconnect/pgliteData"
     }

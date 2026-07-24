@@ -1,0 +1,43 @@
+{
+  "mode": "READ_ONLY_DRY_RUN",
+  "projectId": "tennismate-d8acb",
+  "generatedAt": "2026-07-19T06:17:35.530Z",
+  "sourceManifest": "activity-backfill-production-reconcile-post-run.json",
+  "sourceManifestChecksum": "a2afd180077d6564e4da43efd6b903ef74ae5c1a23a9bdfa26941f40e9a158d7",
+  "sourceEventCount": 37,
+  "scoringEligibleEventCount": 21,
+  "months": [
+    {
+      "monthKey": "2026-07",
+      "sourceEventCount": 3,
+      "scoringEligibleEventCount": 1,
+      "ineligibleOrExcludedEventCount": 2,
+      "aggregatePlayerCount": 2,
+      "rankingSize": 2,
+      "totalPoints": 30,
+      "maximumPoints": 15,
+      "playersAffectedByOpponentCap": 0,
+      "pendingDuplicateEventCount": 2,
+      "excludedDuplicateEventCount": 0,
+      "canonicalConflictEventCount": 0,
+      "malformedScoringEventCount": 0,
+      "generationId": "v1-9f8ccdd6999640ab6871",
+      "sourceChecksum": "9f8ccdd6999640ab687140b10a87e8b07526795644553268229f87816b65f49c"
+    }
+  ],
+  "deploymentSafety": {
+    "recalculationRequestCount": 7,
+    "pendingRecalculationRequestCount": 1,
+    "nonPendingRecalculationRequestCount": 6,
+    "aggregateMonthDocumentCount": 6,
+    "leaderboardMonthDocumentCount": 6
+  },
+  "dataQuality": {
+    "malformedScoringEvents": 0,
+    "eventsWithoutMonthKey": 9,
+    "pendingDuplicateEvents": 4,
+    "excludedConfirmedDuplicateEvents": 3,
+    "canonicalConflicts": 0,
+    "note": "No player identifiers, profile snapshots, source paths, coordinates, or event details are included."
+  }
+}

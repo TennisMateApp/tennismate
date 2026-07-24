@@ -14,6 +14,7 @@ import {
   getCalendarEntryDisplayTitle,
   isTennisEventCalendarEntry,
 } from "@/lib/calendarEventPresentation";
+import LeaderboardEntryCard from "@/components/activityLeaderboard/LeaderboardEntryCard";
 
 type ActivePlayer = {
   id: string;
@@ -527,6 +528,10 @@ const isRematch =
                   events={discoveryEvents}
                   loading={discoveryEventsLoading}
                 />
+
+                <div className="mt-8">
+                  <LeaderboardEntryCard />
+                </div>
 
                 {/* Quick Actions */}
                 <div className="mt-8 rounded-3xl border border-black/10 bg-white p-7 2xl:p-8">
