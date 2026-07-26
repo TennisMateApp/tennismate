@@ -1,14 +1,38 @@
 apply plugin: 'com.android.application'
 
+def releaseSigningPropertiesFile = rootProject.file('keystore.properties')
+def releaseSigningProperties = new Properties()
+if (releaseSigningPropertiesFile.exists()) {
+    releaseSigningPropertiesFile.withInputStream { releaseSigningProperties.load(it) }
+}
+
+def releaseSigningValues = [
+    storeFile: System.getenv('TENNISMATE_UPLOAD_STORE_FILE') ?: releaseSigningProperties.getProperty('storeFile'),
+    storePassword: System.getenv('TENNISMATE_UPLOAD_STORE_PASSWORD') ?: releaseSigningProperties.getProperty('storePassword'),
+    keyAlias: System.getenv('TENNISMATE_UPLOAD_KEY_ALIAS') ?: releaseSigningProperties.getProperty('keyAlias'),
+    keyPassword: System.getenv('TENNISMATE_UPLOAD_KEY_PASSWORD') ?: releaseSigningProperties.getProperty('keyPassword'),
+]
+def releaseSigningAvailable = releaseSigningValues.values().every { value -> value?.trim() }
+
 android {
     namespace "com.tennismate.app"
     compileSdk rootProject.ext.compileSdkVersion
+    signingConfigs {
+        if (releaseSigningAvailable) {
+            release {
+                storeFile rootProject.file(releaseSigningValues.storeFile)
+                storePassword releaseSigningValues.storePassword
+                keyAlias releaseSigningValues.keyAlias
+                keyPassword releaseSigningValues.keyPassword
+            }
+        }
+    }
     defaultConfig {
         applicationId "com.tennismate.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 5
+        versionName "1.0.4"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -20,7 +44,22 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (releaseSigningAvailable) {
+                signingConfig signingConfigs.release
+            }
         }
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    def requiresReleaseSigning = taskGraph.allTasks.any { task ->
+        task.project == project && task.name in ['bundleRelease', 'assembleRelease']
+    }
+    if (requiresReleaseSigning && !releaseSigningAvailable) {
+        throw new GradleException(
+            'Release signing is not configured. Set the TENNISMATE_UPLOAD_* environment variables ' +
+            'or create the ignored android/keystore.properties file.'
+        )
     }
 }
 

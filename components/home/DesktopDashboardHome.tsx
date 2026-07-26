@@ -76,6 +76,8 @@ type DesktopDashboardHomeProps = {
 
   homeBootstrapping?: boolean;
   notificationBanner?: React.ReactNode;
+  clubMembershipPrompt?: React.ReactNode;
+  v2WelcomeCard?: React.ReactNode;
 };
 
 export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
@@ -96,6 +98,8 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
     discoveryEventsLoading,
     homeBootstrapping = false,
     notificationBanner,
+    clubMembershipPrompt,
+    v2WelcomeCard,
   } = props;
 
     const [openInviteId, setOpenInviteId] = useState<string | null>(null);
@@ -331,6 +335,8 @@ const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
           <main className="min-w-0 xl:pr-[460px] 2xl:pr-[520px]">
             <div className="mt-2 grid gap-8 2xl:gap-10">
               {notificationBanner}
+              {clubMembershipPrompt}
+              {v2WelcomeCard}
 
               {/* Left column */}
               <section className="min-w-0">
@@ -571,13 +577,6 @@ const isRematch =
                       <button
                         key={x.label}
                         onClick={() => router.push(x.href)}
-                        data-onboarding-target={
-                          x.label === "Match Me"
-                            ? "match-me"
-                            : x.label === "Events"
-                              ? "quick-actions"
-                              : undefined
-                        }
                         className="relative min-h-[140px] overflow-hidden rounded-3xl p-6 text-left shadow-sm transition-transform hover:-translate-y-[1px]"
                         style={{
                           border: "1px solid rgba(0,0,0,0.10)",

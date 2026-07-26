@@ -11,6 +11,11 @@ import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import * as crypto from "crypto";
 import { pubsub } from "firebase-functions/v1";
 import { fetchNearbyPlayersForUser } from "./nearbyPlayers";
+export {
+  initializeOnboardingAccount,
+  submitOnboardingWaitlist,
+} from "./onboardingFoundation";
+export {finalizeOnboardingProfile} from "./onboardingFinalization";
 import { fetchSuggestedCourtsForInvite } from "./suggestedCourtsForInvite";
 import {
   affectedUserIdsFromCompletedMatch,
@@ -342,6 +347,9 @@ export const getNearbyPlayers = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) {
     throw new HttpsError("unauthenticated", "Authentication required.");
+  }
+  if (request.auth?.token.email_verified !== true) {
+    throw new HttpsError("permission-denied", "Verify your email before finding players.");
   }
 
   return fetchNearbyPlayersForUser(uid, (request.data || {}) as {

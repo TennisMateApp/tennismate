@@ -1,6 +1,7 @@
 import * as admin from "firebase-admin";
 import { HttpsError } from "firebase-functions/v2/https";
 import { geohashQueryBounds } from "geofire-common";
+import { backendCandidateReadiness } from "./profileReadiness";
 
 const db = admin.firestore();
 
@@ -25,6 +26,9 @@ type NearbyPlayerResult = {
   lastActiveAt?: number;
   profileComplete?: boolean;
   isMatchable?: boolean;
+  clubId?: string;
+  clubName?: string;
+  clubStatus?: "member" | "none";
   distanceKm: number;
 };
 
@@ -106,9 +110,17 @@ export async function fetchNearbyPlayersForUser(
     Math.max(limit * QUERY_LIMIT_MULTIPLIER, limit)
   );
 
-  const callerPrivateSnap = await db.collection("players_private").doc(uid).get();
-  if (!callerPrivateSnap.exists) {
-    throw new HttpsError("failed-precondition", "Private profile not found.");
+  const [callerPrivateSnap, callerPublicSnap] = await Promise.all([
+    db.collection("players_private").doc(uid).get(),
+    db.collection("players").doc(uid).get(),
+  ]);
+  const callerReadiness = backendCandidateReadiness(
+    callerPublicSnap.exists ? callerPublicSnap.data() : null,
+    callerPrivateSnap.exists ? callerPrivateSnap.data() : null
+  );
+  if (!callerReadiness.ready) {
+    console.info("[getNearbyPlayers] caller_not_ready", {reason: callerReadiness.reasons[0]});
+    throw new HttpsError("failed-precondition", "Complete your profile before finding players.");
   }
 
   const callerPrivate = callerPrivateSnap.data() || {};
@@ -170,22 +182,15 @@ export async function fetchNearbyPlayersForUser(
     const publicData = publicSnap.data() || {};
     const privateData = candidatePrivateByUid.get(publicSnap.id) || {};
 
-    const lat = toFiniteNumber(privateData.lat);
-    const lng = toFiniteNumber(privateData.lng);
-    const geohash = typeof privateData.geohash === "string" ? privateData.geohash : null;
-    if (lat == null || lng == null || !geohash) {
-      skippedMissingLocation += 1;
+    const readiness = backendCandidateReadiness(publicData, privateData);
+    if (!readiness.ready) {
+      if (readiness.reasons.includes("missing_private_location")) skippedMissingLocation += 1;
+      if (readiness.reasons.includes("profile_incomplete")) skippedIncompleteProfile += 1;
+      if (readiness.reasons.includes("match_me_disabled")) skippedIsMatchableFalse += 1;
       continue;
     }
-
-    if (publicData.profileComplete !== true) {
-      skippedIncompleteProfile += 1;
-      continue;
-    }
-    if (publicData.isMatchable === false) {
-      skippedIsMatchableFalse += 1;
-      continue;
-    }
+    const lat = toFiniteNumber(privateData.lat)!;
+    const lng = toFiniteNumber(privateData.lng)!;
 
     const lastActiveAt = toTimestampMillis(publicData.lastActiveAt);
     if (activeWithinHours != null) {
@@ -228,6 +233,17 @@ export async function fetchNearbyPlayersForUser(
       lastActiveAt,
       profileComplete: publicData.profileComplete === true,
       isMatchable: publicData.isMatchable !== false,
+      clubId:
+        typeof publicData.clubId === "string" ? publicData.clubId : undefined,
+      clubName:
+        typeof publicData.clubName === "string" ?
+          publicData.clubName :
+          undefined,
+      clubStatus:
+        (publicData.clubStatus === "member" ||
+        publicData.clubStatus === "none") ?
+          publicData.clubStatus :
+          undefined,
       distanceKm,
     });
   }
@@ -235,7 +251,6 @@ export async function fetchNearbyPlayersForUser(
   players.sort((a, b) => a.distanceKm - b.distanceKm);
 
   console.log("[getNearbyPlayers] diagnostics", {
-    uid,
     requestedRadiusKm,
     normalizedRadiusKm: radiusKm,
     requestedActiveWithinHours,

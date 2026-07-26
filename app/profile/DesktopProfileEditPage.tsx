@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged, updateProfile } from "firebase/auth";
 import {
   doc,
@@ -32,6 +32,10 @@ import { httpsCallable } from "firebase/functions";
 import { getFunctionsClient } from "@/lib/getFunctionsClient";
 import type { ProfileData } from "@/components/profile/DesktopProfilePage";
 import { buildEditablePlayerProfileUpdate } from "@/lib/editablePlayerProfile";
+import ClubMembershipSelector from "@/components/clubs/ClubMembershipSelector";
+import type { ClubStatus } from "@/lib/clubs";
+import { safeNextDestination } from "@/lib/verificationFlow";
+import { trackEvent as trackAnalyticsEvent } from "@/lib/analytics";
 
 const TM = {
   forest: "#0B3D2E",
@@ -104,6 +108,7 @@ type DesktopProfileEditPageProps = {
 
 export default function DesktopProfileEditPage({ onProfileSaved }: DesktopProfileEditPageProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   console.log("[DesktopProfileEditPage] render start");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -139,6 +144,9 @@ const [formData, setFormData] = useState({
   gender: "",
   isMatchable: true,
   badges: [] as string[],
+  clubId: null as string | null,
+  clubName: null as string | null,
+  clubStatus: null as ClubStatus | null,
 });
 
   const hasPhoto = useMemo(
@@ -193,9 +201,19 @@ setFormData({
   gender: typeof data.gender === "string" ? data.gender : "",
   isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
   badges: Array.isArray(data.badges) ? data.badges : [],
+  clubId: typeof data.clubId === "string" ? data.clubId : null,
+  clubName: typeof data.clubName === "string" ? data.clubName : null,
+  clubStatus: data.clubStatus === "member" || data.clubStatus === "none" ? data.clubStatus : null,
 });
 
-      originalPostcodeRef.current = String(privateData.postcode || data.postcode || "").trim();
+      const hasStoredLocation =
+        typeof privateData.lat === "number" &&
+        typeof privateData.lng === "number" &&
+        typeof privateData.geohash === "string" &&
+        privateData.geohash.length > 0;
+      originalPostcodeRef.current = hasStoredLocation
+        ? String(privateData.postcode || data.postcode || "").trim()
+        : "";
       const currentPhoto = resolveProfilePhoto(data);
       if (currentPhoto) setPreviewURL(currentPhoto);
 
@@ -352,6 +370,7 @@ const handleRemovePhoto = async () => {
     const age = currentYear - by;
     if (!Number.isFinite(by) || by < 1900 || by > currentYear) return setStatus("Please enter a valid birth year.");
     if (age < 18) return setStatus("TennisMate is for adults only (18+).");
+    if (age > 110) return setStatus("Please enter a valid birth year.");
 
     const trimmedPostcode = formData.postcode.trim();
     if (!/^\d{4}$/.test(trimmedPostcode)) return setStatus("Enter a valid 4-digit postcode.");
@@ -409,6 +428,9 @@ const playerPayload = buildEditablePlayerProfileUpdate({
   skillLevel: coarseFromBand(formData.skillBand),
   photoURL,
   photoThumbURL,
+  clubId: formData.clubId,
+  clubName: formData.clubName,
+  clubStatus: formData.clubStatus,
 });
 
 const privatePlayerPayload = {
@@ -475,6 +497,8 @@ setPreviewURL(photoThumbURL || photoURL);
       originalPostcodeRef.current = newPostcode;
 
       setStatus("✅ Saved!");
+      void trackAnalyticsEvent("profile_completion_saved", { surface: "desktop" });
+      void trackAnalyticsEvent("activation_completed", { surface: "desktop" });
       onProfileSaved?.({
         name: formData.name || "",
         postcode: newPostcode,
@@ -486,18 +510,35 @@ setPreviewURL(photoThumbURL || photoURL);
         birthYear: formData.birthYear,
         gender: formData.gender || "",
         availability: formData.availability || [],
+        clubId: formData.clubId,
+        clubName: formData.clubName,
+        clubStatus: formData.clubStatus,
       });
-      router.replace("/profile", { scroll: false });
+      const recoveryNext = searchParams.get("recovery") === "1"
+        ? safeNextDestination(searchParams.get("next"), "/profile")
+        : "/profile";
+      router.replace(recoveryNext, { scroll: false });
     } catch (e: any) {
-      console.error("[DesktopProfileEditPage] profile save failed", {
+      console.error("[DesktopProfileEditPage] profile save failed", e);
+      console.error("[DesktopProfileEditPage] profile save failure context", {
+        errorName: e?.name ?? null,
+        errorMessage: e?.message ?? null,
+        errorCode: e?.code ?? null,
+        errorStack: e?.stack ?? null,
         authenticatedUid: auth.currentUser?.uid ?? null,
         targetDocumentUid: user?.uid ?? null,
         payloadKeys: playerPayloadKeys,
+        clubStatus: formData.clubStatus,
+        clubId: formData.clubId,
+        clubName: formData.clubName,
         documentExists: playerDocumentExists,
         legacySensitiveKeysPresent,
-        code: e?.code ?? null,
       });
-      setStatus("❌ Error saving profile.");
+      setStatus(
+        e?.message === "POSTCODE_NOT_FOUND" || e?.message === "POSTCODE_BAD_COORDS"
+          ? "We couldn't verify that postcode. Check it and try again."
+          : "Error saving profile. Please try again."
+      );
     } finally {
       saveInFlightRef.current = false;
       setSaving(false);
@@ -622,6 +663,21 @@ setPreviewURL(photoThumbURL || photoURL);
               />
               <div className="mt-2 text-xs font-semibold" style={{ color: "rgba(11,61,46,0.55)" }}>
                 {formData.bio.length}/500 characters
+              </div>
+            </section>
+
+            <section className="mt-6 rounded-2xl border p-5" style={{ background: TM.tile, borderColor: TM.border }}>
+              <div className="text-sm font-black" style={{ color: TM.forest }}>Club Membership</div>
+              <p className="mt-1 text-xs font-semibold" style={{ color: "rgba(11,61,46,0.55)" }}>
+                Choose a venue from the TennisMate courts directory.
+              </p>
+              <div className="mt-4">
+                <ClubMembershipSelector
+                  value={{ clubId: formData.clubId, clubName: formData.clubName, clubStatus: formData.clubStatus }}
+                  onChange={(selection) => setFormData((current) => ({ ...current, ...selection }))}
+                  submittedBy={user?.uid || ""}
+                  disabled={!user?.uid}
+                />
               </div>
             </section>
 
@@ -790,6 +846,28 @@ setPreviewURL(photoThumbURL || photoURL);
                   </button>
                 </div>
               </div>
+            </section>
+
+            <section className="rounded-3xl border p-6" style={{ background: TM.tile, borderColor: TM.border }}>
+              <div className="flex items-center justify-between gap-6">
+                <div>
+                  <h2 className="text-sm font-black" style={{ color: TM.forest }}>Match Me visibility</h2>
+                  <p className="mt-1 text-xs font-semibold" style={{ color: TM.sub }}>
+                    Choose whether other ready players can discover you in Match Me.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormData((current) => ({ ...current, isMatchable: !current.isMatchable }))}
+                  aria-pressed={formData.isMatchable}
+                  className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${formData.isMatchable ? "bg-green-600" : "bg-gray-300"}`}
+                >
+                  <span className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${formData.isMatchable ? "translate-x-7" : "translate-x-1"}`} />
+                </button>
+              </div>
+              <p className={`mt-3 text-xs font-bold ${formData.isMatchable ? "text-green-700" : "text-gray-600"}`}>
+                {formData.isMatchable ? "Visible in Match Me" : "Hidden from Match Me"}
+              </p>
             </section>
           </main>
 

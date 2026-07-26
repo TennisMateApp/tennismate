@@ -52,6 +52,18 @@ import UpcomingEventsSection, {
   type HomeDiscoveryEvent,
 } from "@/components/home/UpcomingEventsSection";
 import LeaderboardEntryCard from "@/components/activityLeaderboard/LeaderboardEntryCard";
+import ClubMembershipPrompt from "@/components/clubs/ClubMembershipPrompt";
+import type { ClubStatus } from "@/lib/clubs";
+import HomeWelcomeCard from "@/components/onboarding-v2/HomeWelcomeCard";
+import {useClubMembershipPromptVisibility} from "@/lib/useClubMembershipPromptVisibility";
+import {
+  consumeOnboardingV2EntrySource,
+  markOnboardingV2EntrySource,
+  shouldShowOnboardingV2HomeWelcome,
+  type OnboardingV2EntrySource,
+} from "@/lib/onboardingGuidance";
+import {trackEvent as trackAnalyticsEvent} from "@/lib/analytics";
+import {ANALYTICS_EVENTS} from "@/lib/analyticsEvents";
 
 
 const TM = {
@@ -86,19 +98,16 @@ function ActionTile({
   subtitle,
   icon,
   onClick,
-  onboardingTarget,
 }: {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
   onClick: () => void;
-  onboardingTarget?: string;
 }) {
 
   return (
     <button
       onClick={onClick}
-      data-onboarding-target={onboardingTarget}
      className={cn(
   "group relative w-full overflow-hidden rounded-3xl border text-left transition",
   "active:scale-[0.985] focus:outline-none focus:ring-2 focus:ring-offset-2",
@@ -657,6 +666,7 @@ const showDesktopWeb = !isApp && isDesktop;
   const [levelLabel, setLevelLabel] = useState('AMATEUR');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [playerPostcode, setPlayerPostcode] = useState<string | null>(null);
+  const [clubStatus, setClubStatus] = useState<ClubStatus | null | undefined>(undefined);
 
   const [homeBootstrapping, setHomeBootstrapping] = useState(true);
 
@@ -681,12 +691,85 @@ const [acceptedInviteEvents, setAcceptedInviteEvents] = useState<CalendarEvent[]
 const [acceptedInviteEventsLoading, setAcceptedInviteEventsLoading] = useState(true);
 const [oppByUid, setOppByUid] = useState<Record<string, OpponentProfile>>(() => loadOpponentProfileCache());
 const fetchingNamesRef = useRef<Set<string>>(new Set());
-const onboarding = useOnboardingProgress(uid, { enabled: Boolean(uid) });
+const onboarding = useOnboardingProgress(uid);
+const clubPromptVisibility = useClubMembershipPromptVisibility(uid, clubStatus);
+const [homeWelcomeBusy, setHomeWelcomeBusy] = useState(false);
+const [homeWelcomeLocallyHidden, setHomeWelcomeLocallyHidden] = useState(false);
+const homeWelcomeViewedRef = useRef(false);
+const homeWelcomeSourceRef = useRef<OnboardingV2EntrySource | null>(null);
 const shouldShowHomeNotificationBanner =
   homeNotificationBannerOpen &&
   onboarding.isComplete &&
-  !onboarding.shouldShow &&
   shouldShowNotificationPrompt("home_banner");
+const shouldShowV2HomeWelcome = !homeWelcomeLocallyHidden && shouldShowOnboardingV2HomeWelcome({
+  stateLoaded: onboarding.userOnboardingLoaded,
+  v2Completed: onboarding.v2Completed,
+  status: onboarding.homeWelcomeStatus,
+  accountHealthy:
+    Boolean(uid && auth.currentUser?.emailVerified) &&
+    onboarding.profileBasicsComplete &&
+    onboarding.checklist.availabilityAdded,
+  higherPriorityPrompt:
+    shouldShowHomeNotificationBanner ||
+    clubPromptVisibility.blocksWelcome,
+});
+
+useEffect(() => {
+  homeWelcomeViewedRef.current = false;
+  homeWelcomeSourceRef.current = null;
+  setHomeWelcomeLocallyHidden(false);
+}, [uid]);
+
+useEffect(() => {
+  if (!shouldShowV2HomeWelcome || homeWelcomeViewedRef.current) return;
+  homeWelcomeViewedRef.current = true;
+  homeWelcomeSourceRef.current = consumeOnboardingV2EntrySource();
+  void trackAnalyticsEvent(ANALYTICS_EVENTS.ONBOARDING_V2_HOME_WELCOME_VIEWED, {
+    source: homeWelcomeSourceRef.current === "ready_secondary" ? "ready_secondary" : "home_card",
+  });
+}, [shouldShowV2HomeWelcome]);
+
+const handleDismissV2HomeWelcome = async () => {
+  if (homeWelcomeBusy) return;
+  setHomeWelcomeBusy(true);
+  setHomeWelcomeLocallyHidden(true);
+  try {
+    await onboarding.setHomeWelcomeStatus("dismissed");
+    void trackAnalyticsEvent(ANALYTICS_EVENTS.ONBOARDING_V2_HOME_WELCOME_DISMISSED, {
+      source: "home_card",
+    });
+  } catch (error) {
+    console.warn("[OnboardingV2] unable to dismiss Home welcome", error);
+  } finally {
+    setHomeWelcomeBusy(false);
+  }
+};
+
+const handleV2HomeFindPlayers = async () => {
+  if (homeWelcomeBusy) return;
+  setHomeWelcomeBusy(true);
+  setHomeWelcomeLocallyHidden(true);
+  markOnboardingV2EntrySource("home_card");
+  try {
+    await onboarding.setHomeWelcomeStatus("used_find_players");
+    void trackAnalyticsEvent(ANALYTICS_EVENTS.ONBOARDING_V2_HOME_WELCOME_FIND_PLAYERS, {
+      source: "home_card",
+    });
+  } catch (error) {
+    console.warn("[OnboardingV2] unable to save Home welcome action", error);
+  } finally {
+    router.push("/match");
+    setHomeWelcomeBusy(false);
+  }
+};
+
+const v2HomeWelcomeCard = shouldShowV2HomeWelcome ? (
+  <HomeWelcomeCard
+    busy={homeWelcomeBusy}
+    onFindPlayers={() => void handleV2HomeFindPlayers()}
+    onDismiss={() => void handleDismissV2HomeWelcome()}
+  />
+) : null;
 
 const closeHomeNotificationBanner = () => {
   setHomeNotificationBannerOpen(false);
@@ -780,6 +863,7 @@ useEffect(() => {
       setPlayerPostcode(
         typeof p.postcode === "string" && p.postcode.trim() ? p.postcode.trim() : null
       );
+      setClubStatus(p.clubStatus === "member" || p.clubStatus === "none" ? p.clubStatus : null);
 
       if (playerName) setUserName(playerName);
       setAvatarUrl(resolvedPhoto || null);
@@ -1271,6 +1355,9 @@ function closeDidPlayOverlay() {
 }
 
 const nextEvent = nextUpcomingEvents?.[0] ?? null;
+const clubMembershipPrompt = uid && clubStatus !== undefined
+  ? <ClubMembershipPrompt uid={uid} visibility={clubPromptVisibility} />
+  : null;
 
 // ✅ DESKTOP WEB (not app) layout
 if (showDesktopWeb) {
@@ -1298,6 +1385,8 @@ if (showDesktopWeb) {
       discoveryEventsLoading={discoveryEventsLoading}
       homeBootstrapping={homeBootstrapping}
       notificationBanner={homeNotificationBanner}
+      clubMembershipPrompt={clubMembershipPrompt}
+      v2WelcomeCard={v2HomeWelcomeCard}
     />
   );
 }
@@ -1355,6 +1444,10 @@ if (showDesktopWeb) {
             {homeNotificationBanner}
           </div>
         )}
+
+        {clubMembershipPrompt ? <div className="mt-4">{clubMembershipPrompt}</div> : null}
+
+        {v2HomeWelcomeCard ? <div className="mt-4">{v2HomeWelcomeCard}</div> : null}
 
 {/* Active near you */}
 <div className="mt-4">
@@ -1429,7 +1522,7 @@ if (showDesktopWeb) {
 </div>
 
 {/* Next Match (single card like reference) */}
-<div className="mt-6" data-onboarding-target="next-game">
+<div className="mt-6">
   <div className="mb-2 flex items-center justify-between">
     <div className="text-sm font-extrabold text-black/85">Next Game</div>
 
@@ -1575,7 +1668,7 @@ const isRematch =
 />
 
 {/* My Matches (horizontal scroll) */}
-<div className="mt-6" data-onboarding-target="tennis-mates">
+<div className="mt-6">
   <div className="mb-2 flex items-center justify-between">
     <div className="text-sm font-extrabold text-black/85">My TennisMates</div>
 
@@ -1751,7 +1844,6 @@ style={{
   subtitle="Find a partner now"
   icon={<Swords className="h-5 w-5" style={{ color: TM.neon }} />}
   onClick={() => router.push('/match')}
-  onboardingTarget="match-me"
 />
 
 
@@ -1760,7 +1852,6 @@ style={{
   subtitle="Games & social hits"
   icon={<CalendarDays className="h-5 w-5" style={{ color: TM.neon }} />}
   onClick={() => router.push('/events')}
-  onboardingTarget="quick-actions"
 />
 
 

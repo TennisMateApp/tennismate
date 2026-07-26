@@ -9,6 +9,8 @@ import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import DesktopSignIn from "../../components/signIn/DesktopSignIn";
 import { trackEvent } from "@/lib/analytics";
 import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
+import { initializeOrRepairAccount, resolveAccountDestination } from "@/lib/accountLifecycle";
+import { isOnboardingV2Destination } from "@/lib/onboardingV2";
 
 
 export default function LoginPage() {
@@ -48,28 +50,23 @@ useEffect(() => {
   const searchParams = useSearchParams();
   const next = searchParams?.get("next") || "/home";
 
-  // If already signed in, go to /home (or next) immediately
   useEffect(() => {
-    let unsub: (() => void) | undefined;
+    const suppliedEmail = searchParams.get("email")?.trim();
+    if (suppliedEmail) setEmail(suppliedEmail);
+  }, [searchParams]);
+
+  // Resume account repair/readiness checks for an existing authenticated session.
+  useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      const [{ auth }, { onAuthStateChanged }] = await Promise.all([
-        import("@/lib/firebaseConfig"),
-        import("firebase/auth"),
-      ]);
-
-      if (cancelled) return;
-
-      unsub = onAuthStateChanged(auth, (u) => {
-        if (u) router.replace(next);
-      });
+      const { auth } = await import("@/lib/firebaseConfig");
+      if (!cancelled && auth.currentUser) {
+        router.replace(isOnboardingV2Destination(next) ? next : await resolveAccountDestination(auth.currentUser, next));
+      }
     })();
 
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
+    return () => { cancelled = true; };
   }, [router, next]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -82,11 +79,12 @@ useEffect(() => {
         import("firebase/auth"),
       ]);
 
-      await signInWithEmailAndPassword(auth, email, password);
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      void trackEvent("onboarding_resumed", { entry_point: "login" });
       void trackEvent(ANALYTICS_EVENTS.LOGIN_COMPLETED, {
         login_method: "email_password",
       });
-      router.replace(next);
+      router.replace(isOnboardingV2Destination(next) ? next : await resolveAccountDestination(credential.user, next));
     } catch (err: any) {
       const code = err?.code || "";
       if (code.includes("user-not-found") || code.includes("wrong-password")) {
@@ -142,6 +140,7 @@ useEffect(() => {
 
       const u = auth.currentUser;
       if (!u) throw new Error("No Firebase user after Google sign-in");
+      await initializeOrRepairAccount({ user: u });
 
       const rawPhoto =
         u.providerData?.find((p) => p.providerId === "google.com")?.photoURL ||
@@ -196,7 +195,7 @@ useEffect(() => {
         loadingState: "google-sign-in-onboarding",
         timestamp: new Date().toISOString(),
       });
-      router.replace("/profile?edit=true");
+      router.replace(isOnboardingV2Destination(next) ? next : await resolveAccountDestination(u, next));
     } catch (err: any) {
       console.error("Google sign-in failed:", err);
 

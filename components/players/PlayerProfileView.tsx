@@ -13,6 +13,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import Image from "next/image";
+import Link from "next/link";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebaseConfig";
 import { CalendarDays, CheckCircle2, Trophy } from "lucide-react";
@@ -20,6 +21,7 @@ import type { SkillBand } from "@/lib/skills";
 import { SKILL_OPTIONS, skillFromUTR } from "@/lib/skills";
 import { resolveLargeProfilePhoto, resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
+import { getClubMembershipPresentation } from "@/lib/clubMembershipPresentation";
 
 const TM = {
   forest: "#0B3D2E",
@@ -95,6 +97,9 @@ type Player = {
   utr?: number | null;
   skillBand?: string | null;
   skillBandLabel?: string | null;
+  clubId?: string | null;
+  clubName?: string | null;
+  clubStatus?: "member" | "none" | null;
 };
 
 export default function PlayerProfileView({
@@ -167,6 +172,9 @@ const [currentUid, setCurrentUid] = useState<string | null>(null);
             utr: d.utr ?? null,
             skillBand: d.skillBand ?? null,
             skillBandLabel: d.skillBandLabel ?? null,
+            clubId: typeof d.clubId === "string" ? d.clubId : null,
+            clubName: typeof d.clubName === "string" ? d.clubName : null,
+            clubStatus: d.clubStatus === "member" || d.clubStatus === "none" ? d.clubStatus : null,
           });
           playerLoaded = true;
         } else {
@@ -489,6 +497,7 @@ const handleAcceptMatchRequest = async () => {
       : typeof player.utr === "number"
       ? player.utr
       : null;
+  const clubMembershipPresentation = getClubMembershipPresentation(player);
 
 const recipientUid = resolveRecipientUid();
 const showInviteCTA = !!player && !!currentUid && !!recipientUid && currentUid !== recipientUid;
@@ -600,6 +609,12 @@ const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
 
       {/* Chips */}
       <div className="mt-3 flex flex-wrap gap-2">
+        {clubMembershipPresentation ? (
+          <Link href={`/clubs/${encodeURIComponent(player.clubId!)}`} className="w-full rounded-2xl px-3 py-2 transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#39FF14]" style={{ background: "rgba(57,255,20,0.12)", border: "1px solid rgba(57,255,20,0.24)", color: TM.ink }}>
+            <span className="block text-[11px] font-semibold text-white/55">{clubMembershipPresentation.label}</span>
+            <span className="mt-0.5 block break-words text-xs font-extrabold">{clubMembershipPresentation.clubName}</span>
+          </Link>
+        ) : null}
         {!!player.skillLevel && (
           <span
             className="px-3 py-1 rounded-full text-xs font-bold"

@@ -40,6 +40,18 @@ import { useRequireBirthYear } from "@/lib/useRequireBirthYear";
 import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
 import { useOnboardingProgress } from "@/lib/useOnboardingProgress";
 import NotificationPrompt from "@/components/notifications/NotificationPrompt";
+import ClubDiscoveryFilter from "@/components/match/ClubDiscoveryFilter";
+import MatchClubAffiliation from "@/components/match/MatchClubAffiliation";
+import { loadUniqueClubs } from "@/lib/clubs";
+import {
+  ANY_CLUB_FILTER,
+  clubFilterEmptyState,
+  clubFilterUrlValue,
+  filterCandidatesByClub,
+  getCompleteClubMembership,
+  resolveClubFilterFromUrl,
+  type ClubFilter,
+} from "@/lib/matchClubDiscovery";
 import { shouldShowNotificationPrompt } from "@/lib/notificationPromptState";
 import { registerTennisMateNotifications } from "@/lib/registerNotifications";
 import {
@@ -47,6 +59,14 @@ import {
   trackEvent as trackAnalyticsEvent,
 } from "@/lib/analytics";
 import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
+import { profileRecoveryReady } from "@/lib/profileReadiness";
+import MatchMeContextualIntro from "@/components/onboarding-v2/MatchMeContextualIntro";
+import {
+  consumeOnboardingV2EntrySource,
+  ONBOARDING_V2_MATCH_INTRO_STEPS,
+  shouldShowOnboardingV2MatchIntro,
+  type OnboardingV2EntrySource,
+} from "@/lib/onboardingGuidance";
 
 
 
@@ -91,6 +111,9 @@ interface Player {
   distance?: number;
   lat?: number | null;
   lng?: number | null;
+  clubId?: string | null;
+  clubName?: string | null;
+  clubStatus?: "member" | "none" | null;
 }
 
 type ScoredPlayer = Player & {
@@ -654,16 +677,15 @@ export default function MatchPage() {
   const [recommendedMatches, setRecommendedMatches] = useState<RecommendedMatchPlayer[]>([]);
   const [recommendedMatchLoading, setRecommendedMatchLoading] = useState(false);
   const isDesktop = useIsDesktop();
-  const userCreatedAtMs = user?.metadata?.creationTime
-    ? new Date(user.metadata.creationTime).getTime()
-    : null;
-  const isNewUserForOnboarding =
-    userCreatedAtMs == null || Date.now() - userCreatedAtMs < 14 * 24 * 60 * 60 * 1000;
-  const onboarding = useOnboardingProgress(user?.uid, {
-    enabled: Boolean(user?.emailVerified && myProfile?.profileComplete === true && isNewUserForOnboarding),
-  });
+  const onboarding = useOnboardingProgress(user?.uid);
   const [firstRequestSuccessVisible, setFirstRequestSuccessVisible] = useState(false);
   const [matchRequestNotificationPromptOpen, setMatchRequestNotificationPromptOpen] = useState(false);
+  const [matchIntroOpen, setMatchIntroOpen] = useState(false);
+  const [matchIntroStepIndex, setMatchIntroStepIndex] = useState(0);
+  const matchIntroHandledRef = useRef(false);
+  const matchIntroTerminalEventRef = useRef(false);
+  const matchIntroViewedStepsRef = useRef(new Set<number>());
+  const matchIntroSourceRef = useRef<OnboardingV2EntrySource | null>(null);
   const [matchSurface, setMatchSurface] = useState<"players" | "availability">("players");
   const [availabilityLastSeenMs, setAvailabilityLastSeenMs] = useState<number | null>(null);
   const [availabilityRequestOpen, setAvailabilityRequestOpen] = useState(false);
@@ -696,6 +718,7 @@ type ActivityFilter = "" | "online" | "recent" | "offline";
 const [ageBand, setAgeBand] = useState<AgeBand>("");
 const [genderFilter, setGenderFilter] = useState<GenderFilter>("");
 const [activityFilter, setActivityFilter] = useState<ActivityFilter>("");
+const [clubFilter, setClubFilterState] = useState<ClubFilter>(ANY_CLUB_FILTER);
 
 const router = useRouter();
 const params = useSearchParams();
@@ -705,6 +728,18 @@ const setQuery = (key: string, value?: string) => {
   if (value == null || value === "") p.delete(key);
   else p.set(key, value);
   router.replace(`?${p.toString()}`);
+};
+
+const setClubFilter = (next: ClubFilter) => {
+  setClubFilterState(next);
+  const p = new URLSearchParams(params.toString());
+  const urlValue = clubFilterUrlValue(next);
+  p.delete("club");
+  p.delete("clubId");
+  if (urlValue.club) p.set("club", urlValue.club);
+  if (urlValue.clubId) p.set("clubId", urlValue.clubId);
+  const queryString = p.toString();
+  router.replace(queryString ? `?${queryString}` : "/match", { scroll: false });
 };
 
 const clearRecommendedMatchQuery = () => {
@@ -764,6 +799,7 @@ const filtersActive =
   ageBand !== "" ||
   genderFilter !== "" ||
   activityFilter !== "" ||
+  clubFilter.mode !== "any" ||
   hideContacted !== true;
 
   useEffect(() => {
@@ -1364,6 +1400,9 @@ const loadNearbyPlayers = useCallback(
         timestamp: null,
         lastActiveAt: data.lastActiveAt ?? null,
         distance: data.distanceKm,
+        clubId: typeof data.clubId === "string" ? data.clubId : null,
+        clubName: typeof data.clubName === "string" ? data.clubName : null,
+        clubStatus: data.clubStatus ?? null,
       } satisfies Player;
     });
   },
@@ -1428,11 +1467,15 @@ const refreshMatches = useCallback(async () => {
   try {
     // 1) Load my profile
     const myRef = doc(db, "players", auth.currentUser.uid);
-    const mySnap = await getDoc(myRef);
+    const [mySnap, myPrivateSnap] = await Promise.all([
+      getDoc(myRef),
+      getDoc(doc(db, "players_private", auth.currentUser.uid)),
+    ]);
     if (!mySnap.exists()) return;
 
     const myData = mySnap.data() as any;
-    if (!hasUsablePublicPlayerProfile(myData)) {
+    const myPrivateData = myPrivateSnap.exists() ? myPrivateSnap.data() : null;
+    if (!profileRecoveryReady(myData, myPrivateData).ready) {
       setMyProfileHidden(false);
       setRawMatches([]);
       setLastUpdated(Date.now());
@@ -1440,8 +1483,8 @@ const refreshMatches = useCallback(async () => {
     }
 
     const myBirthYear =
-      typeof myData.birthYear === "number" && Number.isFinite(myData.birthYear)
-        ? myData.birthYear
+      typeof myPrivateData?.birthYear === "number" && Number.isFinite(myPrivateData.birthYear)
+        ? myPrivateData.birthYear
         : null;
 
     const myAge =
@@ -1714,39 +1757,19 @@ useEffect(() => {
 
     // ensure profile exists
     const myRef = doc(db, "players", user.uid);
-    const mySnap = await getDoc(myRef);
+    const [mySnap, myPrivateSnap] = await Promise.all([
+      getDoc(myRef),
+      getDoc(doc(db, "players_private", user.uid)),
+    ]);
     if (cancelled) return;
 
     const myData = mySnap.exists() ? (mySnap.data() as any) : null;
 
-    if (!mySnap.exists() || !hasUsablePublicPlayerProfile(myData)) {
-      console.log("[PROFILE REDIRECT DEBUG]", {
-        source: "MatchPage",
-        reason: mySnap.exists()
-          ? "incomplete players/{uid} public profile"
-          : "missing players/{uid} document",
-        pathname: "/match",
-        uid: user.uid,
-        playerExists: mySnap.exists(),
-        profileComplete: myData?.profileComplete ?? null,
-        birthYear: myData?.birthYear ?? null,
-      });
-      console.trace("[PROFILE REDIRECT TRACE]", {
-        source: "MatchPage",
-        pathname: "/match",
-        target: "/profile",
-        uid: user.uid,
-        profileGateReady: null,
-        playerExists: mySnap.exists(),
-        profileComplete: myData?.profileComplete ?? null,
-        usableProfile: false,
-        playerData: myData,
-        authReady: true,
-        loadingState: mySnap.exists() ? "incomplete-player-document" : "missing-player-document",
-        timestamp: new Date().toISOString(),
-      });
-      alert("Please complete your profile first.");
-      router.push("/profile");
+    const privateData = myPrivateSnap.exists() ? myPrivateSnap.data() : null;
+    const readiness = profileRecoveryReady(myData, privateData);
+    if (!readiness.ready) {
+      const reason = readiness.reasons[0] || "profile_incomplete";
+      router.replace(`/profile?edit=true&recovery=1&reason=${encodeURIComponent(reason)}&next=%2Fmatch`);
       return;
     }
 
@@ -2203,7 +2226,6 @@ useEffect(() => {
 
 const maybeShowAfterMatchRequestNotificationPrompt = () => {
   if (matchRequestNotificationPromptOpen) return;
-  if (onboarding.shouldShow) return;
   if (!shouldShowNotificationPrompt("after_match_request_sent")) return;
 
   setMatchRequestNotificationPromptOpen(true);
@@ -2238,6 +2260,11 @@ const matchRequestNotificationPrompt = (
   // don't double-submit the same card
 const handleMatchRequest = async (target: Player | string) => {
   if (!myProfile || !user) return false;
+  const completesActiveMatchIntro = matchIntroOpen;
+  if (completesActiveMatchIntro) {
+    matchIntroHandledRef.current = true;
+    setMatchIntroOpen(false);
+  }
 
   const toUid = resolveRecipientUid(target);
   if (!toUid) {
@@ -2407,9 +2434,12 @@ trackEvent("match_request_sent", {
   targetSkillBand: matchPlayer?.skillBand ?? null,
 });
 
-if (!onboarding.checklist.firstMatchRequestSent) {
-  await onboarding.markFirstMatchRequestSent(ref.id);
+if (!onboarding.hasSentFirstRequest) {
   setFirstRequestSuccessVisible(true);
+}
+
+if (completesActiveMatchIntro) {
+  await finishMatchIntro("completed", "match_request");
 }
 
 console.log("[TM] match_requests created:", ref.id, { toUid });
@@ -2683,7 +2713,7 @@ const recommendedMatchOverlay = !recommendedMatchLoading && recommendedMatches.l
 const filteredMatches = useMemo(() => {
   if (!myProfile || !user) return rawMatches;
 
-  return rawMatches.filter((m) => {
+  const eligibleMatches = rawMatches.filter((m) => {
     const toUid = uidOf(m);
     if (!toUid) return false;
 
@@ -2713,6 +2743,8 @@ const filteredMatches = useMemo(() => {
 
     return true;
   });
+
+  return filterCandidatesByClub(eligibleMatches, myProfile, clubFilter);
 }, [
   rawMatches,
   hideContacted,
@@ -2724,6 +2756,7 @@ const filteredMatches = useMemo(() => {
   ageBand,
   genderFilter,
   activityFilter,
+  clubFilter,
 ]);
 
 
@@ -2850,6 +2883,96 @@ const visibleMatches = useMemo(
   () => sortedMatches.slice(0, visibleCount),
   [sortedMatches, visibleCount]
 );
+const clubEmptyState = clubFilterEmptyState(clubFilter);
+const matchIntroEligible = shouldShowOnboardingV2MatchIntro({
+  stateLoaded: onboarding.userOnboardingLoaded && onboarding.firstMatchRequestLoaded && !loading,
+  v2Completed: onboarding.v2Completed,
+  status: onboarding.matchIntroStatus,
+  profileActivated: myProfile?.profileComplete === true && myProfile.isMatchable !== false && !myProfileHidden,
+  emailVerified: user?.emailVerified === true,
+  hasSentFirstRequest: onboarding.hasSentFirstRequest,
+});
+
+useEffect(() => {
+  matchIntroHandledRef.current = false;
+  matchIntroTerminalEventRef.current = false;
+  matchIntroViewedStepsRef.current.clear();
+  matchIntroSourceRef.current = null;
+  setMatchIntroOpen(false);
+  setMatchIntroStepIndex(0);
+}, [user?.uid]);
+
+useEffect(() => {
+  if (!matchIntroEligible || matchIntroHandledRef.current) return;
+  matchIntroHandledRef.current = true;
+  matchIntroSourceRef.current = consumeOnboardingV2EntrySource();
+  setMatchIntroStepIndex(0);
+  setMatchIntroOpen(true);
+  void trackAnalyticsEvent(ANALYTICS_EVENTS.ONBOARDING_V2_MATCH_INTRO_STARTED, {
+    ...(matchIntroSourceRef.current ? {source: matchIntroSourceRef.current} : {}),
+  });
+}, [matchIntroEligible]);
+
+useEffect(() => {
+  if (!matchIntroOpen) return;
+  const step = ONBOARDING_V2_MATCH_INTRO_STEPS[matchIntroStepIndex];
+  if (!step || matchIntroViewedStepsRef.current.has(step.number)) return;
+  matchIntroViewedStepsRef.current.add(step.number);
+  void trackAnalyticsEvent(ANALYTICS_EVENTS.ONBOARDING_V2_MATCH_INTRO_STEP_VIEWED, {
+    step_number: step.number,
+    step_name: step.name,
+    ...(matchIntroSourceRef.current ? {source: matchIntroSourceRef.current} : {}),
+  });
+}, [matchIntroOpen, matchIntroStepIndex]);
+
+const finishMatchIntro = useCallback(async (
+  outcome: "completed" | "skipped",
+  method: "next" | "match_request" | "skip" | "close" | "escape"
+) => {
+  setMatchIntroOpen(false);
+  matchIntroHandledRef.current = true;
+  try {
+    await onboarding.setMatchIntroStatus(outcome);
+  } catch (error) {
+    console.warn("[OnboardingV2] unable to persist Match Me introduction", error);
+  }
+  if (matchIntroTerminalEventRef.current) return;
+  matchIntroTerminalEventRef.current = true;
+  void trackAnalyticsEvent(
+    outcome === "completed"
+      ? ANALYTICS_EVENTS.ONBOARDING_V2_MATCH_INTRO_COMPLETED
+      : ANALYTICS_EVENTS.ONBOARDING_V2_MATCH_INTRO_SKIPPED,
+    {
+      completion_method: method,
+      ...(matchIntroSourceRef.current ? {source: matchIntroSourceRef.current} : {}),
+    }
+  );
+}, [onboarding.setMatchIntroStatus]);
+
+const openMatchPlayerProfile = useCallback((id: string) => {
+  if (matchIntroOpen) setMatchIntroStepIndex(2);
+  setProfileOpenId(id);
+}, [matchIntroOpen]);
+
+const handleMatchIntroNext = useCallback(() => {
+  if (matchIntroStepIndex >= ONBOARDING_V2_MATCH_INTRO_STEPS.length - 1) {
+    void finishMatchIntro("completed", "next");
+    return;
+  }
+  setMatchIntroStepIndex((current) => Math.min(
+    current + 1,
+    ONBOARDING_V2_MATCH_INTRO_STEPS.length - 1
+  ));
+}, [finishMatchIntro, matchIntroStepIndex]);
+
+const matchIntroOverlay = matchIntroOpen ? (
+  <MatchMeContextualIntro
+    stepIndex={matchIntroStepIndex}
+    hasRecommendations={matchSurface === "players" && visibleMatches.length > 0}
+    onNext={handleMatchIntroNext}
+    onSkip={(method) => void finishMatchIntro("skipped", method)}
+  />
+) : null;
 
 useEffect(() => {
   if (loading) return;
@@ -2872,21 +2995,6 @@ useEffect(() => {
     availability_overlap: false,
   });
 }, [profileOpenId]);
-
-const shouldHighlightFirstMatchRequest =
-  onboarding.shouldShow &&
-  onboarding.activationTour.currentStep === "bestMatchInvite" &&
-  matchSurface === "players";
-
-useEffect(() => {
-  if (!user?.uid || matchSurface !== "players" || visibleMatches.length === 0) return;
-  void onboarding.markViewedRecommendedPlayers();
-}, [matchSurface, onboarding.markViewedRecommendedPlayers, user?.uid, visibleMatches.length]);
-
-useEffect(() => {
-  if (!shouldHighlightFirstMatchRequest) return;
-  void onboarding.markFirstMatchRequestPromptShown();
-}, [onboarding.markFirstMatchRequestPromptShown, shouldHighlightFirstMatchRequest]);
 
 useEffect(() => {
   if (!user?.uid || visibleMatches.length === 0) return;
@@ -3001,7 +3109,7 @@ const browseAvailabilityCards = useMemo(() => {
 
 useEffect(() => {
   setVisibleCount(PAGE_SIZE);
-}, [sortBy, hideContacted, matchMode, ageBand, genderFilter, activityFilter]);
+}, [sortBy, hideContacted, matchMode, ageBand, genderFilter, activityFilter, clubFilter]);
 
 useEffect(() => {
   const qSort = params.get("sort");
@@ -3009,6 +3117,8 @@ useEffect(() => {
   const qMode = params.get("mode");
   const qActivity = params.get("activity");
   const qSurface = params.get("surface");
+  const qClub = params.get("club");
+  const qClubId = params.get("clubId");
 
   if (qSort) setSortBy(qSort);
   if (qHide === "0" || qHide === "1") setHideContacted(qHide === "1");
@@ -3019,8 +3129,50 @@ useEffect(() => {
   if (qSurface === "availability" || qSurface === "players") {
     setMatchSurface(qSurface);
   }
+  if (qClub === "my") {
+    setClubFilterState({ mode: "my", clubId: null, clubName: null });
+  } else if (qClubId) {
+    void loadUniqueClubs().then((clubs) => {
+      const resolved = resolveClubFilterFromUrl({ clubId: qClubId }, clubs);
+      if (resolved.mode === "selected") {
+        setClubFilterState(resolved);
+        return;
+      }
+
+      setClubFilterState(ANY_CLUB_FILTER);
+      const nextParams = new URLSearchParams(window.location.search);
+      nextParams.delete("clubId");
+      const queryString = nextParams.toString();
+      router.replace(queryString ? `?${queryString}` : "/match", { scroll: false });
+    }).catch((error) => {
+      console.error("[MatchClubFilter] unable to validate URL club", error);
+      setClubFilterState(ANY_CLUB_FILTER);
+    });
+  }
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
+
+useEffect(() => {
+  if (!myProfile || clubFilter.mode !== "my") return;
+  if (getCompleteClubMembership(myProfile)) return;
+  setClubFilter(ANY_CLUB_FILTER);
+  // setClubFilter intentionally reads the latest URL parameters.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [clubFilter.mode, myProfile]);
+
+const resetFilters = () => {
+  setSortBy("score");
+  setMatchMode("auto");
+  setAgeBand("");
+  setGenderFilter("");
+  setActivityFilter("");
+  setHideContacted(true);
+  setClubFilterState(ANY_CLUB_FILTER);
+  const p = new URLSearchParams(params.toString());
+  ["sort", "mode", "age", "gender", "activity", "hide", "club", "clubId"].forEach((key) => p.delete(key));
+  const queryString = p.toString();
+  router.replace(queryString ? `?${queryString}` : "/match", { scroll: false });
+};
 
 const TM = {
   forest: "#0B3D2E",
@@ -3175,12 +3327,16 @@ if (isDesktop) {
   setGenderFilter={setGenderFilter}
   activityFilter={activityFilter}
   setActivityFilter={setActivityFilter}
+  clubFilter={clubFilter}
+  currentPlayer={myProfile}
+  setClubFilter={setClubFilter}
   hideContacted={hideContacted}
   setHideContacted={setHideContacted}
+  onResetFilters={resetFilters}
   onLoadMore={() => setVisibleCount((c) => c + PAGE_SIZE)}
   onInvite={(match) => handleMatchRequest(match)}
   onDismiss={(match) => void handleDismissPlayer(match)}
-  onViewProfile={(id) => setProfileOpenId(id)}
+  onViewProfile={openMatchPlayerProfile}
   onOpenAvailabilityRequest={() => setAvailabilityRequestOpen(true)}
   onOpenAvailabilityActions={() => setAvailabilityActionsOpen(true)}
   matchSurface={matchSurface}
@@ -3192,7 +3348,6 @@ if (isDesktop) {
   pendingAvailabilityInterestKeys={pendingAvailabilityInterestKeys}
   hasNewAvailability={hasNewAvailability}
   postcodePrefixPlayerCount={postcodePrefixPlayerCount}
-  highlightFirstMatchRequest={shouldHighlightFirstMatchRequest}
   profileOpenId={profileOpenId}
   setProfileOpenId={setProfileOpenId}
 />
@@ -3202,6 +3357,7 @@ if (isDesktop) {
 
       {recommendedMatchOverlay}
       {matchRequestNotificationPrompt}
+      {matchIntroOverlay}
 
       {availabilityRequestOpen && (
         <div className="fixed inset-0 z-[10000]">
@@ -3397,7 +3553,6 @@ return (
   <div className="w-full min-h-screen bg-white">
     <div
       className="w-full min-h-screen px-4 pb-28 pt-4 sm:px-6 bg-white"
-      data-tour="match-page"
     >
 
 
@@ -3439,7 +3594,9 @@ return (
         className="text-[13px] font-semibold mt-1"
         style={{ color: "rgba(11,61,46,0.70)" }}
       >
-        {(postcodePrefixPlayerCount ?? sortedMatches.length)} players nearby
+        {filtersActive
+          ? `${sortedMatches.length} matching ${sortedMatches.length === 1 ? "player" : "players"}`
+          : `${postcodePrefixPlayerCount ?? sortedMatches.length} players nearby`}
       </div>
     </div>
 
@@ -3583,7 +3740,7 @@ return (
 
 
     {/* Panel: anchored near top-right (below header) */}
-    <div className="absolute right-4 sm:right-6 top-[76px] w-[calc(100%-2rem)] sm:w-[420px] max-w-[420px]">
+    <div className="absolute right-4 top-[76px] max-h-[calc(100dvh-6rem)] w-[calc(100%-2rem)] max-w-[420px] overflow-y-auto sm:right-6 sm:w-[420px]">
       <div
         className="rounded-2xl p-3 shadow-2xl"
         style={{
@@ -3641,6 +3798,13 @@ return (
               </select>
             </div>
           </div>
+
+          <ClubDiscoveryFilter
+            value={clubFilter}
+            currentPlayer={myProfile}
+            onChange={setClubFilter}
+            tone="dark"
+          />
 
           {/* Row 3: Age/Gender */}
           <div className="grid grid-cols-2 gap-3 sm:flex sm:items-end sm:gap-4">
@@ -3714,13 +3878,20 @@ return (
               Hide contacted
             </label>
 
-            <button
-              onClick={() => setFiltersOpen(false)}
-              className="rounded-lg px-3 py-2 text-xs font-extrabold"
-              style={{ background: TM.neon, color: TM.forest }}
-            >
-              Done
-            </button>
+            <div className="flex items-center gap-2">
+              {filtersActive ? (
+                <button type="button" onClick={resetFilters} className="rounded-lg px-2 py-2 text-xs font-extrabold text-white/75 underline underline-offset-2">
+                  Reset
+                </button>
+              ) : null}
+              <button
+                onClick={() => setFiltersOpen(false)}
+                className="rounded-lg px-3 py-2 text-xs font-extrabold"
+                style={{ background: TM.neon, color: TM.forest }}
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -3733,6 +3904,7 @@ return (
 
 {recommendedMatchOverlay}
 {matchRequestNotificationPrompt}
+{matchIntroOverlay}
 
 {justVerified && (
   <div
@@ -4183,10 +4355,7 @@ return (
               style={{
                 background: alreadySent ? "rgba(11,61,46,0.10)" : TM.neon,
                 color: alreadySent ? "rgba(11,61,46,0.60)" : TM.forest,
-                boxShadow:
-                  shouldHighlightFirstMatchRequest && !alreadySent
-                    ? "0 0 0 4px rgba(57,255,20,0.22), 0 14px 34px rgba(57,255,20,0.26)"
-                    : "0 10px 30px rgba(57,255,20,0.18)",
+                boxShadow: "0 10px 30px rgba(57,255,20,0.18)",
                 opacity: sending ? 0.75 : 1,
               }}
             >
@@ -4194,8 +4363,6 @@ return (
                 ? "Sending..."
                 : alreadySent
                 ? "Request Sent"
-                : shouldHighlightFirstMatchRequest
-                ? "Send Match Request"
                 : "I'm Interested"}
             </button>
                                 </>
@@ -4207,7 +4374,12 @@ return (
     )}
   </div>
 ) : sortedMatches.length === 0 ? (
-<p>No matches found yet. Try adjusting your availability or skill level.</p>
+  clubEmptyState ? (
+    <div className="rounded-3xl border border-emerald-950/10 bg-white px-5 py-8 text-center shadow-sm">
+      <p className="text-sm font-extrabold text-emerald-950">{clubEmptyState.title}</p>
+      <p className="mt-2 text-sm font-semibold text-emerald-950/55">{clubEmptyState.body}</p>
+    </div>
+  ) : <p>No matches found yet. Try adjusting your availability or skill level.</p>
 ) : (
   <>
 
@@ -4228,7 +4400,7 @@ return (
   </div>
 )}
 
-    <ul className="space-y-3" data-onboarding-target="recommended-matches">
+    <ul className="space-y-3" data-v2-intro-target="recommendations">
 {visibleMatches.map((match, index) => {
   const avatarSrc = match.photoThumbURL || match.photoURL || null;
   const initials = (match.name || "?").trim().charAt(0).toUpperCase();
@@ -4249,7 +4421,6 @@ return (
   role="region"
   aria-label={`${match.name} match card`}
   key={match.id}
-  data-tour={index === 0 ? "top-match" : undefined}
 className="rounded-3xl p-5 shadow-sm relative"
 style={{
   background: "#FFFFFF",
@@ -4316,6 +4487,8 @@ style={{
   >
     {match.name}
   </div>
+
+  <MatchClubAffiliation player={match} />
 
   {(() => {
     const numeric =
@@ -4397,8 +4570,7 @@ style={{
       handleMatchRequest(match); // still fine
     }}
     disabled={sendingIds.has(toUid)}
-    data-tour={index === 0 ? "send-request" : undefined}
-    data-onboarding-target={index === 0 ? "best-match-invite" : undefined}
+    data-v2-intro-target={index === 0 ? "invite" : undefined}
     data-distance-km={index === 0 && typeof match.distance === "number" ? String(match.distance) : undefined}
     data-availability-text={index === 0 ? formatAvailability(match.availability) : undefined}
     className="w-full rounded-full py-3.5 text-[14px] font-extrabold disabled:opacity-60"
@@ -4416,7 +4588,8 @@ style={{
 <div className="mt-3">
   <button
     type="button"
-    onClick={() => setProfileOpenId(match.id)}
+    onClick={() => openMatchPlayerProfile(match.id)}
+    data-v2-intro-target={index === 0 ? "profile" : undefined}
     className="w-full rounded-full py-3.5 text-[14px] font-extrabold"
     style={{
       background: "#EEF0F2",

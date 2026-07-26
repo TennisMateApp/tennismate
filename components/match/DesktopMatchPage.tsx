@@ -3,6 +3,9 @@
 import Image from "next/image";
 import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
+import ClubDiscoveryFilter from "@/components/match/ClubDiscoveryFilter";
+import MatchClubAffiliation from "@/components/match/MatchClubAffiliation";
+import { clubFilterEmptyState, type ClubFilter, type ClubMembershipLike } from "@/lib/matchClubDiscovery";
 import { CalendarDays, MapPin, X } from "lucide-react";
 
 const TM = {
@@ -125,8 +128,13 @@ export default function DesktopMatchPage(props: {
   activityFilter: ActivityFilter;
 setActivityFilter: (v: ActivityFilter) => void;
 
+  clubFilter: ClubFilter;
+  currentPlayer: ClubMembershipLike | null;
+  setClubFilter: (v: ClubFilter) => void;
+
   hideContacted: boolean;
   setHideContacted: (v: boolean) => void;
+  onResetFilters: () => void;
   matchSurface: "players" | "availability";
   setMatchSurface: (v: "players" | "availability") => void;
   activeAvailability: {
@@ -156,8 +164,6 @@ setActivityFilter: (v: ActivityFilter) => void;
   pendingAvailabilityInterestKeys: Set<string>;
   hasNewAvailability: boolean;
   postcodePrefixPlayerCount: number | null;
-  highlightFirstMatchRequest: boolean;
-
   onLoadMore: () => void;
   onInvite: (match: any) => void;
   onDismiss: (match: any) => void;
@@ -176,7 +182,7 @@ setActivityFilter: (v: ActivityFilter) => void;
     visibleCount,
     refreshing,
 
-    // filtersActive, // not used in this component UI yet
+    filtersActive,
     setFiltersOpen,
 
     sortBy,
@@ -189,8 +195,12 @@ setActivityFilter: (v: ActivityFilter) => void;
     setGenderFilter,
     activityFilter,
     setActivityFilter,
+    clubFilter,
+    currentPlayer,
+    setClubFilter,
     hideContacted,
     setHideContacted,
+    onResetFilters,
     matchSurface,
     setMatchSurface,
     activeAvailability,
@@ -200,8 +210,6 @@ setActivityFilter: (v: ActivityFilter) => void;
     pendingAvailabilityInterestKeys,
     hasNewAvailability,
     postcodePrefixPlayerCount,
-    highlightFirstMatchRequest,
-
     onLoadMore,
     onInvite,
     onDismiss,
@@ -212,6 +220,7 @@ setActivityFilter: (v: ActivityFilter) => void;
     profileOpenId,
     setProfileOpenId,
   } = props;
+  const clubEmptyState = clubFilterEmptyState(clubFilter);
 
 
 // ✅ Small helper: derive Auth UID (preferred) with safe fallbacks
@@ -334,7 +343,9 @@ const handleInvite = useCallback(
                       color: TM.forest,
                     }}
                   >
-                    {postcodePrefixPlayerCount ?? sortedMatches.length} partners
+                    {filtersActive
+                      ? `${sortedMatches.length} matching ${sortedMatches.length === 1 ? "partner" : "partners"}`
+                      : `${postcodePrefixPlayerCount ?? sortedMatches.length} partners`}
                   </span>
                 </div>
 
@@ -501,10 +512,7 @@ const handleInvite = useCallback(
                               style={{
                                 background: alreadySent ? "rgba(11,61,46,0.10)" : TM.neon,
                                 color: alreadySent ? "rgba(11,61,46,0.60)" : TM.forest,
-                                boxShadow:
-                                  highlightFirstMatchRequest && !alreadySent
-                                    ? "0 0 0 4px rgba(57,255,20,0.20), 0 14px 34px rgba(57,255,20,0.24)"
-                                    : "0 10px 24px rgba(57,255,20,0.14)",
+                                boxShadow: "0 10px 24px rgba(57,255,20,0.14)",
                                 opacity: sending ? 0.75 : 1,
                               }}
                             >
@@ -512,8 +520,6 @@ const handleInvite = useCallback(
                                 ? "Sending..."
                                 : alreadySent
                                 ? "Request Sent"
-                                : highlightFirstMatchRequest
-                                ? "Send Match Request"
                                 : "I'm Interested"}
                             </button>
                                 </>
@@ -526,8 +532,10 @@ const handleInvite = useCallback(
                   </div>
                 </div>
               ) : visibleMatches.length === 0 ? (
-  <div className="rounded-2xl border bg-white p-6 shadow-sm text-sm text-gray-700">
-    No matches found yet. Try adjusting your filters.
+  <div className="rounded-2xl border bg-white p-6 text-center shadow-sm text-sm text-gray-700">
+    {clubEmptyState ? (
+      <><div className="font-extrabold text-emerald-950">{clubEmptyState.title}</div><p className="mt-2 font-semibold text-emerald-950/55">{clubEmptyState.body}</p></>
+    ) : "No matches found yet. Try adjusting your filters."}
   </div>
 ) : (
   <>
@@ -540,7 +548,7 @@ const handleInvite = useCallback(
       </div>
     )}
 
-    <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4" data-onboarding-target="recommended-matches">
+    <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4" data-v2-intro-target="recommendations">
 {visibleMatches.map((p, index) => {
   const activityBadge = getActivityBadge(p.lastActiveAt);
 
@@ -603,6 +611,8 @@ const handleInvite = useCallback(
         {p.name}
       </div>
 
+      <MatchClubAffiliation player={p} />
+
             <div
               className="mt-1 text-sm font-semibold"
               style={{ color: "rgba(11,61,46,0.70)" }}
@@ -647,7 +657,7 @@ const handleInvite = useCallback(
           <button
             type="button"
             onClick={() => handleInvite(p)}
-            data-onboarding-target={index === 0 ? "best-match-invite" : undefined}
+            data-v2-intro-target={index === 0 ? "invite" : undefined}
             data-distance-km={index === 0 && typeof p.distance === "number" ? String(p.distance) : undefined}
             data-availability-text={
               index === 0 && Array.isArray(p.availability) && p.availability.length > 0
@@ -658,17 +668,15 @@ const handleInvite = useCallback(
             style={{
               background: TM.neon,
               color: TM.forest,
-              boxShadow: highlightFirstMatchRequest
-                ? "0 0 0 4px rgba(57,255,20,0.20), 0 12px 28px rgba(57,255,20,0.22)"
-                : undefined,
             }}
           >
-            {highlightFirstMatchRequest ? "Send Match Request" : "Invite to Play"}
+            Invite to Play
           </button>
 
           <button
             type="button"
-            onClick={() => setProfileOpenId(p.docId || p.id)}
+            onClick={() => onViewProfile(p.docId || p.id)}
+            data-v2-intro-target={index === 0 ? "profile" : undefined}
             className="rounded-xl px-3 py-2 text-sm font-semibold"
             style={{
               color: "#0B3D2E",
@@ -722,6 +730,12 @@ const handleInvite = useCallback(
                   <option value="utr">TMR</option>
                 </select>
               </div>
+
+              <ClubDiscoveryFilter
+                value={clubFilter}
+                currentPlayer={currentPlayer}
+                onChange={setClubFilter}
+              />
 
               <div>
                 <div className="text-xs font-semibold text-gray-700 mb-2">Age</div>
@@ -777,6 +791,12 @@ const handleInvite = useCallback(
                 />
                 Hide contacted
               </label>
+
+              {filtersActive ? (
+                <button type="button" onClick={onResetFilters} className="w-full rounded-xl border border-emerald-950/15 px-3 py-2 text-xs font-extrabold text-emerald-950 hover:bg-emerald-950/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#39FF14]">
+                  Reset filters
+                </button>
+              ) : null}
 
             </div>
           </aside>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { auth, db, storage } from "@/lib/firebaseConfig";
 import { getFunctionsClient } from "@/lib/getFunctionsClient";
 import { onAuthStateChanged, updateProfile } from "firebase/auth";
@@ -35,6 +36,11 @@ import {
   withPhotoCacheBust,
 } from "@/lib/profilePhoto";
 import { buildEditablePlayerProfileUpdate } from "@/lib/editablePlayerProfile";
+import ClubMembershipSelector from "@/components/clubs/ClubMembershipSelector";
+import type { ClubStatus } from "@/lib/clubs";
+import { safeNextDestination } from "@/lib/verificationFlow";
+import { trackEvent as trackAnalyticsEvent } from "@/lib/analytics";
+import { getClubMembershipPresentation } from "@/lib/clubMembershipPresentation";
 
 
 const TM = {
@@ -177,6 +183,9 @@ const [formData, setFormData] = useState({
   birthYear: "" as number | "",
   gender: "",
   timestamp: null as any,
+  clubId: null as string | null,
+  clubName: null as string | null,
+  clubStatus: null as ClubStatus | null,
 });
 
 const derivedAge = useMemo(() => {
@@ -186,6 +195,7 @@ const derivedAge = useMemo(() => {
   if (!Number.isFinite(age) || age < 0 || age > 120) return null;
   return age;
 }, [formData.birthYear]);
+const clubMembershipPresentation = getClubMembershipPresentation(formData);
 
 
 // Profile photo presence (preview, stored, or freshly cropped)
@@ -253,9 +263,19 @@ setFormData({
   birthYear: typeof privateData.birthYear === "number" ? privateData.birthYear : "",
   gender: typeof data.gender === "string" ? data.gender : "",
   timestamp: data.timestamp || null,
+  clubId: typeof data.clubId === "string" ? data.clubId : null,
+  clubName: typeof data.clubName === "string" ? data.clubName : null,
+  clubStatus: data.clubStatus === "member" || data.clubStatus === "none" ? data.clubStatus : null,
 });
 
-originalPostcodeRef.current = String(privateData.postcode || data.postcode || "").trim();
+const hasStoredLocation =
+  typeof privateData.lat === "number" &&
+  typeof privateData.lng === "number" &&
+  typeof privateData.geohash === "string" &&
+  privateData.geohash.length > 0;
+originalPostcodeRef.current = hasStoredLocation
+  ? String(privateData.postcode || data.postcode || "").trim()
+  : "";
 
     const currentPhoto = resolveProfilePhoto(data);
     if (currentPhoto) setPreviewURL(currentPhoto);
@@ -639,6 +659,10 @@ if (!Number.isFinite(by) || by < 1900 || by > currentYear) {
   setStatus("TennisMate is for adults only (18+).");
   return false;
 }
+if (age > 110) {
+  setStatus("Please enter a valid birth year (e.g. 1994).");
+  return false;
+}
 
 if (age > 110) {
   setStatus("Please enter a valid birth year (e.g. 1994).");
@@ -717,6 +741,9 @@ const playerPayload = buildEditablePlayerProfileUpdate({
   skillLevel: coarseFromBand(formData.skillBand),
   photoURL,
   photoThumbURL,
+  clubId: formData.clubId,
+  clubName: formData.clubName,
+  clubStatus: formData.clubStatus,
 });
 
 const privatePlayerPayload = {
@@ -785,17 +812,30 @@ setPreviewURL(photoThumbURL || photoURL);
     originalPostcodeRef.current = newPostcode;
 
     setStatus("✅ Profile saved successfully!");
+    void trackAnalyticsEvent("profile_completion_saved", { surface: "mobile" });
+    void trackAnalyticsEvent("activation_completed", { surface: "mobile" });
     return true;
   } catch (e: any) {
-    console.error("[ProfileContent] profile save failed", {
+    console.error("[ProfileContent] profile save failed", e);
+    console.error("[ProfileContent] profile save failure context", {
+      errorName: e?.name ?? null,
+      errorMessage: e?.message ?? null,
+      errorCode: e?.code ?? null,
+      errorStack: e?.stack ?? null,
       authenticatedUid: auth.currentUser?.uid ?? null,
       targetDocumentUid: user?.uid ?? null,
       payloadKeys: playerPayloadKeys,
+      clubStatus: formData.clubStatus,
+      clubId: formData.clubId,
+      clubName: formData.clubName,
       documentExists: playerDocumentExists,
       legacySensitiveKeysPresent,
-      code: e?.code ?? null,
     });
-    setStatus("❌ Error saving profile.");
+    setStatus(
+      e?.message === "POSTCODE_NOT_FOUND" || e?.message === "POSTCODE_BAD_COORDS"
+        ? "We couldn't verify that postcode. Check it and try again."
+        : "Error saving profile. Please try again."
+    );
     return false;
   } finally {
     setSaving(false);
@@ -820,7 +860,10 @@ const handleSaveAndExitEditMode = async () => {
     if (!ok) return;
 
     setEditMode(false);
-    router.replace("/profile", { scroll: false });
+    const recoveryNext = searchParams.get("recovery") === "1"
+      ? safeNextDestination(searchParams.get("next"), "/profile")
+      : "/profile";
+    router.replace(recoveryNext, { scroll: false });
   } finally {
     saveInFlightRef.current = false;
   }
@@ -979,6 +1022,13 @@ return (
         </span>
       </div>
     </div>
+
+    {clubMembershipPresentation ? (
+      <Link href={`/clubs/${encodeURIComponent(formData.clubId!)}`} className="mt-4 block rounded-2xl border border-emerald-950/10 bg-white px-4 py-3 text-center transition hover:border-emerald-950/25 focus:outline-none focus:ring-2 focus:ring-[#39FF14]" style={{ color: TM.forest }}>
+        <div className="text-xs font-bold" style={{ color: "rgba(11,61,46,0.55)" }}>{clubMembershipPresentation.label}</div>
+        <div className="mt-0.5 break-words text-sm font-extrabold">{clubMembershipPresentation.clubName}</div>
+      </Link>
+    ) : null}
 
     {/* 2x2 INFO TILES */}
     <div className="mt-6 grid grid-cols-2 gap-4">
@@ -1463,6 +1513,21 @@ return (
           />
           <div className="mt-1 text-[11px]" style={{ color: "rgba(11,61,46,0.55)" }}>
             {formData.bio.length}/300
+          </div>
+        </div>
+
+        <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(11,61,46,0.18)" }}>
+          <div className="text-sm font-extrabold" style={{ color: TM.forest }}>Club Membership</div>
+          <p className="mt-1 text-[11px]" style={{ color: "rgba(11,61,46,0.65)" }}>
+            Choose a venue from the TennisMate courts directory.
+          </p>
+          <div className="mt-3">
+            <ClubMembershipSelector
+              value={{ clubId: formData.clubId, clubName: formData.clubName, clubStatus: formData.clubStatus }}
+              onChange={(selection) => setFormData((current) => ({ ...current, ...selection }))}
+              submittedBy={user?.uid || ""}
+              disabled={!user?.uid}
+            />
           </div>
         </div>
 

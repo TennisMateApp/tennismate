@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -22,6 +23,7 @@ import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 // ✅ Reuse your existing skill helpers
 import type { SkillBand } from "@/lib/skills";
 import { SKILL_OPTIONS, skillFromUTR } from "@/lib/skills";
+import { getClubMembershipPresentation } from "@/lib/clubMembershipPresentation";
 
 import { BADGE_CATALOG } from "@/lib/badges";
 
@@ -116,6 +118,9 @@ export type ProfileData = {
   birthYear: number | "";
   gender: string;
   availability: string[];
+  clubId?: string | null;
+  clubName?: string | null;
+  clubStatus?: "member" | "none" | null;
   memberSince?: string; // optional
 };
 
@@ -257,6 +262,9 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
     birthYear: "",
     gender: "",
     availability: [],
+    clubId: null,
+    clubName: null,
+    clubStatus: null,
   };
   const [loading, setLoading] = useState(!initialProfile);
   const [profile, setProfile] = useState<ProfileData>(initialProfile ?? emptyProfile);
@@ -275,6 +283,7 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
   }, [profile.birthYear]);
 
   const safeBadges = Array.isArray(profile.badges) ? profile.badges : [];
+  const clubMembershipPresentation = getClubMembershipPresentation(profile);
 
   const weekly = useMemo(() => buildWeeklyMatrix(profile.availability || []), [profile.availability]);
 
@@ -317,6 +326,9 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
         gender: typeof data.gender === "string" ? data.gender : "",
         availability: normalizeAvailability(data.availability),
         memberSince: data.memberSince || "", // optional if you store it
+        clubId: typeof data.clubId === "string" ? data.clubId : null,
+        clubName: typeof data.clubName === "string" ? data.clubName : null,
+        clubStatus: data.clubStatus === "member" || data.clubStatus === "none" ? data.clubStatus : null,
       });
 
       // ✅ Matches = accepted OR confirmed OR completed match requests
@@ -739,6 +751,13 @@ return (
                   {profile.memberSince ? `Member since ${profile.memberSince}` : "Member"}
                 </div>
               </div>
+
+              {clubMembershipPresentation ? (
+                <Link href={`/clubs/${encodeURIComponent(profile.clubId!)}`} className="mt-4 block rounded-2xl border px-4 py-3 transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#39FF14]" style={{ background: "rgba(57,255,20,0.10)", borderColor: "rgba(57,255,20,0.30)", color: TM.forest }}>
+                  <div className="text-xs font-bold" style={{ color: "rgba(11,61,46,0.55)" }}>{clubMembershipPresentation.label}</div>
+                  <div className="mt-0.5 break-words text-sm font-extrabold">{clubMembershipPresentation.clubName}</div>
+                </Link>
+              ) : null}
 
               {/* Key info list */}
               <div className="mt-5 space-y-3">

@@ -1,12 +1,12 @@
 // app/signup/page.tsx
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseConfig";
 import SignupErrorModal from "@/components/SignupErrorModal";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, serverTimestamp, getDoc, writeBatch } from "firebase/firestore";
+import { doc, serverTimestamp, getDoc, writeBatch } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import Cropper from "react-easy-crop";
 import getCroppedImg from "../utils/cropImage";
@@ -16,7 +16,19 @@ import { Mail, Lock, User, MapPin, Camera } from "lucide-react";
 
 import { clampUTR, SKILL_OPTIONS, skillFromUTR, type SkillBand } from "../../lib/skills";
 import { geohashForLocation } from "geofire-common";
-import { trackEvent } from "@/lib/mixpanel";
+import { trackEvent } from "@/lib/analytics";
+import {
+  initializeOrRepairAccount,
+  markUnsupportedPostcodeWaitlist,
+  sendInitialVerificationIfClaimed,
+} from "@/lib/accountLifecycle";
+import { classifyPostcode } from "@/lib/postcodeEligibility";
+import {
+  collectReferralCandidates,
+  referralCookieValue,
+  REFERRAL_SESSION_KEY,
+} from "@/lib/referralAttribution";
+import { safeNextDestination } from "@/lib/verificationFlow";
 
 const DEFAULT_AVATAR = "/images/default-avatar.jpg";
 const RATING_LABEL = "TennisMate Rating (TMR)";
@@ -69,6 +81,20 @@ export default function SignupPage() {
   const [showEmailExistsModal, setShowEmailExistsModal] = useState(false);
   const [existingEmail, setExistingEmail] = useState<string>("");
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextDestination = safeNextDestination(searchParams.get("next"), "/home");
+
+  useEffect(() => {
+    const candidates = collectReferralCandidates({
+      stored: sessionStorage.getItem(REFERRAL_SESSION_KEY),
+      ref: searchParams.get("ref"),
+      rc: searchParams.get("rc"),
+      cookie: referralCookieValue(document.cookie),
+    });
+    if (!sessionStorage.getItem(REFERRAL_SESSION_KEY) && candidates[0]) {
+      sessionStorage.setItem(REFERRAL_SESSION_KEY, candidates[0].code);
+    }
+  }, [searchParams]);
 
 const [formData, setFormData] = useState({
   name: "",
@@ -268,200 +294,159 @@ const handleSubmit = async (e: React.FormEvent) => {
   setErrors(newErrors);
   if (Object.keys(newErrors).length > 0) return;
 
-  setStatus("Submitting...");
+  setStatus("Checking your postcode...");
 
-  const firstDigit = formData.postcode.trim().charAt(0);
-  const isSupportedRegion = firstDigit === "3" || firstDigit === "2";
-
-  try {
-    // 1) Create Auth user
-    const email = formData.email.trim().toLowerCase();
-
-    const userCredential = await createUserWithEmailAndPassword(
-      auth,
-      email,
-      formData.password
-    );
-
-    const user = userCredential.user;
-    const uid = user.uid;
-    const authEmail = user.email?.trim().toLowerCase() || email;
-
-    // 2) Upload REQUIRED profile photo (FULL + THUMB)
-    if (!croppedImage) {
-      setErrors((prev) => ({ ...prev, photo: "Please add a profile photo." }));
+  const postcode = formData.postcode.trim();
+  const firstDigit = postcode.charAt(0);
+  let postcodeRecord: Record<string, unknown> | null = null;
+  if (firstDigit === "2" || firstDigit === "3") {
+    try {
+      const postcodeSnapshot = await getDoc(doc(db, "postcodes", postcode));
+      postcodeRecord = postcodeSnapshot.exists() ? postcodeSnapshot.data() : null;
+    } catch {
+      void trackEvent("postcode_validation_failed", { reason: "lookup_unavailable" });
+      setErrors((current) => ({
+        ...current,
+        postcode: "We couldn't verify that postcode right now. Please try again.",
+      }));
       setStatus("");
       return;
     }
+  }
 
-    let photoURL = DEFAULT_AVATAR;
-    let photoThumbURL: string | null = null;
+  const postcodeEligibility = classifyPostcode(postcode, postcodeRecord);
+  if (postcodeEligibility.kind === "invalid") {
+    void trackEvent("postcode_validation_failed", { reason: "invalid_format" });
+    setErrors((current) => ({ ...current, postcode: "Enter a valid 4-digit postcode." }));
+    setStatus("");
+    return;
+  }
+  if (postcodeEligibility.kind === "unknown") {
+    void trackEvent("postcode_validation_failed", { reason: "unknown_postcode" });
+    setErrors((current) => ({
+      ...current,
+      postcode: "We don't recognise that postcode yet. Check it and try again.",
+    }));
+    setStatus("");
+    return;
+  }
 
-    const fullRef = ref(storage, `profile_pictures/${uid}/avatar_full.jpg`);
-    await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
-    photoURL = await getDownloadURL(fullRef);
+  try {
+    setStatus("Creating your account...");
+    void trackEvent("account_creation_started", {
+      supported_region: postcodeEligibility.kind === "supported",
+    });
+    const email = formData.email.trim().toLowerCase();
+    const { user } = await createUserWithEmailAndPassword(auth, email, formData.password);
+    const uid = user.uid;
+    const authEmail = user.email?.trim().toLowerCase() || email;
+    void trackEvent("auth_account_created");
 
-    const thumbFile = await makeAvatarThumb(croppedImage, 160, 0.72);
-    const thumbRef = ref(storage, `profile_pictures/${uid}/avatar_thumb.jpg`);
-    await uploadBytes(thumbRef, thumbFile, { contentType: "image/jpeg" });
-    photoThumbURL = await getDownloadURL(thumbRef);
+    const referralCandidates = collectReferralCandidates({
+      stored: sessionStorage.getItem(REFERRAL_SESSION_KEY),
+      ref: searchParams.get("ref"),
+      rc: searchParams.get("rc"),
+      cookie: referralCookieValue(document.cookie),
+    });
+    const initialization = await initializeOrRepairAccount({
+      user,
+      displayName: formData.name,
+      birthYear: Number(formData.birthYear),
+      referralCandidates,
+    });
+    void trackEvent("account_initialization_completed", {
+      repaired_document_count: initialization.repairedDocuments.length,
+      referral_captured: initialization.referralCaptured,
+    });
+    if (initialization.referralCaptured) void trackEvent("referral_captured");
+    const initialVerificationSent = await sendInitialVerificationIfClaimed({
+      user,
+      shouldSendVerification: initialization.shouldSendVerification,
+      next: nextDestination,
+    }).catch(() => false);
+    if (initialVerificationSent) void trackEvent("verification_sent", { send_type: "initial" });
 
-    const userRef = doc(db, "users", uid);
-
-    if (isSupportedRegion) {
-      const ratingOrNull = formData.rating === "" ? null : formData.rating;
-      const skillBandValue = formData.skillBand || null;
-      const skillBandLabel = toSkillLabel(skillBandValue);
-
-      let lat: number | null = null;
-      let lng: number | null = null;
-      let geohash: string | null = null;
-
-      try {
-        const pcSnap = await getDoc(doc(db, "postcodes", formData.postcode));
-        if (pcSnap.exists()) {
-          const pc = pcSnap.data() as any;
-
-          if (typeof pc.lat === "number" && typeof pc.lng === "number") {
-            lat = pc.lat;
-            lng = pc.lng;
-            geohash = geohashForLocation([pc.lat, pc.lng]);
-          }
-        }
-      } catch (e) {
-        console.warn("Postcode lookup failed; continuing without lat/lng/geohash", e);
-      }
-
-      const playerRef = doc(db, "players", uid);
-      const privatePlayerRef = doc(db, "players_private", uid);
-      const [userSnap, playerSnap, privatePlayerSnap] = await Promise.all([
-        getDoc(userRef),
-        getDoc(playerRef),
-        getDoc(privatePlayerRef),
-      ]);
-      const userCreatedAt = userSnap.data()?.createdAt ?? null;
-
-      const publicPlayerData = {
-        name: formData.name,
-        nameLower: (formData.name || "").toLowerCase(),
-        postcode: formData.postcode,
-        isMatchable: true,
-        skillRating: ratingOrNull,
-        utr: ratingOrNull,
-        skillBand: skillBandValue,
-        skillBandLabel,
-        availability: formData.availability,
-        bio: formData.bio,
-        photoURL,
-        photoThumbURL,
-        profileComplete: true,
-        updatedAt: serverTimestamp(),
-      };
-
-      const privatePlayerData = {
-        email: authEmail,
-        postcode: formData.postcode,
-        birthYear: formData.birthYear ? Number(formData.birthYear) : null,
-        lat,
-        lng,
-        geohash,
-        updatedAt: serverTimestamp(),
-      };
-
-      try {
-        const batch = writeBatch(db);
-        const createdAt = userCreatedAt || serverTimestamp();
-
-        batch.set(
-          userRef,
-          {
-            name: formData.name,
-            email: authEmail,
-            photoURL,
-            photoThumbURL,
-            requireVerification: true,
-            ...(userSnap.exists() ? {} : { createdAt }),
-          },
-          { merge: true }
-        );
-
-        batch.set(
-          playerRef,
-          {
-            ...publicPlayerData,
-            ...(playerSnap.exists() ? {} : { createdAt }),
-          },
-          { merge: true }
-        );
-
-        batch.set(
-          privatePlayerRef,
-          {
-            ...privatePlayerData,
-            ...(privatePlayerSnap.exists() ? {} : { createdAt }),
-          },
-          { merge: true }
-        );
-
-        await batch.commit();
-      } catch (writeError) {
-        console.error("[Signup] Failed to create profile documents after Auth signup", {
-          uid,
-          email: authEmail,
-          writeError,
-        });
-        setStatus(
-          "Your account was created, but we could not finish your TennisMate profile. Please contact support before continuing."
-        );
-        return;
-      }
-
-      trackEvent("signup_completed", {
-        userId: uid,
-        email: authEmail,
-        postcode: formData.postcode,
-        skillBand: skillBandValue,
-        hasRating: ratingOrNull !== null,
-        availabilityCount: formData.availability.length,
-        regionSupported: true,
-      });
-
-      setStatus("");
-      router.replace("/verify-email");
-      return;
-        } else {
-      await setDoc(doc(db, "users", uid), {
-        name: formData.name,
-        email: authEmail,
-        photoURL,
-        photoThumbURL,
-        requireVerification: true,
-        createdAt: serverTimestamp(),
-      }, { merge: true });
-
-      await setDoc(doc(db, "waitlist_users", uid), {
-        name: formData.name,
-        email: authEmail,
-        postcode: formData.postcode,
-        timestamp: serverTimestamp(),
-        source: "signupForm",
-      });
-
-      trackEvent("signup_completed", {
-        userId: uid,
-        email: authEmail,
-        postcode: formData.postcode,
-        skillBand: formData.skillBand || null,
-        hasRating: formData.rating !== "",
-        availabilityCount: formData.availability.length,
-        regionSupported: false,
-        waitlisted: true,
-      });
-
+    if (postcodeEligibility.kind === "unsupported") {
+      await markUnsupportedPostcodeWaitlist({ postcode, displayName: formData.name });
+      void trackEvent("waitlist_signup_completed", { supported_region: false });
       setShowWaitlistModal(true);
       setStatus("");
       return;
     }
+
+    if (!croppedImage) {
+      setErrors((current) => ({ ...current, photo: "Please add a profile photo." }));
+      setStatus("");
+      return;
+    }
+
+    const fullRef = ref(storage, `profile_pictures/${uid}/avatar_full.jpg`);
+    await uploadBytes(fullRef, croppedImage, { contentType: "image/jpeg" });
+    const photoURL = await getDownloadURL(fullRef);
+    const thumbFile = await makeAvatarThumb(croppedImage, 160, 0.72);
+    const thumbRef = ref(storage, `profile_pictures/${uid}/avatar_thumb.jpg`);
+    await uploadBytes(thumbRef, thumbFile, { contentType: "image/jpeg" });
+    const photoThumbURL = await getDownloadURL(thumbRef);
+
+    const userRef = doc(db, "users", uid);
+    const playerRef = doc(db, "players", uid);
+    const privatePlayerRef = doc(db, "players_private", uid);
+    const [userSnap, playerSnap, privatePlayerSnap] = await Promise.all([
+      getDoc(userRef),
+      getDoc(playerRef),
+      getDoc(privatePlayerRef),
+    ]);
+    const createdAt = userSnap.data()?.createdAt ?? serverTimestamp();
+    const ratingOrNull = formData.rating === "" ? null : formData.rating;
+    const skillBandValue = formData.skillBand || null;
+    const batch = writeBatch(db);
+    batch.set(userRef, {
+      name: formData.name,
+      email: authEmail,
+      photoURL,
+      photoThumbURL,
+      requireVerification: true,
+      ...(userSnap.exists() ? {} : { createdAt }),
+    }, { merge: true });
+    batch.set(playerRef, {
+      name: formData.name,
+      nameLower: formData.name.toLowerCase(),
+      postcode,
+      gender: formData.gender,
+      isMatchable: true,
+      skillRating: ratingOrNull,
+      utr: ratingOrNull,
+      skillBand: skillBandValue,
+      skillBandLabel: toSkillLabel(skillBandValue),
+      availability: formData.availability,
+      bio: formData.bio,
+      photoURL,
+      photoThumbURL,
+      profileComplete: true,
+      updatedAt: serverTimestamp(),
+      ...(playerSnap.exists() ? {} : { createdAt }),
+    }, { merge: true });
+    batch.set(privatePlayerRef, {
+      email: authEmail,
+      postcode,
+      birthYear: Number(formData.birthYear),
+      lat: postcodeEligibility.lat,
+      lng: postcodeEligibility.lng,
+      geohash: geohashForLocation([postcodeEligibility.lat, postcodeEligibility.lng]),
+      updatedAt: serverTimestamp(),
+      ...(privatePlayerSnap.exists() ? {} : { createdAt }),
+    }, { merge: true });
+    await batch.commit();
+
+    void trackEvent("signup_completed", {
+      skill_band: skillBandValue,
+      has_rating: ratingOrNull !== null,
+      availability_count: formData.availability.length,
+      supported_region: true,
+    });
+    setStatus("");
+    router.replace(`/verify-email?next=${encodeURIComponent(nextDestination)}`);
+    return;
   } catch (error: any) {
     if (error?.code === "auth/email-already-in-use") {
       const email = formData.email.trim().toLowerCase();
@@ -473,8 +458,13 @@ const handleSubmit = async (e: React.FormEvent) => {
       setStatus("⚠️ Password must be at least 6 characters.");
       return;
     } else {
-      console.error("Signup error:", error);
-      setStatus("❌ Something went wrong. Please try again.");
+      console.error("[account_creation] failed", { code: error?.code || "unknown" });
+      if (auth.currentUser) void trackEvent("onboarding_interrupted", { stage: "profile_initialization" });
+      setStatus(
+        auth.currentUser
+          ? "Your account is safe, but setup did not finish. Sign in again to resume."
+          : "Something went wrong. Please try again."
+      );
       return;
     }
   }
@@ -486,7 +476,14 @@ const handleSubmit = async (e: React.FormEvent) => {
   <SignupErrorModal
     email={existingEmail}
     onClose={() => setShowEmailExistsModal(false)}
-    onGoToLogin={() => router.push(`/login?email=${encodeURIComponent(existingEmail)}`)}
+    onGoToLogin={() => {
+      const next = searchParams.get("next");
+      router.push(
+        `/login?email=${encodeURIComponent(existingEmail)}${
+          next ? `&next=${encodeURIComponent(next)}` : ""
+        }`
+      );
+    }}
   />
 )}
 
@@ -861,7 +858,7 @@ We’ve saved your interest and will notify you when we launch
 in your area.
                 </p>
                 <button
-                  onClick={() => setShowWaitlistModal(false)}
+                  onClick={() => router.replace(`/verify-email?next=${encodeURIComponent(nextDestination)}`)}
                   className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
                 >
                   Got it

@@ -40,6 +40,8 @@ const BLOCKED_PARAM_KEYS = new Set([
   "accessToken",
   "access_token",
   "password",
+  "birthYear",
+  "birth_year",
   "uid",
   "userId",
   "user_id",

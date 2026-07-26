@@ -11,6 +11,9 @@ export type EditablePlayerProfileInput = {
   skillLevel: string;
   photoURL: string;
   photoThumbURL: string;
+  clubId: string | null;
+  clubName: string | null;
+  clubStatus: "member" | "none" | null;
 };
 
 /** Public player fields that profile owners are intentionally allowed to edit. */
@@ -33,6 +36,9 @@ export function buildEditablePlayerProfileUpdate(input: EditablePlayerProfileInp
     photoURL: input.photoURL,
     photoThumbURL: input.photoThumbURL,
     avatar: input.photoThumbURL || input.photoURL || null,
+    clubId: input.clubStatus === "member" ? input.clubId : null,
+    clubName: input.clubStatus === "member" ? input.clubName : null,
+    clubStatus: input.clubStatus,
     profileComplete: true,
   };
 }

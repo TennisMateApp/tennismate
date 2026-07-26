@@ -18,6 +18,9 @@ export type NearbyPlayerResponseItem = {
   lastActiveAt?: unknown;
   profileComplete?: boolean;
   isMatchable?: boolean;
+  clubId?: string;
+  clubName?: string;
+  clubStatus?: "member" | "none";
   distanceKm: number;
 };
 

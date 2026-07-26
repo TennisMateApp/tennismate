@@ -36,6 +36,9 @@ service cloud.firestore {
         "photoURL",
         "photoThumbURL",
         "avatar",
+        "clubId",
+        "clubName",
+        "clubStatus",
         "profileComplete"
       ];
     }
@@ -51,6 +54,96 @@ service cloud.firestore {
 
     function playerCreateAllowedKeys() {
       return playerClientMutableKeys().concat(["createdAt"]);
+    }
+
+    function trustedAccountLifecycleKeys() {
+      return [
+        "accountInitialization",
+        "accountStatus",
+        "waitlistPostcode",
+        "verificationInitialSendClaimedAt",
+        "referralAttribution"
+      ];
+    }
+
+    function onboardingCreateValid() {
+      let onboarding = request.resource.data.get("onboarding", {});
+      return onboarding is map
+        && !onboarding.keys().hasAny([
+          "v2StartedAt",
+          "version",
+          "completedAt",
+          "matchIntro",
+          "homeWelcome"
+        ]);
+    }
+
+    function matchIntroTransitionValid(before, after) {
+      let oldIntro = before.get("matchIntro", {});
+      let newIntro = after.get("matchIntro", {});
+      let oldStatus = oldIntro.get("status", "");
+      let newStatus = newIntro.get("status", "");
+      return newIntro == oldIntro
+        || (before.get("v2StartedAt", null) is timestamp
+          && before.get("version", 0) == 2
+          && before.get("completedAt", null) is timestamp
+          && oldIntro is map
+          && newIntro is map
+          && newIntro.keys().hasOnly(["status", "updatedAt"])
+          && newIntro.get("updatedAt", null) == request.time
+          && ((oldStatus == "not_started"
+              && (newStatus == "completed" || newStatus == "skipped"))
+            || ((oldStatus == "completed" || oldStatus == "skipped")
+              && newStatus == oldStatus)));
+    }
+
+    function homeWelcomeTransitionValid(before, after) {
+      let oldWelcome = before.get("homeWelcome", {});
+      let newWelcome = after.get("homeWelcome", {});
+      let oldStatus = oldWelcome.get("status", "");
+      let newStatus = newWelcome.get("status", "");
+      return newWelcome == oldWelcome
+        || (before.get("v2StartedAt", null) is timestamp
+          && before.get("version", 0) == 2
+          && before.get("completedAt", null) is timestamp
+          && oldWelcome is map
+          && newWelcome is map
+          && newWelcome.keys().hasOnly(["status", "updatedAt"])
+          && newWelcome.get("updatedAt", null) == request.time
+          && ((oldStatus == "not_seen"
+              && (newStatus == "dismissed" || newStatus == "used_find_players"))
+            || ((oldStatus == "dismissed" || oldStatus == "used_find_players")
+              && newStatus == oldStatus)));
+    }
+
+    function onboardingUpdateValid() {
+      let userChanged = request.resource.data.diff(resource.data).affectedKeys();
+      let before = resource.data.get("onboarding", {});
+      let after = request.resource.data.get("onboarding", {});
+      let onboardingChanged = after.diff(before).affectedKeys();
+      let guidanceChanged = onboardingChanged.hasAny(["matchIntro", "homeWelcome"]);
+      return !userChanged.hasAny(["onboarding"])
+        || (before is map
+          && after is map
+          && !onboardingChanged.hasAny(["v2StartedAt", "version", "completedAt"])
+          && (!guidanceChanged
+            || (onboardingChanged.hasOnly(["matchIntro", "homeWelcome"])
+              && matchIntroTransitionValid(before, after)
+              && homeWelcomeTransitionValid(before, after))));
+    }
+
+    function clubMembershipValid(data) {
+      let status = data.get("clubStatus", null);
+      let clubId = data.get("clubId", null);
+      let clubName = data.get("clubName", null);
+      return (status == null && clubId == null && clubName == null)
+        || (status == "none" && clubId == null && clubName == null)
+        || (status == "member"
+          && clubId is string
+          && clubName is string
+          && clubName.size() > 0
+          && exists(/databases/$(database)/documents/courts/$(clubId))
+          && get(/databases/$(database)/documents/courts/$(clubId)).data.name == clubName);
     }
 
     function participantsOf(data) {
@@ -263,7 +356,14 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read, write: if isSelf(uid);
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid)
+        && !request.resource.data.keys().hasAny(trustedAccountLifecycleKeys())
+        && onboardingCreateValid();
+      allow update: if isSelf(uid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(trustedAccountLifecycleKeys())
+        && onboardingUpdateValid();
+      allow delete: if isSelf(uid);
 
       match /devices/{token} {
         allow read, write: if isSelf(uid);
@@ -299,9 +399,11 @@ service cloud.firestore {
 
       allow create: if isSelf(uid)
         && playerWriteHasNoSensitiveFields()
+        && clubMembershipValid(request.resource.data)
         && request.resource.data.keys().hasOnly(playerCreateAllowedKeys());
 
       allow update: if isSelf(uid)
+        && clubMembershipValid(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(playerClientMutableKeys());
 
       allow delete: if false;
@@ -313,9 +415,36 @@ service cloud.firestore {
         && request.resource.data.email == request.auth.token.email;
     }
 
+    match /waitlist_users/{uid} {
+      allow read: if isSelf(uid);
+      allow create, update, delete: if false;
+    }
+
     match /player_public_stats/{uid} {
       allow read: if signedIn();
       allow write: if false;
+    }
+
+    match /clubRequests/{requestId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          "clubName",
+          "suburb",
+          "submittedBy",
+          "submittedAt",
+          "status"
+        ])
+        && request.resource.data.clubName is string
+        && request.resource.data.clubName.size() > 0
+        && request.resource.data.clubName.size() <= 100
+        && request.resource.data.suburb is string
+        && request.resource.data.suburb.size() > 0
+        && request.resource.data.suburb.size() <= 80
+        && request.resource.data.submittedBy == request.auth.uid
+        && request.resource.data.submittedAt == request.time
+        && request.resource.data.status == "pending";
+      allow update, delete: if false;
     }
 
     // Server-generated Activity Leaderboard data. Only the current published

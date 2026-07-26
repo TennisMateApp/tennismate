@@ -13,7 +13,6 @@ import {
   endAt,
   QueryDocumentSnapshot,
   DocumentData,
-  getCountFromServer,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseConfig";
 import Link from "next/link";
@@ -98,15 +97,24 @@ function getSkillLabel(v: DocumentData): string {
   return "";
 }
 
-function playerFromDoc(d: QueryDocumentSnapshot<DocumentData>): Player {
+function playerFromDoc(d: QueryDocumentSnapshot<DocumentData>): Player | null {
   const v = d.data();
   const photo = getPlayerPhotoUrl(v);
+  const name = typeof v.name === "string" ? v.name.trim() : "";
+  const postcode = typeof v.postcode === "string" ? v.postcode.trim() : "";
+  const skillLevel = getSkillLabel(v);
+
+  // Draft account shells must not be presented as normal directory players.
+  // Legacy usable profiles without the newer flag remain compatible.
+  if (v.profileComplete === false || !name || !/^\d{4}$/.test(postcode) || !skillLevel) {
+    return null;
+  }
 
   return {
     id: d.id,
-    name: v.name ?? "",
-    postcode: v.postcode ?? "",
-    skillLevel: getSkillLabel(v),
+    name,
+    postcode,
+    skillLevel,
     photoURL: photo ?? undefined,
     photoThumbURL: typeof v.photoThumbURL === "string" ? v.photoThumbURL : undefined,
     timestamp: v.timestamp ?? undefined,
@@ -124,7 +132,7 @@ export default function DirectoryPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
-  const [totalPlayers, setTotalPlayers] = useState<number | null>(null);
+  const totalPlayers = null;
 
   // ----- search state -----
   const [searchTerm, setSearchTerm] = useState("");
@@ -168,21 +176,6 @@ useEffect(() => {
 
 
   // ----- fetch total count (for “Showing X of Y”) -----
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const agg = await getCountFromServer(collection(db, "players"));
-        if (!cancelled) setTotalPlayers(agg.data().count ?? null);
-      } catch {
-        if (!cancelled) setTotalPlayers(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // ----- initial browse load -----
   useEffect(() => {
     const loadFirstPage = async () => {
@@ -191,7 +184,10 @@ useEffect(() => {
         const qy = query(collection(db, "players"), orderBy("nameLower"), limit(PAGE_SIZE));
         const snap = await getDocs(qy);
 
-        const page = snap.docs.map(playerFromDoc);
+        const page = snap.docs.flatMap((item) => {
+          const player = playerFromDoc(item);
+          return player ? [player] : [];
+        });
 
         setPlayers(page);
         setCursor(snap.docs[snap.docs.length - 1] ?? null);
@@ -233,7 +229,10 @@ useEffect(() => {
 
       const snap = await getDocs(qy);
 
-      const page = snap.docs.map(playerFromDoc);
+      const page = snap.docs.flatMap((item) => {
+        const player = playerFromDoc(item);
+        return player ? [player] : [];
+      });
 
       setPlayers((prev) => [...prev, ...page]);
       setCursor(snap.docs[snap.docs.length - 1] ?? null);
@@ -272,7 +271,10 @@ useEffect(() => {
         const snap = await getDocs(qy);
         if (cancelled) return;
 
-        const page = snap.docs.map(playerFromDoc);
+        const page = snap.docs.flatMap((item) => {
+          const player = playerFromDoc(item);
+          return player ? [player] : [];
+        });
 
         setSearchResults(page);
         setSearchCursor(snap.docs[snap.docs.length - 1] ?? null);
@@ -324,7 +326,10 @@ useEffect(() => {
 
       const snap = await getDocs(qy);
 
-      const page = snap.docs.map(playerFromDoc);
+      const page = snap.docs.flatMap((item) => {
+        const player = playerFromDoc(item);
+        return player ? [player] : [];
+      });
 
       setSearchResults((prev) => [...prev, ...page]);
       setSearchCursor(snap.docs[snap.docs.length - 1] ?? null);

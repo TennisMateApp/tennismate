@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useRef } from "react";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import {
   User,
   MessageCircle,
@@ -53,6 +53,7 @@ import { track } from "@/lib/track";
 import Image from "next/image";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { cn } from "@/lib/utils";
+import { shouldHideFloatingFeedback } from "@/lib/feedbackVisibility";
 import { initMixpanel, identifyUser, trackEvent } from "@/lib/mixpanel";
 import {
   analyticsNotificationStatus,
@@ -60,20 +61,11 @@ import {
   clearAnalyticsUser,
   identifyAnalyticsUser,
 } from "@/lib/analytics";
-import OnboardingTour from "@/components/onboarding/OnboardingTour";
 import PwaInstallPrompt from "@/components/pwa/PwaInstallPrompt";
-import {
-  clearBrowserOnboardingState,
-  isOnboardingDebugEnabled,
-  useOnboardingProgress,
-} from "@/lib/useOnboardingProgress";
-
-declare global {
-  interface Window {
-    restartTennisMateOnboarding?: () => Promise<void>;
-  }
-}
-
+import {useOnboardingProgress} from "@/lib/useOnboardingProgress";
+import { initializeOrRepairAccount } from "@/lib/accountLifecycle";
+import { profileRecoveryReady } from "@/lib/profileReadiness";
+import { isOnboardingV2Destination, ONBOARDING_V2_PATH } from "@/lib/onboardingV2";
 
 const TM = {
   forest: "#0B3D2E",
@@ -110,16 +102,6 @@ function shouldPingLastActive(uid: string) {
 
   localStorage.setItem(key, String(now));
   return true;
-}
-
-function isPlayerProfileUsable(playerData: any) {
-  return Boolean(
-    playerData &&
-    typeof playerData.name === "string" &&
-    playerData.name.trim().length > 0 &&
-    typeof playerData.postcode === "string" &&
-    playerData.postcode.trim().length > 0
-  );
 }
 
 function stateFromPostcode(postcode?: unknown) {
@@ -194,6 +176,7 @@ const [photoThumbURL, setPhotoThumbURL] = useState<string | null>(null);
 const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
 const [playerExists, setPlayerExists] = useState<boolean | null>(null);
 const [playerData, setPlayerData] = useState<any>(null);
+const [privatePlayerData, setPrivatePlayerData] = useState<any>(null);
 const [playerBirthYear, setPlayerBirthYear] = useState<number | null>(null);
 const [authReady, setAuthReady] = useState(false);
 const [showProfilePrompt, setShowProfilePrompt] = useState(false);
@@ -210,52 +193,13 @@ const [showProfilePrompt, setShowProfilePrompt] = useState(false);
 
 const router = useRouter();
 const pathname = usePathname() || "";
-const searchParams = useSearchParams();
 
 console.log("[LayoutWrapper] render start", { pathname });
 
 const isDesktop = useIsDesktop(1024);
 const isApp = Capacitor.isNativePlatform();
 const isDesktopWeb = isDesktop && !isApp;
-const userCreatedAtMs = user?.metadata?.creationTime
-  ? new Date(user.metadata.creationTime).getTime()
-  : null;
-const isNewUserForOnboarding =
-  userCreatedAtMs == null || Date.now() - userCreatedAtMs < 14 * 24 * 60 * 60 * 1000;
-const onboardingEligible =
-  Boolean(user?.emailVerified) && profileComplete === true && isNewUserForOnboarding;
-const onboarding = useOnboardingProgress(user?.uid, { enabled: onboardingEligible });
-
-useEffect(() => {
-  if (!isOnboardingDebugEnabled()) return;
-  if (!user?.uid) return;
-
-  window.restartTennisMateOnboarding = async () => {
-    clearBrowserOnboardingState();
-    await onboarding.restartActivationTour();
-  };
-
-  return () => {
-    delete window.restartTennisMateOnboarding;
-  };
-}, [onboarding.restartActivationTour, user?.uid]);
-
-useEffect(() => {
-  if (!isOnboardingDebugEnabled()) return;
-  if (!user?.uid) return;
-  if (!pathname.startsWith("/home") && !pathname.startsWith("/match")) return;
-  if (searchParams.get("restartOnboarding") !== "1") return;
-
-  const params = new URLSearchParams(searchParams.toString());
-  params.delete("restartOnboarding");
-  const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
-
-  void (async () => {
-    clearBrowserOnboardingState();
-    await onboarding.restartActivationTour();
-    router.replace(nextUrl, { scroll: false });
-  })();
-}, [onboarding.restartActivationTour, pathname, router, searchParams, user?.uid]);
+const onboarding = useOnboardingProgress(user?.uid);
 
 
 
@@ -277,19 +221,24 @@ const fullBleedRoutes = [
   "/coaches",
   "/profile",
   "/activity-leaderboard",
+  ONBOARDING_V2_PATH,
 ];
-const isFullBleed = fullBleedRoutes.some((r) => pathname.startsWith(r));
+const isClubProfileRoute = /^\/clubs\/[^/]+\/?$/.test(pathname);
+const isFullBleed =
+  isClubProfileRoute || fullBleedRoutes.some((r) => pathname.startsWith(r));
 
 
 const isActive = (href: string) =>
   pathname === href || pathname.startsWith(href + "/");  
 
-const PUBLIC_ROUTES = new Set(["/login", "/signup", "/verify-email"]);
+const PUBLIC_ROUTES = new Set(["/login", "/signup", ONBOARDING_V2_PATH, "/verify-email", "/verify-complete", "/verified"]);
+const isStandaloneVerificationRoute =
+  pathname.startsWith("/verify-complete") || pathname.startsWith("/verified");
 const PROFILE_PROMPT_SESSION_KEY = "tm_dismiss_profile_prompt";
 
 const [profileGateReady, setProfileGateReady] = useState(false);
 const showVerifyRef = useRef(showVerify);
-const usableProfile = isPlayerProfileUsable(playerData);
+const usableProfile = profileRecoveryReady(playerData, privatePlayerData).ready;
 const loadingState = !bootDone
   ? "booting"
   : !authReady
@@ -337,11 +286,11 @@ useEffect(() => {
 
   getDoc(playerRef)
     .then((snap) => {
-      if (!snap.exists() || !isPlayerProfileUsable(snap.data())) return;
+      if (!snap.exists() || !profileRecoveryReady(snap.data(), privatePlayerData).ready) return;
       return updateDoc(playerRef, { lastActiveAt: serverTimestamp() });
     })
     .catch(() => {});
-}, [user?.uid, pathname]);
+}, [user?.uid, pathname, privatePlayerData]);
 
 
 // Show "Matches" instead of "Events" when the user is in the match flow
@@ -363,7 +312,8 @@ const footerTabs = inEventsFlow
 
 // Existing hides
 const hideNavMessages = pathname.startsWith("/messages/");
-const hideNavVerify = pathname.startsWith("/verify-email"); // 👈 hide chrome on verify page
+const hideNavVerify =
+  pathname.startsWith("/verify-email") || pathname.startsWith(ONBOARDING_V2_PATH);
 
 // Hide on match completion/summary routes (supports optional trailing slash)
 const hideFeedback =
@@ -372,6 +322,14 @@ const hideFeedback =
 // NEW: hide on the feedback form route
 const hideNavFeedback =
   /^\/matches\/[^/]+\/feedback\/?$/.test(pathname);
+
+// Club community pages keep the standard navigation but omit the floating feedback action.
+const isOnboardingV2VerificationReturn =
+  pathname.startsWith("/verify-complete") &&
+  typeof window !== "undefined" &&
+  isOnboardingV2Destination(new URLSearchParams(window.location.search).get("next"));
+const hideFloatingFeedback =
+  shouldHideFloatingFeedback(pathname) || isOnboardingV2VerificationReturn;
 
 // Aggregate: header/footer/FAB should be hidden if any of the above match
 const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFeedback;
@@ -392,6 +350,7 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
   setProfileGateReady(false);
   setPlayerExists(null);
   setPlayerData(null);
+  setPrivatePlayerData(null);
   setPlayerBirthYear(null);
 
   if (u) {
@@ -406,6 +365,22 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
     analyticsUserRef.current = u.uid;
 
     identifyUser(u.uid);
+
+    const activeUrl = typeof window !== "undefined" ? new URL(window.location.href) : null;
+    const v2OwnsInitialization =
+      activeUrl?.pathname === ONBOARDING_V2_PATH ||
+      activeUrl?.pathname === "/verify-complete" ||
+      activeUrl?.pathname === "/verified" ||
+      (activeUrl?.pathname === "/login" && isOnboardingV2Destination(activeUrl.searchParams.get("next")));
+    if (!v2OwnsInitialization) {
+      try {
+        await initializeOrRepairAccount({ user: u });
+      } catch (error) {
+        console.error("[account_lifecycle] repair failed", {
+          code: (error as { code?: string })?.code || "unknown",
+        });
+      }
+    }
 
   // ✅ Track login only once per browser session (prevents firing on every refresh)
  
@@ -423,6 +398,13 @@ unsubAuth = onAuthStateChanged(auth, async (u) => {
 const playerRef = doc(db, "players", u.uid);
 
 unsubPlayer = onSnapshot(playerRef, async (docSnap) => {
+  const privateSnap = await getDoc(doc(db, "players_private", u.uid));
+  const privateData = privateSnap.exists() ? privateSnap.data() : null;
+  setPrivatePlayerData(privateData);
+  setPlayerBirthYear(
+    typeof privateData?.birthYear === "number" ? privateData.birthYear : null
+  );
+
   if (docSnap.exists()) {
     const data = docSnap.data() as any;
 
@@ -430,7 +412,6 @@ unsubPlayer = onSnapshot(playerRef, async (docSnap) => {
     setPhotoThumbURL(typeof data.photoThumbURL === "string" ? data.photoThumbURL : null);
     setPlayerExists(true);
     setPlayerData(data);
-    setPlayerBirthYear(typeof data.birthYear === "number" ? data.birthYear : null);
     setProfileComplete(data.profileComplete === true);
     setProfileGateReady(true);
     const analyticsProperties = {
@@ -453,7 +434,6 @@ unsubPlayer = onSnapshot(playerRef, async (docSnap) => {
     setPhotoThumbURL(null);
     setPlayerExists(false);
     setPlayerData(null);
-    setPlayerBirthYear(null);
     setProfileComplete(null);
     setProfileGateReady(true);
   }
@@ -521,6 +501,7 @@ if (hasNewer && inbound) {
   setProfileComplete(null);
   setPlayerExists(null);
   setPlayerData(null);
+  setPrivatePlayerData(null);
   setPlayerBirthYear(null);
   setProfileGateReady(true);
 }
@@ -566,12 +547,17 @@ useEffect(() => {
       needsVerify,
     });
 
-    if (needsVerify && !pathname?.startsWith("/verify-email")) {
+    if (
+      needsVerify &&
+      !pathname?.startsWith("/verify-email") &&
+      !isStandaloneVerificationRoute &&
+      !pathname?.startsWith(ONBOARDING_V2_PATH)
+    ) {
       console.log("[LayoutWrapper] redirecting to /verify-email", { pathname });
       router.replace("/verify-email");
     }
   })();
-}, [pathname, router]);
+}, [isStandaloneVerificationRoute, pathname, router]);
 
 useEffect(() => {
   if (!user) return;
@@ -588,10 +574,12 @@ useEffect(() => {
     "/verify-complete",
     "/login",
     "/signup",
+    "/waitlist",
+    ONBOARDING_V2_PATH,
   ];
 
   const isAllowed = allowedPrefixes.some((p) => pathname.startsWith(p));
-  if (isAllowed || playerExists !== true || profileComplete === true || usableProfile === true) {
+  if (isAllowed || usableProfile === true) {
     setShowProfilePrompt(false);
     return;
   }
@@ -691,6 +679,9 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
       </button>
     );
   }
+
+  // Email action pages must not wait for or render application chrome.
+  if (isStandaloneVerificationRoute) return <>{children}</>;
 
   // Show lightweight splash until boot timer completes (runs AFTER all hooks)
   // Show lightweight splash until boot timer completes (runs AFTER all hooks)
@@ -824,21 +815,6 @@ return (
 </main>
 
 {user &&
-  onboarding.shouldShow &&
-  !PUBLIC_ROUTES.has(pathname || "") &&
-  !pathname.startsWith("/verify-email") &&
-  !hideFeedback &&
-  !hideNavFeedback && (
-    <OnboardingTour
-      tour={onboarding.activationTour}
-      shouldShow={onboarding.shouldShow}
-      onSkip={() => void onboarding.skip()}
-      onStepChange={(step) => onboarding.setActivationTourStep(step)}
-    />
-  )}
-
-{user &&
-  !onboarding.shouldShow &&
   !PUBLIC_ROUTES.has(pathname || "") &&
   !pathname.startsWith("/verify-email") && (
     <PwaInstallPrompt onboardingComplete={onboarding.isComplete} />
@@ -857,7 +833,6 @@ return (
         <Link
           href="/home"
           aria-label="Home"
-          data-tour="home"
           className="flex flex-col items-center gap-1"
           style={{ color: isActive("/home") ? FOOTER.active : FOOTER.inactive }}
         >
@@ -888,7 +863,6 @@ return (
         <Link
           href="/directory"
           aria-label="Search"
-          data-tour="directory"
           className="flex flex-col items-center gap-1"
           style={{
             color: isActive("/directory") ? FOOTER.active : FOOTER.inactive,
@@ -902,7 +876,6 @@ return (
         <Link
           href="/profile"
           aria-label="Profile"
-          data-tour="profile"
           className="flex flex-col items-center gap-1"
           style={{
             color: isActive("/profile") ? FOOTER.active : FOOTER.inactive,
@@ -921,7 +894,7 @@ return (
 
 
 
-     {user && !hideAllNav && !hideFeedback && !isDesktopWeb && <FloatingFeedbackButton />}
+     {user && !hideAllNav && !hideFeedback && !hideFloatingFeedback && !isDesktopWeb && <FloatingFeedbackButton />}
 
 
     </div>

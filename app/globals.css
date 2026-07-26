@@ -84,3 +84,23 @@ body {
 .tm-scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+@keyframes onboarding-v2-step-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.onboarding-v2-step-content {
+  animation: onboarding-v2-step-enter 200ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-v2-step-content {
+    animation: none;
+  }
+}
