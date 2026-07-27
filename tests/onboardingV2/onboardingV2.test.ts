@@ -23,6 +23,7 @@ const shellSource = readFileSync("components/onboarding-v2/OnboardingV2Shell.tsx
 const authGateSource = readFileSync("components/AuthGate.tsx", "utf8");
 const layoutSource = readFileSync("components/ClientLayoutWrapper.tsx", "utf8");
 const globalsSource = readFileSync("app/globals.css", "utf8");
+const nextConfigSource = readFileSync("next.config.js", "utf8");
 
 function validInput() {
   return {
@@ -32,10 +33,13 @@ function validInput() {
   };
 }
 
-test("V2 uses an isolated route and leaves the current signup implementation available", () => {
+test("V2 availability uses the explicit flag and preserves legacy signup as the fallback", () => {
   assert.equal(ONBOARDING_V2_PATH, "/signup-v2");
-  assert.match(routeSource, /ONBOARDING_V2_ENABLED/);
-  assert.match(routeSource, /VERCEL_ENV === "production"/);
+  assert.match(routeSource, /process\.env\.ONBOARDING_V2_ENABLED === "true"/);
+  assert.doesNotMatch(routeSource, /VERCEL_ENV/);
+  assert.match(nextConfigSource, /process\.env\.ONBOARDING_V2_ENABLED !== "true"/);
+  assert.match(nextConfigSource, /source: "\/signup"/);
+  assert.match(nextConfigSource, /destination: "\/signup-v2"/);
   assert.match(signupSource, /export default function SignupPage/);
   assert.match(signupSource, /postcode/);
   assert.match(authGateSource, /ONBOARDING_V2_PATH/);

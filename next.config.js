@@ -54,6 +54,17 @@ module.exports = withPWA({
   reactStrictMode: true,
   outputFileTracingRoot: path.join(__dirname),
 
+  async redirects() {
+    if (process.env.ONBOARDING_V2_ENABLED !== "true") return [];
+    return [
+      {
+        source: "/signup",
+        destination: "/signup-v2",
+        permanent: false,
+      },
+    ];
+  },
+
   async headers() {
     return [
       {

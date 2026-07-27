@@ -4,8 +4,6 @@ import { Suspense } from "react";
 import OnboardingV2Flow from "@/components/onboarding-v2/OnboardingV2Flow";
 
 function onboardingV2Enabled() {
-  if (process.env.NODE_ENV === "development") return true;
-  if (process.env.VERCEL_ENV === "production") return false;
   return process.env.ONBOARDING_V2_ENABLED === "true";
 }
 
