@@ -16,6 +16,11 @@ import {
 
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { getEventFilledSpots } from "@/lib/eventCapacity";
+import {
+  formatEventDuration,
+  resolveEventDisplayDurationMinutes,
+  resolveEventEnd,
+} from "@/lib/eventDuration";
 
 
 export type EventDoc = {
@@ -25,6 +30,8 @@ export type EventDoc = {
   start?: string; // ISO
   end?: string; // ISO
   durationMins?: number;
+  durationMinutes?: number;
+  timeZone?: string;
 
   // ✅ keep legacy numeric for older events
   minSkill?: number | null;
@@ -91,10 +98,10 @@ function toTitleCase(input?: string | null) {
     .join(" ");
 }
 
-function formatWhen(startISO?: string, endISO?: string) {
-  if (!startISO) return "TBA";
-  const start = new Date(startISO);
-  const end = endISO ? new Date(endISO) : null;
+function formatWhen(event: EventDoc) {
+  if (!event.start) return "TBA";
+  const start = new Date(event.start);
+  const end = resolveEventEnd(event);
 
   const datePart = start.toLocaleDateString([], {
     weekday: "short",
@@ -466,13 +473,11 @@ export default function DesktopEventDetailsPage(props: {
                       <div>
                         <div className="text-xs font-extrabold text-gray-700">When</div>
                         <div className="mt-1 text-sm font-semibold text-gray-900">
-                          {formatWhen(event.start, event.end)}
+                          {formatWhen(event)}
                         </div>
-                        {event.durationMins ? (
-                          <div className="mt-1 text-xs text-gray-500">
-                            ({event.durationMins} mins)
-                          </div>
-                        ) : null}
+                        <div className="mt-1 text-xs text-gray-500">
+                          {formatEventDuration(resolveEventDisplayDurationMinutes(event))}
+                        </div>
                       </div>
                     </div>
 
@@ -810,4 +815,3 @@ export default function DesktopEventDetailsPage(props: {
   </div>
 );
 }
-

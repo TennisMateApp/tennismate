@@ -21,6 +21,15 @@ import { ChevronLeft, CalendarDays } from "lucide-react";
 
 import DesktopCreateEventPage from "@/components/events/DesktopCreateEventPage";
 import { useIsDesktop } from "@/lib/useIsDesktop";
+import {
+  DEFAULT_EVENT_DURATION_MINUTES,
+  DEFAULT_EVENT_TIME_ZONE,
+  EVENT_DURATION_OPTIONS,
+  type EventDurationMinutes,
+  calculateEventEnd,
+  formatEventDuration,
+  resolveEventDurationMinutes,
+} from "@/lib/eventDuration";
 
 type EventType = "practice" | "social" | "competitive";
 
@@ -72,6 +81,8 @@ type EventDoc = {
   start?: string; // ISO
   end?: string; // ISO
   durationMins?: number;
+  durationMinutes?: number;
+  timeZone?: string;
   minSkillLabel?: SkillBandLabel | string | null; // skill from
 maxSkillLabel?: SkillBandLabel | string | null; // skill to (NEW)
   spotsTotal?: number;
@@ -138,6 +149,9 @@ export default function NewEventPage() {
   const [eventType, setEventType] = useState<EventType>("practice");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
+  const [durationMinutes, setDurationMinutes] = useState<EventDurationMinutes>(
+    DEFAULT_EVENT_DURATION_MINUTES
+  );
   const [location, setLocation] = useState("");
 
   // ===== COURT MATCHING (like invite flow) =====
@@ -219,6 +233,7 @@ const [skillTo, setSkillTo] = useState<SkillBandLabel>("upper advance");
         const dt = isoToDateTime(data.start);
         setDate(dt.date);
         setTime(dt.time);
+        setDurationMinutes(resolveEventDurationMinutes(data));
 
         setLocation(data.location ?? "");
         // ✅ if the event already has a predetermined court, restore it
@@ -359,8 +374,7 @@ useEffect(() => {
       return;
     }
 
-    const durationMins = 90;
-    const end = new Date(start.getTime() + durationMins * 60_000);
+    const end = calculateEventEnd(start, durationMinutes);
 
     const fixed = clampSkillRange(skillFrom, skillTo);
     const fromToSave = fixed.from;
@@ -391,7 +405,10 @@ useEffect(() => {
   court: courtPayload, // ✅ ADD
   start: start.toISOString(),
   end: end.toISOString(),
-  durationMins,
+  durationMinutes,
+  // Temporary compatibility mirror for older deployed event clients.
+  durationMins: durationMinutes,
+  timeZone: DEFAULT_EVENT_TIME_ZONE,
   description: description.trim() === "" ? null : description.trim(),
   minSkillLabel: fromToSave,
   maxSkillLabel: toToSave,
@@ -410,7 +427,10 @@ useEffect(() => {
   court: courtPayload, // ✅ ADD
   start: start.toISOString(),
   end: end.toISOString(),
-  durationMins,
+  durationMinutes,
+  // Temporary compatibility mirror for older deployed event clients.
+  durationMins: durationMinutes,
+  timeZone: DEFAULT_EVENT_TIME_ZONE,
 
   description: description.trim() === "" ? null : description.trim(),
 
@@ -572,6 +592,29 @@ useEffect(() => {
                       <div className="text-sm font-semibold text-gray-700">{dateTimeLabel}</div>
                     </div>
                   )}
+
+                  <div>
+                    <label
+                      htmlFor="event-duration"
+                      className="mb-2 block text-[11px] font-extrabold tracking-widest text-gray-500"
+                    >
+                      DURATION
+                    </label>
+                    <select
+                      id="event-duration"
+                      value={durationMinutes}
+                      onChange={(event) =>
+                        setDurationMinutes(Number(event.target.value) as EventDurationMinutes)
+                      }
+                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-gray-300 focus:ring-2 focus:ring-black/5"
+                    >
+                      {EVENT_DURATION_OPTIONS.map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {formatEventDuration(minutes)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 

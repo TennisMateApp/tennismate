@@ -5,8 +5,12 @@ import {
   onDocumentUpdated,
   onDocumentWritten,
 } from "firebase-functions/v2/firestore";
-import { sendEventRemindersV2 } from "./eventReminders";
+import {
+  isEventReminderStillValid,
+  sendEventRemindersV2,
+} from "./eventReminders";
 import { sendPostMatchRemindersV2 } from "./postMatchReminders";
+import {isPushDeviceEligible} from "./pushEligibility";
 import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import * as crypto from "crypto";
 import { pubsub } from "firebase-functions/v1";
@@ -516,6 +520,7 @@ async function getNativeDeviceTokensForUser(uid: string): Promise<NativeDeviceTo
     const token = (tokenInDoc || d.id || "").trim();
 
     if (!token) return;
+    if (!isPushDeviceEligible(d.data())) return;
 
     out.push({
       token,
@@ -2949,6 +2954,27 @@ if (notifData.type === "message") {
 
     const title = (notifData.title || notifData.message || "🎾 TennisMate").toString();
     const body = (notifData.body || "You have a new notification").toString();
+
+    if (notifData.type === "event_reminder") {
+      const eventId = typeof notifData.eventId === "string" ?
+        notifData.eventId : "";
+      const scheduledStart = typeof notifData.scheduledStart === "string" ?
+        notifData.scheduledStart : "";
+      const eventSnap = eventId ?
+        await db.collection("events").doc(eventId).get() : null;
+      const eventRecord = eventSnap?.exists ? eventSnap.data() : null;
+      const remainsValid = isEventReminderStillValid(
+        eventRecord,
+        recipientId,
+        scheduledStart
+      );
+
+      if (!remainsValid) {
+        await event.data?.ref.delete();
+        console.log("[EventReminder] discarded stale notification", {eventId});
+        return;
+      }
+    }
   let route =
   (typeof notifData.route === "string" && notifData.route)
     ? notifData.route

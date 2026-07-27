@@ -44,6 +44,7 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import DesktopEventDetailsPage from "@/components/events/DesktopEventDetailsPage";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import { countEventAttendees, getEventFilledSpots } from "@/lib/eventCapacity";
+import { resolveEventEnd } from "@/lib/eventDuration";
 
 
 function getSkill(profile?: any | null): number | null {
@@ -768,7 +769,7 @@ async function handleConfirmBooking() {
   }
 
 const start = event.start ? new Date(event.start) : null;
-const end = event.end ? new Date(event.end) : null;
+const end = resolveEventEnd(event);
 
 const status: "open" | "full" | "cancelled" | "completed" =
   event.status === "open" ||

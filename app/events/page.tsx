@@ -26,6 +26,8 @@ type EventItem = {
   location?: string;
   start?: string;
   end?: string;
+  durationMins?: number;
+  durationMinutes?: number;
   status?: "open" | "full" | "cancelled" | "completed" | string;
   spotsTotal?: number;
   spotsFilled?: number;

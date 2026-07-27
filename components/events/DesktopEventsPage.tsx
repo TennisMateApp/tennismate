@@ -4,6 +4,7 @@ import Link from "next/link";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import { Plus, CalendarDays, MapPin, Heart } from "lucide-react";
 import { getEventFilledSpots } from "@/lib/eventCapacity";
+import { resolveEventEnd } from "@/lib/eventDuration";
 
 export type Player = {
   name?: string;
@@ -20,6 +21,8 @@ export type DesktopEventItem = {
   location?: string;
   start?: string;
   end?: string;
+  durationMins?: number;
+  durationMinutes?: number;
   spotsTotal?: number;
   spotsFilled?: number;
   hostId?: string;
@@ -30,10 +33,10 @@ export type DesktopEventItem = {
 const pickPlayerImg = (p?: Player) =>
   p?.photoThumbURL || p?.photoURL || p?.avatar || "/default-avatar.png";
 
-function formatLine(startISO?: string, endISO?: string) {
-  if (!startISO) return "TBA";
-  const start = new Date(startISO);
-  const end = endISO ? new Date(endISO) : null;
+function formatLine(event: DesktopEventItem) {
+  if (!event.start) return "TBA";
+  const start = new Date(event.start);
+  const end = resolveEventEnd(event);
 
   const datePart = start.toLocaleDateString([], {
     weekday: "long",
@@ -110,7 +113,7 @@ function DesktopEventCard({ ev }: { ev: DesktopEventItem }) {
         <div className="mt-2 space-y-1 text-xs text-gray-600">
           <div className="flex items-center gap-2">
             <CalendarDays className="h-4 w-4 text-lime-600" />
-            <span className="line-clamp-1">{formatLine(ev.start, ev.end)}</span>
+            <span className="line-clamp-1">{formatLine(ev)}</span>
           </div>
 
           {ev.location && (

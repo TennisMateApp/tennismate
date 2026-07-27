@@ -298,6 +298,33 @@ service cloud.firestore {
       );
     }
 
+    function isSupportedEventDuration(value) {
+      return value is int && value in [30, 60, 90, 120];
+    }
+
+    function validEventDurationOnCreate() {
+      return isSupportedEventDuration(request.resource.data.get("durationMinutes", null))
+        && (
+          !request.resource.data.keys().hasAny(["durationMins"]) ||
+          request.resource.data.durationMins == request.resource.data.durationMinutes
+        );
+    }
+
+    function validEventDurationOnUpdate() {
+      return (
+          request.resource.data.get("durationMinutes", null) ==
+            resource.data.get("durationMinutes", null) &&
+          request.resource.data.get("durationMins", null) ==
+            resource.data.get("durationMins", null)
+        ) || (
+          isSupportedEventDuration(request.resource.data.get("durationMinutes", null)) &&
+          (
+            !request.resource.data.keys().hasAny(["durationMins"]) ||
+            request.resource.data.durationMins == request.resource.data.durationMinutes
+          )
+        );
+    }
+
     function eventHost(eventId) {
       let event = get(/databases/$(database)/documents/events/$(eventId)).data;
       return signedIn() && (
@@ -795,13 +822,16 @@ match /match_history/{historyId} {
     match /events/{eventId} {
       allow read: if signedIn();
 
-      allow create: if signedIn() && (
-        request.resource.data.hostId == request.auth.uid ||
-        request.resource.data.createdBy == request.auth.uid ||
-        request.resource.data.ownerId == request.auth.uid
-      );
+      allow create: if signedIn()
+        && validEventDurationOnCreate()
+        && (
+          request.resource.data.hostId == request.auth.uid ||
+          request.resource.data.createdBy == request.auth.uid ||
+          request.resource.data.ownerId == request.auth.uid
+        );
 
-      allow update, delete: if isEventHostFromResource();
+      allow update: if isEventHostFromResource() && validEventDurationOnUpdate();
+      allow delete: if isEventHostFromResource();
 
       match /join_requests/{reqId} {
         allow read: if eventHost(eventId)

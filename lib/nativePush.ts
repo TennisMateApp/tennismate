@@ -9,6 +9,26 @@ let setupDone = false;
  */
 let lastKnownToken: string | null = null;
 
+export function resolveNativePushDestination(data: unknown): string {
+  const payload = data && typeof data === "object"
+    ? data as Record<string, unknown>
+    : {};
+  const route = typeof payload.route === "string" ? payload.route : "";
+  if (route.startsWith("/")) return route;
+
+  const url = typeof payload.url === "string" ? payload.url : "";
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      return `${parsed.pathname}${parsed.search}` || "/home";
+    } catch {
+      if (url.startsWith("/")) return url;
+    }
+  }
+
+  return "/home";
+}
+
 export async function initNativePush() {
   if (typeof window === "undefined") return;
 
@@ -206,36 +226,9 @@ PushNotifications.addListener(
   "pushNotificationActionPerformed",
   (a: any) => {
     const data = (a.notification?.data || {}) as any;
-    const route =
-      typeof data.route === "string" && data.route
-        ? data.route
-        : null;
-
-    const url =
-      typeof data.url === "string" && data.url
-        ? data.url
-        : null;
-
-    if (route) {
-      console.log("[Push] notification tap -> route", route);
-      window.location.href = route;
-      return;
-    }
-
-    if (url) {
-      try {
-        const parsed = new URL(url);
-        const destination = `${parsed.pathname}${parsed.search}`;
-        console.log("[Push] notification tap -> url", destination);
-        window.location.href = destination;
-        return;
-      } catch (e) {
-        console.warn("[Push] failed to parse notification url", url, e);
-      }
-    }
-
-    console.log("[Push] notification tap -> fallback /home");
-    window.location.href = "/home";
+    const destination = resolveNativePushDestination(data);
+    console.log("[Push] notification tap -> route", destination);
+    window.location.href = destination;
   }
 );
   }

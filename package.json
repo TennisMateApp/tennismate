@@ -16,6 +16,7 @@
     "test:legacy-tour-removal": "tsx --test tests/onboardingV2/legacyTourRemoval.test.ts",
     "test:home-welcome": "tsx --test tests/onboardingV2/homeWelcomeSuppression.test.ts",
     "test:verification": "tsx --test tests/verification/*.test.ts",
+    "test:event-duration": "tsx --test tests/events/*.test.ts",
     "validate:activity-leaderboard-ui": "tsx scripts/validateActivityLeaderboardPhase3.ts",
     "audit:activity-leaderboard-avatars": "tsx scripts/activityLeaderboardAvatarAudit.ts",
     "export:match-invites": "node scripts/exportMatchInvites.js"

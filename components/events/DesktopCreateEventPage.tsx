@@ -16,6 +16,14 @@ import {
   limit,
 } from "firebase/firestore";
 import debounce from "lodash.debounce";
+import {
+  DEFAULT_EVENT_DURATION_MINUTES,
+  DEFAULT_EVENT_TIME_ZONE,
+  EVENT_DURATION_OPTIONS,
+  type EventDurationMinutes,
+  calculateEventEnd,
+  formatEventDuration,
+} from "@/lib/eventDuration";
 
 /** Desktop Create Event (matches screenshot layout) */
 
@@ -202,7 +210,9 @@ export default function DesktopCreateEventPage() {
 
   const [date, setDate] = useState<string>(todayISO);
   const [startTime, setStartTime] = useState<string>("09:00");
-  const [endTime, setEndTime] = useState<string>("11:00");
+  const [durationMinutes, setDurationMinutes] = useState<EventDurationMinutes>(
+    DEFAULT_EVENT_DURATION_MINUTES
+  );
 
   const [location, setLocation] = useState<string>("");
 
@@ -249,18 +259,6 @@ useEffect(() => {
   const [submitting, setSubmitting] = useState(false);
 
   const DESC_LIMIT = 400;
-
-  // keep endTime >= startTime by at least 30 mins if user changes startTime
-  useEffect(() => {
-    if (!startTime || !endTime) return;
-    // naive compare ok because HH:MM strings
-    if (endTime <= startTime) {
-      const opts = buildHalfHourOptions();
-      const idx = opts.indexOf(startTime);
-      const next = opts[Math.min(opts.length - 1, idx + 2)]; // +60 mins
-      setEndTime(next || startTime);
-    }
-  }, [startTime]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const searchCourtsPrefix = async (text: string) => {
   const qText = text.trim().toLowerCase();
@@ -334,7 +332,6 @@ useEffect(() => {
     title.trim().length > 0 &&
     date &&
     startTime &&
-    endTime &&
     location.trim().length > 0 &&
     !submitting;
 
@@ -343,17 +340,13 @@ useEffect(() => {
     const u = auth.currentUser;
     if (!u) return;
 
-    if (!isHalfHour(startTime) || !isHalfHour(endTime)) {
+    if (!isHalfHour(startTime)) {
       alert("Please select times in 30-minute increments.");
-      return;
-    }
-    if (endTime <= startTime) {
-      alert("End time must be after start time.");
       return;
     }
 
     const start = new Date(`${date}T${startTime}:00`);
-    const end = new Date(`${date}T${endTime}:00`);
+    const end = calculateEventEnd(start, durationMinutes);
 
     if (start.getTime() < Date.now() - 60_000) {
       alert("Start time is in the past. Please choose a future time.");
@@ -386,7 +379,10 @@ useEffect(() => {
         location: location.trim(),
         start: start.toISOString(),
         end: end.toISOString(),
-        durationMins: Math.max(0, Math.round((end.getTime() - start.getTime()) / 60_000)),
+        durationMinutes,
+        // Temporary compatibility mirror for older deployed event clients.
+        durationMins: durationMinutes,
+        timeZone: DEFAULT_EVENT_TIME_ZONE,
 
         // keep numeric field for backwards compat if you still use it elsewhere
         minSkill: null,
@@ -533,11 +529,16 @@ useEffect(() => {
                     </div>
 
                     <div>
-                      <div className="mb-2 text-[12px] font-semibold text-gray-700">End Time</div>
-                      <Select value={endTime} onChange={setEndTime}>
-                        {buildHalfHourOptions("05:30", "23:59").map((t) => (
-                          <option key={t} value={t}>
-                            {t}
+                      <div className="mb-2 text-[12px] font-semibold text-gray-700">Duration</div>
+                      <Select
+                        value={String(durationMinutes)}
+                        onChange={(value) =>
+                          setDurationMinutes(Number(value) as EventDurationMinutes)
+                        }
+                      >
+                        {EVENT_DURATION_OPTIONS.map((minutes) => (
+                          <option key={minutes} value={minutes}>
+                            {formatEventDuration(minutes)}
                           </option>
                         ))}
                       </Select>
