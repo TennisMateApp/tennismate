@@ -535,76 +535,6 @@ const isRematch =
                   loading={discoveryEventsLoading}
                 />
 
-                <div className="mt-8">
-                  <LeaderboardEntryCard />
-                </div>
-
-                {/* Quick Actions */}
-                <div className="mt-8 rounded-3xl border border-black/10 bg-white p-7 2xl:p-8">
-                  <div className="text-sm font-extrabold text-black/85">Quick Actions</div>
-
-                  <div className="mt-5 grid grid-cols-2 gap-6">
-                    {[
-                      {
-                        label: "Match Me",
-                        sub: "Find a partner now",
-                        cta: "Start Match",
-                        href: "/match",
-                        icon: <Swords className="h-5 w-5" style={{ color: TM.neon }} />,
-                      },
-                      {
-                        label: "Events",
-                        sub: "Games & social hits",
-                        cta: "Join or Host",
-                        href: "/events",
-                        icon: <CalendarDays className="h-5 w-5" style={{ color: TM.neon }} />,
-                      },
-                      {
-                        label: "Courts",
-                        sub: "Find courts near you",
-                        cta: "Browse",
-                        href: "/courts",
-                        icon: <MapPin className="h-5 w-5" style={{ color: TM.neon }} />,
-                      },
-                      {
-                        label: "Coaches",
-                        sub: "Level up your game",
-                        cta: "Find a Coach",
-                        href: "/coaches",
-                        icon: <GraduationCap className="h-5 w-5" style={{ color: TM.neon }} />,
-                      },
-                    ].map((x) => (
-                      <button
-                        key={x.label}
-                        onClick={() => router.push(x.href)}
-                        className="relative min-h-[140px] overflow-hidden rounded-3xl p-6 text-left shadow-sm transition-transform hover:-translate-y-[1px]"
-                        style={{
-                          border: "1px solid rgba(0,0,0,0.10)",
-                          background: TM.forest,
-                        }}
-                      >
-                        <MobileTileBG />
-
-                        <div className="relative z-10 flex items-start justify-between gap-3">
-                          <div className="flex items-start gap-4">
-                            <IconBubble>{x.icon}</IconBubble>
-
-                            <div className="min-w-0">
-                              <div className="text-lg font-extrabold text-white">{x.label}</div>
-                              <div className="mt-1 text-sm text-white/70">{x.sub}</div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="relative z-10 mt-6 text-sm font-semibold text-white/80">
-                          {x.cta}
-                        </div>
-
-                        <NeonBottomBar />
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </section>
 
               {/* Right rail */}
@@ -617,15 +547,20 @@ const isRematch =
                   xl:overflow-auto
                 "
               >
-                <div className="rounded-3xl border border-black/10 bg-white p-7 2xl:p-8">
+                <section
+                  className="rounded-3xl border border-black/10 bg-white p-7 2xl:p-8"
+                  aria-labelledby="desktop-my-activity-heading"
+                >
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-extrabold text-black/85">My TennisMates</div>
+                    <h2 id="desktop-my-activity-heading" className="text-sm font-extrabold text-black/85">
+                      My Activity
+                    </h2>
                     <button
                       onClick={() => router.push("/matches")}
                       className="text-xs font-extrabold tracking-wide"
                       style={{ color: TM.forest }}
                     >
-                      SEE ALL
+                      VIEW ALL
                     </button>
                   </div>
 
@@ -730,10 +665,81 @@ const isRematch =
                       })
                     )}
                   </div>
-                </div>
+
+                  <div className="mt-6">
+                    <LeaderboardEntryCard source="desktop_home" labelledBy="desktop-my-activity-heading" />
+                  </div>
+                </section>
 
                 {/* ✅ REMOVED: progress bar section (as requested) */}
               </aside>
+
+              {/* Quick Actions */}
+              <div className="mt-8 rounded-3xl border border-black/10 bg-white p-7 2xl:p-8">
+                <div className="text-sm font-extrabold text-black/85">Quick Actions</div>
+
+                <div className="mt-5 grid grid-cols-2 gap-6">
+                  {[
+                    {
+                      label: "Match Me",
+                      sub: "Find a partner now",
+                      cta: "Start Match",
+                      href: "/match",
+                      icon: <Swords className="h-5 w-5" style={{ color: TM.neon }} />,
+                    },
+                    {
+                      label: "Events",
+                      sub: "Games & social hits",
+                      cta: "Join or Host",
+                      href: "/events",
+                      icon: <CalendarDays className="h-5 w-5" style={{ color: TM.neon }} />,
+                    },
+                    {
+                      label: "Courts",
+                      sub: "Find courts near you",
+                      cta: "Browse",
+                      href: "/courts",
+                      icon: <MapPin className="h-5 w-5" style={{ color: TM.neon }} />,
+                    },
+                    {
+                      label: "Coaches",
+                      sub: "Level up your game",
+                      cta: "Find a Coach",
+                      href: "/coaches",
+                      icon: <GraduationCap className="h-5 w-5" style={{ color: TM.neon }} />,
+                    },
+                  ].map((x) => (
+                    <button
+                      key={x.label}
+                      onClick={() => router.push(x.href)}
+                      className="relative min-h-[140px] overflow-hidden rounded-3xl p-6 text-left shadow-sm transition-transform hover:-translate-y-[1px]"
+                      style={{
+                        border: "1px solid rgba(0,0,0,0.10)",
+                        background: TM.forest,
+                      }}
+                    >
+                      <MobileTileBG />
+
+                      <div className="relative z-10 flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-4">
+                          <IconBubble>{x.icon}</IconBubble>
+
+                          <div className="min-w-0">
+                            <div className="text-lg font-extrabold text-white">{x.label}</div>
+                            <div className="mt-1 text-sm text-white/70">{x.sub}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="relative z-10 mt-6 text-sm font-semibold text-white/80">
+                        {x.cta}
+                      </div>
+
+                      <NeonBottomBar />
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </main>
         </div>

@@ -1667,11 +1667,12 @@ const isRematch =
   compact
 />
 
-{/* My Matches (horizontal scroll) */}
-<div className="mt-6">
+{/* My Activity */}
+<section className="mt-6" aria-labelledby="mobile-my-activity-heading">
   <div className="mb-2 flex items-center justify-between">
-    <div className="text-sm font-extrabold text-black/85">My TennisMates</div>
-
+    <h2 id="mobile-my-activity-heading" className="text-sm font-extrabold text-black/85">
+      My Activity
+    </h2>
     <button
       onClick={() => router.push("/matches")}
       className="text-xs font-extrabold tracking-wide"
@@ -1827,12 +1828,12 @@ style={{
       </button>
     </div>
   )}
-</div>
 
+  <div className="mt-5">
+    <LeaderboardEntryCard compact source="mobile_home" labelledBy="mobile-my-activity-heading" />
+  </div>
+</section>
 
-        <div className="mt-6">
-          <LeaderboardEntryCard compact />
-        </div>
 
         {/* Quick Actions */}
         <div className="mt-6">
@@ -1875,6 +1876,7 @@ style={{
 
           </div>
         </div>
+
       </div>
 
       {openPlayerId && (

@@ -6,9 +6,11 @@ export interface ActivityAuditOptions {
 
 const VALUE_OPTIONS = new Set(["--month", "--limit", "--output"]);
 
+type EnvironmentVariables = Readonly<Record<string, string | undefined>>;
+
 export function parseActivityAuditOptions(
   argv: string[],
-  env: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv
+  env: EnvironmentVariables = {}
 ): ActivityAuditOptions {
   const values = new Map<string, string>();
 
@@ -57,7 +59,7 @@ export function parseActivityAuditOptions(
 
 export function expectedAuditArgumentsWereLost(
   argv: string[],
-  env: NodeJS.ProcessEnv,
+  env: EnvironmentVariables,
   options: ActivityAuditOptions
 ): boolean {
   if (argv.some((argument) => VALUE_OPTIONS.has(argument) ||

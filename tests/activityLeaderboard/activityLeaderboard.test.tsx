@@ -3,7 +3,7 @@ import {readFileSync} from "node:fs";
 import {test} from "node:test";
 import React from "react";
 import {renderToStaticMarkup} from "react-dom/server";
-import LeaderboardRows from "@/components/activityLeaderboard/LeaderboardRows";
+import LeaderboardRows, {LeaderboardAvatar, shouldShowLeaderboardAvatar} from "@/components/activityLeaderboard/LeaderboardRows";
 import {
   ActivityLeaderboardRow,
   activityLeaderboardViewState,
@@ -48,6 +48,25 @@ test("malformed public rows fail closed", () => {
   assert.equal(parseActivityLeaderboardRow({...row(), points: "15"}), null);
   assert.equal(parseActivityLeaderboardRow({...row(), displayName: ""}), null);
   assert.equal(parseActivityLeaderboardRow({...row(), avatarUrl: {url: "private"}}), null);
+});
+
+test("leaderboard avatar uses initials for missing and failed URLs without retrying", () => {
+  const missing = renderToStaticMarkup(<LeaderboardAvatar avatarUrl={null} displayName="Alex" />);
+  const valid = renderToStaticMarkup(<LeaderboardAvatar avatarUrl="/images/default-avatar.jpg" displayName="Alex" />);
+  assert.match(missing, />A</);
+  assert.doesNotMatch(missing, /<img/);
+  assert.match(valid, /<img/);
+  assert.equal(shouldShowLeaderboardAvatar("https://example.test/avatar.jpg", null), true);
+  assert.equal(shouldShowLeaderboardAvatar("https://example.test/avatar.jpg", "https://example.test/avatar.jpg"), false);
+  assert.equal(shouldShowLeaderboardAvatar("https://example.test/avatar-new.jpg", "https://example.test/avatar.jpg"), true);
+  assert.equal(shouldShowLeaderboardAvatar(null, null), false);
+});
+
+test("all leaderboard rows share the same responsive avatar fallback component", () => {
+  const source = readFileSync("components/activityLeaderboard/LeaderboardRows.tsx", "utf8");
+  assert.match(source, /onError=\{\(\) => setFailedUrl\(avatarUrl\)\}/);
+  assert.match(source, /<LeaderboardAvatar avatarUrl=\{row\.avatarUrl\} displayName=\{row\.displayName\} \/>/);
+  assert.doesNotMatch(source, /onError[^}]+setFailedUrl\(null\)/);
 });
 
 test("the exact Test account name is omitted without matching real names", () => {
@@ -127,4 +146,46 @@ test("page includes unavailable, empty, permission-safe error, and encouragement
   assert.match(source, /We couldn&apos;t load the leaderboard/);
   assert.match(source, /Want to join the standings/);
   assert.doesNotMatch(source, /duplicateResolutionRole|ineligibilityReasons|eventId|postcode|birthYear|skillLevel/);
+});
+
+test("mobile and desktop use one My Activity hierarchy with players before leaderboard before Quick Actions", () => {
+  const mobile = readFileSync("app/home/HomeClient.tsx", "utf8");
+  const desktop = readFileSync("components/home/DesktopDashboardHome.tsx", "utf8");
+  for (const [source, context] of [[mobile, "mobile_home"], [desktop, "desktop_home"]]) {
+    const activityHeadings = source.match(/<h2[^>]*>\s*My Activity\s*<\/h2>/g) ?? [];
+    const activityHeading = source.search(/<h2[^>]*>\s*My Activity\s*<\/h2>/);
+    const activityHeaderRow = source.lastIndexOf("<div", activityHeading);
+    const playerContent = source.indexOf("myMatchesLoading", activityHeading);
+    const leaderboard = source.indexOf(`source="${context}"`);
+    const quickActions = source.indexOf("Quick Actions", leaderboard);
+    assert.ok(activityHeading >= 0);
+    assert.equal(activityHeadings.length, 1);
+    assert.doesNotMatch(source, />My TennisMates</);
+    assert.match(source.slice(activityHeaderRow, playerContent), /justify-between[\s\S]+VIEW ALL/);
+    assert.ok(activityHeading < playerContent);
+    assert.ok(playerContent < leaderboard);
+    assert.ok(leaderboard < quickActions);
+    assert.match(source, new RegExp(`LeaderboardEntryCard[^>]+source=\\"${context}\\"[^>]+labelledBy=`));
+    assert.match(source, /aria-labelledby=/);
+  }
+  assert.doesNotMatch(mobile, />Your Activity</);
+  assert.doesNotMatch(desktop, />Your Activity</);
+});
+
+test("points help teaches the TennisMate match workflow and exact scoring contract", () => {
+  const source = readFileSync("app/activity-leaderboard/ActivityLeaderboardClient.tsx", "utf8");
+  for (const copy of ["How to earn Activity Points", "Step 1 — Find a player", "Match Me", "Match Request", "Chat", "Step 2 — Schedule your match", "Next Match", "Match Invite", "Step 3 — Play your match", "Step 4 — Confirm the result", "Around 30 minutes", "notification", "in-app prompt", "optionally record the score", "Both players receive Activity Points", "10 points", "5 bonus points", "first four completed matches", "When will my points appear", "require review"]) assert.match(source, new RegExp(copy));
+  for (const deprecatedCopy of ["confirmed tennis activity", "scoring activity", "eligible tennis activity", "raw activity", "both players must confirm"]) assert.doesNotMatch(source, new RegExp(deprecatedCopy, "i"));
+  assert.doesNotMatch(source, /score is required|must enter a score|invite is required/i);
+});
+
+test("release analytics use the approved names and safe metadata only", () => {
+  const events = readFileSync("lib/analyticsEvents.ts", "utf8");
+  const card = readFileSync("components/activityLeaderboard/LeaderboardEntryCard.tsx", "utf8");
+  const page = readFileSync("app/activity-leaderboard/ActivityLeaderboardClient.tsx", "utf8");
+  for (const name of ["activity_leaderboard_home_card_viewed", "activity_leaderboard_home_card_clicked", "activity_leaderboard_points_help_opened", "activity_leaderboard_month_changed"]) assert.match(events, new RegExp(name));
+  assert.match(card, /viewed\.current/);
+  assert.match(page, /selected_month_category/);
+  assert.doesNotMatch(card, /trackEvent\([^)]*\{[^}]*(uid|player|opponent|match|postcode|club|points)/);
+  assert.doesNotMatch(page, /selected_month_category[^}]+(uid|player|opponent|match|postcode|club|points)/);
 });

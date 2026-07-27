@@ -47,6 +47,10 @@ export const ANALYTICS_EVENTS = {
   ONBOARDING_V2_HOME_WELCOME_VIEWED: "onboarding_v2_home_welcome_viewed",
   ONBOARDING_V2_HOME_WELCOME_DISMISSED: "onboarding_v2_home_welcome_dismissed",
   ONBOARDING_V2_HOME_WELCOME_FIND_PLAYERS: "onboarding_v2_home_welcome_find_players",
+  ACTIVITY_LEADERBOARD_HOME_CARD_VIEWED: "activity_leaderboard_home_card_viewed",
+  ACTIVITY_LEADERBOARD_HOME_CARD_CLICKED: "activity_leaderboard_home_card_clicked",
+  ACTIVITY_LEADERBOARD_POINTS_HELP_OPENED: "activity_leaderboard_points_help_opened",
+  ACTIVITY_LEADERBOARD_MONTH_CHANGED: "activity_leaderboard_month_changed",
 } as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENTS)[keyof typeof ANALYTICS_EVENTS];

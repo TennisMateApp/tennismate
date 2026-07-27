@@ -62,7 +62,11 @@ export function calculateMonthlyActivity(
   }
   const sourceStates = monthEvents.map((event) => ({canonicalMatchId: event.canonicalMatchId, sourceFingerprint: event.sourceFingerprint, normalizationVersion: event.normalizationVersion, eligibleForScoring: event.eligibleForScoring, monthKey: event.monthKey, participantIds: [...event.participantIds].sort(), activityAt: event.activityAt?.toISOString() || null}));
   const sourceChecksum = checksum({monthKey, calculationVersion: ACTIVITY_CALCULATION_VERSION, scoringVersion: ACTIVITY_SCORING_VERSION, events: sourceStates});
-  const generationId = `v${ACTIVITY_CALCULATION_VERSION}-${sourceChecksum.slice(0, 20)}`;
+  // The scoring checksum intentionally excludes presentation data. The
+  // generation identity includes the published profile snapshot so an avatar
+  // repair creates a rollback-safe generation without changing points.
+  const profileStates = [...working.keys()].sort().map((playerId) => ({playerId, ...(profiles.get(playerId) || {displayName: null, avatarUrl: null})}));
+  const generationId = `v${ACTIVITY_CALCULATION_VERSION}-${checksum({sourceChecksum, profiles: profileStates}).slice(0, 20)}`;
   const aggregates: MonthlyPlayerAggregate[] = [...working.entries()].map(([playerId, value]) => {
     const cappedActivityCount = [...value.opponents.values()].reduce((total, count) => total + Math.min(count, MAX_POINT_BEARING_MATCHES_PER_OPPONENT), 0);
     const distinctOpponentCount = value.opponents.size;

@@ -2,13 +2,14 @@
 export const PRODUCTION_PROJECT_ID = "tennismate-d8acb";
 const VALUE_OPTIONS = new Set(["--month", "--limit", "--output", "--resume-from", "--batch-size", "--confirm-project", "--confirm-checksum"]);
 const BOOLEAN_OPTIONS = new Set(["--write", "--reconcile"]);
+type EnvironmentVariables = Readonly<Record<string, string | undefined>>;
 
 export interface ActivityBackfillCliOptions {
   month: string | null; limit: number | null; output: string | null; resumeFrom: string | null; batchSize: number;
   write: boolean; reconcile: boolean; confirmProject: string | null; confirmChecksum: string | null;
 }
 
-export function parseActivityBackfillOptions(argv: string[], env: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv): ActivityBackfillCliOptions {
+export function parseActivityBackfillOptions(argv: string[], env: EnvironmentVariables = {}): ActivityBackfillCliOptions {
   const values = new Map<string, string>(); const flags = new Set<string>();
   const onlyBarePowerShellValues = argv.length > 0 && argv.every((argument) => !argument.startsWith("--"));
   if (onlyBarePowerShellValues) {
@@ -34,7 +35,7 @@ export function parseActivityBackfillOptions(argv: string[], env: NodeJS.Process
   return {month, limit: numberValue("--limit", null), output: values.get("--output") || null, resumeFrom: values.get("--resume-from") || null, batchSize: numberValue("--batch-size", 20) as number, write, reconcile, confirmProject: values.get("--confirm-project") || null, confirmChecksum: values.get("--confirm-checksum") || null};
 }
 
-export function assertWriteSafeguards(options: ActivityBackfillCliOptions, activeProject: string | null, env: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv): void {
+export function assertWriteSafeguards(options: ActivityBackfillCliOptions, activeProject: string | null, env: EnvironmentVariables = {}): void {
   if (!options.write) return;
   if (env.FIRESTORE_EMULATOR_HOST || env.FIREBASE_AUTH_EMULATOR_HOST || env.FUNCTIONS_EMULATOR) throw new Error("Production write mode refuses emulator environments");
   if (!activeProject || activeProject !== PRODUCTION_PROJECT_ID) throw new Error(`Unsupported active project: ${activeProject || "unknown"}`);
@@ -46,7 +47,7 @@ export function assertFreshChecksum(expected: string | null, actual: string): vo
   if (!expected || expected !== actual) throw new Error(`Preview freshness checksum mismatch: expected ${expected || "missing"}, actual ${actual}`);
 }
 
-export function activeProjectId(appOptions: {projectId?: string}, env: NodeJS.ProcessEnv): string | null {
+export function activeProjectId(appOptions: {projectId?: string}, env: EnvironmentVariables): string | null {
   if (appOptions.projectId) return appOptions.projectId;
   for (const name of ["GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT"]) if (env[name]) return env[name] as string;
   if (env.FIREBASE_CONFIG) { try { const parsed = JSON.parse(env.FIREBASE_CONFIG); if (typeof parsed.projectId === "string") return parsed.projectId; } catch { return null; } }

@@ -2,6 +2,7 @@
 export const PHASE2_PRODUCTION_PROJECT = "tennismate-d8acb";
 export const PHASE2_CONTROLLED_PILOT_MONTHS = ["2025-12", "2026-02", "2026-03", "2026-04", "2026-07"] as const;
 const VALUE_OPTIONS = new Set(["--month", "--confirm-project", "--confirm-source-checksum"]);
+type EnvironmentVariables = Readonly<Record<string, string | undefined>>;
 
 export interface Phase2PilotOptions {
   month: string | null;
@@ -24,7 +25,7 @@ export function parsePhase2PilotOptions(argv: string[]): Phase2PilotOptions {
   return {month, write, confirmProject: values.get("--confirm-project") || null, confirmSourceChecksum: values.get("--confirm-source-checksum") || null};
 }
 
-export function assertPhase2PilotSafeguards(options: Phase2PilotOptions, actualChecksum: string, env: NodeJS.ProcessEnv): void {
+export function assertPhase2PilotSafeguards(options: Phase2PilotOptions, actualChecksum: string, env: EnvironmentVariables): void {
   if (!options.write) throw new Error("The pilot command requires --write and interactive confirmation");
   if (env.FIRESTORE_EMULATOR_HOST || env.FIREBASE_AUTH_EMULATOR_HOST || env.FUNCTIONS_EMULATOR) throw new Error("The production pilot refuses emulator environments");
   if (env.ACTIVITY_PHASE2_ENABLED !== "false") throw new Error("ACTIVITY_PHASE2_ENABLED must be explicitly false for a controlled pilot");

@@ -1,5 +1,5 @@
 import Image from "next/image";
-import React from "react";
+import React, {useState} from "react";
 import {ActivityLeaderboardRow, rowTone, tiedRanks} from "@/lib/activityLeaderboardModel";
 
 const toneClasses: Record<string, string> = {
@@ -9,6 +9,44 @@ const toneClasses: Record<string, string> = {
   "current-user": "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200",
   standard: "border-black/10 bg-white",
 };
+
+export function shouldShowLeaderboardAvatar(
+  avatarUrl: string | null | undefined,
+  failedUrl: string | null,
+): boolean {
+  return typeof avatarUrl === "string" && avatarUrl.trim().length > 0 && avatarUrl !== failedUrl;
+}
+
+export function LeaderboardAvatar({
+  avatarUrl,
+  displayName,
+}: {
+  avatarUrl: string | null;
+  displayName: string;
+}) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const initial = displayName.charAt(0).toUpperCase();
+  const showImage = shouldShowLeaderboardAvatar(avatarUrl, failedUrl);
+
+  return (
+    <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-full border border-black/10 bg-emerald-100">
+      {showImage ? (
+        <Image
+          src={avatarUrl as string}
+          alt=""
+          fill
+          sizes="44px"
+          className="object-cover"
+          onError={() => setFailedUrl(avatarUrl)}
+        />
+      ) : (
+        <div className="grid h-full w-full place-items-center text-sm font-black text-emerald-900" aria-hidden="true">
+          {initial}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function LeaderboardRow({
   currentUserId,
@@ -21,7 +59,6 @@ export function LeaderboardRow({
 }) {
   const tone = rowTone(row, currentUserId);
   const isCurrentUser = row.playerId === currentUserId;
-  const initial = row.displayName.charAt(0).toUpperCase();
   return (
     <li
       data-current-user={row.playerId === currentUserId ? "true" : "false"}
@@ -35,13 +72,7 @@ export function LeaderboardRow({
         {isTied && <div className="text-[9px] font-bold uppercase tracking-wide text-slate-500">Tied</div>}
       </div>
       <div className="flex min-w-0 items-center gap-3">
-        <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-full border border-black/10 bg-emerald-100">
-          {row.avatarUrl ? (
-            <Image src={row.avatarUrl} alt="" fill sizes="44px" className="object-cover" />
-          ) : (
-            <div className="grid h-full w-full place-items-center text-sm font-black text-emerald-900">{initial}</div>
-          )}
-        </div>
+        <LeaderboardAvatar avatarUrl={row.avatarUrl} displayName={row.displayName} />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-extrabold text-slate-900 sm:text-base">{row.displayName}</span>

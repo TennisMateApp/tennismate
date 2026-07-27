@@ -4,6 +4,7 @@ import {PHASE2_PRODUCTION_PROJECT} from "./pilotCli";
 
 const VALUE_OPTIONS = new Set(["--month", "--confirm-project", "--confirm-source-checksum"]);
 export const PHASE2_AUDIT_RECONSTRUCTION_CONFIRMATION = `${PHASE2_PRODUCTION_PROJECT} 2026-06 RECONSTRUCT AUDIT`;
+type EnvironmentVariables = Readonly<Record<string, string | undefined>>;
 
 export function isExactPhase2AuditAutomationConfirmation(value: string | undefined): boolean {return value === PHASE2_AUDIT_RECONSTRUCTION_CONFIRMATION;}
 
@@ -26,7 +27,7 @@ export function parsePhase2AuditReconstructionOptions(argv: string[]): Phase2Aud
   return {month: values.get("--month") || null, write, confirmProject: values.get("--confirm-project") || null, confirmSourceChecksum: values.get("--confirm-source-checksum") || null};
 }
 
-export function assertPhase2AuditReconstructionSafeguards(options: Phase2AuditReconstructionOptions, env: NodeJS.ProcessEnv): void {
+export function assertPhase2AuditReconstructionSafeguards(options: Phase2AuditReconstructionOptions, env: EnvironmentVariables): void {
   if (options.month && options.month !== PHASE2_JUNE_PILOT_MONTH) throw new Error(`Reconstruction month must equal ${PHASE2_JUNE_PILOT_MONTH}`);
   if (options.confirmProject && options.confirmProject !== PHASE2_PRODUCTION_PROJECT) throw new Error(`--confirm-project must equal ${PHASE2_PRODUCTION_PROJECT}`);
   if (options.confirmSourceChecksum && options.confirmSourceChecksum !== PHASE2_JUNE_PILOT_CHECKSUM) throw new Error("--confirm-source-checksum must equal the verified June checksum");

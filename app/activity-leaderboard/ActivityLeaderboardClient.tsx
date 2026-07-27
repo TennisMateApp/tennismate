@@ -14,8 +14,13 @@ import {
 } from "@/lib/activityLeaderboardClient";
 import {activityLeaderboardViewState, defaultPublishedMonth, formatActivityMonth} from "@/lib/activityLeaderboardModel";
 import LeaderboardRows, {LeaderboardRow} from "@/components/activityLeaderboard/LeaderboardRows";
+import {ANALYTICS_EVENTS} from "@/lib/analyticsEvents";
 
 const INITIAL_ROW_COUNT = 10;
+const trackActivityEvent = async (eventName: string, params?: Record<string, string>) => {
+  const {trackEvent} = await import("@/lib/analytics");
+  await trackEvent(eventName, params);
+};
 
 function LoadingState() {
   return <div className="space-y-2" aria-label="Loading leaderboard">{Array.from({length: 5}, (_, index) => <div key={index} className="h-[74px] animate-pulse rounded-2xl bg-black/5" />)}</div>;
@@ -76,6 +81,10 @@ export default function ActivityLeaderboardClient() {
   const currentUserOutsideRange = Boolean(currentUserRow && currentUserIndex >= INITIAL_ROW_COUNT && !showAll);
 
   const changeMonth = (month: string) => {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    void trackActivityEvent(ANALYTICS_EVENTS.ACTIVITY_LEADERBOARD_MONTH_CHANGED, {
+      selected_month_category: month === currentMonth ? "current" : "historical",
+    });
     setSelectedMonth(month);
     router.replace(`/activity-leaderboard?month=${encodeURIComponent(month)}`, {scroll: false});
   };
@@ -116,7 +125,7 @@ export default function ActivityLeaderboardClient() {
             <div>
               <p className="text-xs font-black uppercase tracking-[0.2em] text-lime-300">Monthly activity</p>
               <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">Activity Leaderboard</h1>
-              <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">A friendly celebration of confirmed tennis activity and the people you play with.</p>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">A friendly celebration of completed matches recorded in TennisMate and the people you play with.</p>
             </div>
           </div>
         </header>
@@ -143,16 +152,26 @@ export default function ActivityLeaderboardClient() {
                 <section className="mt-5 border-t border-black/10 pt-5" aria-labelledby="your-position"><h2 id="your-position" className="mb-2 text-sm font-black text-slate-900">Your position</h2><ul><LeaderboardRow row={currentUserRow} currentUserId={uid} isTied={leaderboard.rows.filter((row) => row.rank === currentUserRow.rank).length > 1} /></ul></section>
               )}
               {!currentUserRow && (
-                <div className="mt-5 rounded-2xl bg-emerald-50 p-4"><div className="font-black text-emerald-950">Want to join the standings?</div><p className="mt-1 text-sm leading-relaxed text-slate-600">Play and confirm eligible tennis activity this month. Your position will appear after the next leaderboard update.</p></div>
+                <div className="mt-5 rounded-2xl bg-emerald-50 p-4"><div className="font-black text-emerald-950">Want to join the standings?</div><p className="mt-1 text-sm leading-relaxed text-slate-600">Record a completed match in TennisMate this month. Your position will appear after a leaderboard update.</p></div>
               )}
               {leaderboard.malformedRowCount > 0 && <p className="mt-4 text-center text-xs text-slate-500">Some unavailable rows were safely omitted.</p>}
             </>
           )}
         </main>
 
-        <details className="group mt-5 rounded-[24px] border border-black/10 bg-white p-5 shadow-sm">
+        <details className="group mt-5 rounded-[24px] border border-black/10 bg-white p-5 shadow-sm" onToggle={(event) => {
+          if (event.currentTarget.open) void trackActivityEvent(ANALYTICS_EVENTS.ACTIVITY_LEADERBOARD_POINTS_HELP_OPENED);
+        }}>
           <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between font-black text-slate-900"><span className="flex items-center gap-2"><Info className="h-5 w-5 text-emerald-800" />How points work</span><ChevronDown className="h-5 w-5 transition group-open:rotate-180" /></summary>
-          <div className="mt-3 space-y-2 text-sm leading-relaxed text-slate-600"><p><strong className="text-slate-800">10 points</strong> for each scoring activity, plus <strong className="text-slate-800">5 points</strong> for each distinct opponent.</p><p>Only the first four activities against the same opponent each month earn activity points. Your raw activity count can still be higher.</p><p>Some activity may wait for confirmation or review before it counts. Nothing private about those checks appears here.</p></div>
+          <div className="mt-4 space-y-4 text-sm leading-relaxed text-slate-600">
+            <h2 className="text-base font-black text-slate-900">How to earn Activity Points</h2>
+            <section><h3 className="font-black text-slate-800">Step 1 — Find a player</h3><p className="mt-1">Use <strong className="text-slate-800">Match Me</strong> to send a <strong className="text-slate-800">Match Request</strong>. Once it&apos;s accepted, organise your game through TennisMate <strong className="text-slate-800">Chat</strong>.</p></section>
+            <section><h3 className="font-black text-slate-800">Step 2 — Schedule your match</h3><p className="mt-1">In Chat, tap <strong className="text-slate-800">Next Match</strong>, create a <strong className="text-slate-800">Match Invite</strong>, and have your opponent accept it.</p></section>
+            <section><h3 className="font-black text-slate-800">Step 3 — Play your match</h3><p className="mt-1">Meet at the scheduled time and enjoy your match.</p></section>
+            <section><h3 className="font-black text-slate-800">Step 4 — Confirm the result</h3><p className="mt-1">Around 30 minutes after the scheduled match time, TennisMate sends both players a notification and an in-app prompt. Confirm that the match was played and optionally record the score. Both players receive Activity Points.</p></section>
+            <section><h3 className="font-black text-slate-800">Points</h3><ul className="mt-1 list-disc space-y-1 pl-5"><li><strong className="text-slate-800">10 points</strong> per completed match.</li><li><strong className="text-slate-800">5 bonus points</strong> for every different opponent each month.</li><li>Only the first four completed matches against the same opponent each month earn match points.</li></ul></section>
+            <section><h3 className="font-black text-slate-800">When will my points appear?</h3><p className="mt-1">Points normally appear after completed matches have been processed. Some matches may take a little longer if they require review.</p></section>
+          </div>
         </details>
       </div>
     </div>

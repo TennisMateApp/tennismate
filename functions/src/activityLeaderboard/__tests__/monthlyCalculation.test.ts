@@ -36,3 +36,13 @@ test("reruns are identical and malformed scoring events fail closed", () => {
   const events = [event("one", ["a", "b"], "2026-07-01")]; const first = calculateMonthlyActivity(events, "2026-07"); const second = calculateMonthlyActivity([...events].reverse(), "2026-07"); assert.equal(first.generationId, second.generationId); assert.equal(first.sourceChecksum, second.sourceChecksum); assert.deepEqual(first.aggregates, second.aggregates);
   assert.throws(() => calculateMonthlyActivity([event("bad", ["a", "b"], "2026-07-01", {participantIds: ["a", "a"]})], "2026-07"), MalformedScoringEventError);
 });
+
+test("profile snapshot changes create a rollback-safe generation without changing scoring", () => {
+  const events = [event("one", ["a", "b"], "2026-07-01")];
+  const before = calculateMonthlyActivity(events, "2026-07", new Map([["a", {displayName: "A", avatarUrl: "old"}]]));
+  const after = calculateMonthlyActivity(events, "2026-07", new Map([["a", {displayName: "A", avatarUrl: "new"}]]));
+  assert.equal(before.sourceChecksum, after.sourceChecksum);
+  assert.notEqual(before.generationId, after.generationId);
+  assert.deepEqual(before.aggregates.map(({generationId, ...row}) => row), after.aggregates.map(({generationId, ...row}) => row));
+  assert.deepEqual(before.rankings.map(({avatarUrl, generationId, ...row}) => row), after.rankings.map(({avatarUrl, generationId, ...row}) => row));
+});

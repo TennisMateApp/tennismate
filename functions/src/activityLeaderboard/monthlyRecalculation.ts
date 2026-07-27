@@ -38,6 +38,9 @@ async function writeChunks(db: FirebaseFirestore.Firestore, writes: StagedWrite[
   }
 }
 async function publicProfiles(db: FirebaseFirestore.Firestore, playerIds: string[]): Promise<Map<string, PublicProfileSnapshot>> {
+  // Current-month recalculation refreshes the latest profile snapshot. A
+  // historical month is queued only when its persisted avatar is unavailable;
+  // ordinary profile updates never dirty historical months.
   const result = new Map<string, PublicProfileSnapshot>();
   for (let offset = 0; offset < playerIds.length; offset += 100) {
     const refs = playerIds.slice(offset, offset + 100).map((id) => db.collection("players").doc(id));

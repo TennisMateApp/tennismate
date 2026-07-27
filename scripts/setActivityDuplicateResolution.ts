@@ -3,6 +3,7 @@ import * as admin from "firebase-admin";
 import {MANUAL_DUPLICATE_DECISION_VERSION} from "../functions/src/activityLeaderboard/config";
 import {applyManualDuplicateResolution, duplicateGroupFingerprint, ManualDuplicateDecision, ManualDuplicateResolution} from "../functions/src/activityLeaderboard/duplicateResolution";
 import {NormalizedActivityEvent} from "../functions/src/activityLeaderboard/types";
+import {persistManualDuplicateResolution} from "../functions/src/activityLeaderboard/manualResolutionPersistence";
 
 const EXPECTED_PROJECT = "tennismate-d8acb";
 function option(name: string): string | null {
@@ -42,15 +43,7 @@ async function main(): Promise<void> {
   if (projectId !== EXPECTED_PROJECT) throw new Error(`Write mode denied for project ${projectId}`);
   if (option("confirm") !== group) throw new Error("Write mode requires --confirm=<duplicateGroupKey>");
   if (proposed.status === "PENDING") throw new Error("Resolution is invalid or stale");
-  await db.runTransaction(async (transaction) => {
-    const current = await Promise.all(refs.map((ref: FirebaseFirestore.DocumentReference) => transaction.get(ref)));
-    const currentEvents = current.filter((snap) => snap.exists).map((snap) => stored(snap.data() || {}));
-    if (duplicateGroupFingerprint(currentEvents) !== resolution.groupFingerprint) throw new Error("Group changed during resolution; retry preview");
-    const applied = applyManualDuplicateResolution(currentEvents, resolution);
-    if (applied.status === "PENDING") throw new Error("Resolution became invalid");
-    transaction.set(db.collection("activity_duplicate_resolutions").doc(group), {...resolution, decidedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: false});
-    for (const event of applied.events) transaction.set(db.collection("activity_match_events").doc(event.canonicalMatchId), {duplicateReviewStatus: event.duplicateReviewStatus, duplicateResolutionRole: event.duplicateResolutionRole, duplicateSurvivorEventId: event.duplicateSurvivorEventId, eligibleForScoring: event.eligibleForScoring, normalizedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
-    transaction.set(reviewRef, {status: applied.status, survivorEventId: applied.survivorEventId, excludedEventIds: applied.excludedEventIds, groupFingerprint: resolution.groupFingerprint, resolutionVersion: resolution.decisionVersion, resolvedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
-  });
+  const persisted = await persistManualDuplicateResolution(db, resolution);
+  console.log(JSON.stringify({written: !persisted.alreadyApplied, alreadyApplied: persisted.alreadyApplied, affectedMonthKeys: persisted.affectedMonthKeys}));
 }
 main().catch((error: unknown) => { console.error(JSON.stringify({script: "setActivityDuplicateResolution", error: error instanceof Error ? error.message : String(error)})); process.exitCode = 1; });
