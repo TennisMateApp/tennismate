@@ -279,6 +279,12 @@ service cloud.firestore {
 
     function isNotificationCreateAllowed() {
       return signedIn()
+        && request.resource.data.get("type", "") != "event_reminder"
+        && request.resource.data.get("source", "") != "event_reminder_scheduler"
+        && !request.resource.data.keys().hasAny([
+          "reminderType",
+          "scheduledStart"
+        ])
         && (
           request.resource.data.fromUserId == request.auth.uid ||
           request.resource.data.senderId == request.auth.uid

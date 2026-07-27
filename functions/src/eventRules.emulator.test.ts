@@ -76,3 +76,23 @@ test("duration validation does not broaden event editing permissions", {skip: !h
   }));
   assert.ok(true);
 });
+
+test("clients cannot create backend-owned event reminders", {skip: !host}, async () => {
+  const db = environment.authenticatedContext("sender").firestore();
+  await assertFails(setDoc(doc(db, "notifications", "event-reminder"), {
+    fromUserId: "sender",
+    recipientId: "recipient",
+    type: "event_reminder",
+    reminderType: "1h",
+    scheduledStart: "2026-08-01T00:00:00.000Z",
+    source: "event_reminder_scheduler",
+    route: "/events/event-id",
+  }));
+  await assertSucceeds(setDoc(doc(db, "notifications", "match-request"), {
+    fromUserId: "sender",
+    recipientId: "recipient",
+    type: "match_request",
+    source: "client:match_request",
+    route: "/matches",
+  }));
+});
