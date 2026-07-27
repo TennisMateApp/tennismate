@@ -25,6 +25,7 @@ import {
   upsertMatchFeedbackRelationship,
   withRelationshipFields,
 } from "@/lib/playerRelationships";
+import {recordCompletedMatch} from "@/lib/recordCompletedMatchClient";
 
 export default function MatchSummaryPage() {
   const { id: matchId } = useParams();
@@ -150,6 +151,19 @@ const handleComplete = async () => {
       return;
     }
 
+    await recordCompletedMatch({
+      mode: "invite",
+      sourceId: cleanId,
+      sourceType: "match_request",
+      result: {
+        outcome: "played",
+        score: typeof match.score === "string" ? match.score : "",
+        sets: Array.isArray(match.sets) ? match.sets : [],
+        winnerId: match.winnerId || null,
+        matchType: match.matchType || null,
+      },
+    });
+
     const matchRef = doc(db, "match_requests", cleanId);
     const matchSnap = await getDoc(matchRef);
     if (!matchSnap.exists()) {
@@ -185,19 +199,7 @@ const handleComplete = async () => {
           relationshipPairId = null;
         }
 
-        const historyRef = doc(collection(db, "match_history"));
-        const historyPayload: Record<string, any> = {
-          ...matchData,
-          completed: true,
-          status: "completed",
-          movedAt: serverTimestamp(),
-        };
-        await setDoc(
-          historyRef,
-          relationshipPairId
-            ? withRelationshipFields(matchData.fromUserId, matchData.toUserId, historyPayload)
-            : historyPayload
-        );
+        const historyRef = doc(db, "match_history", cleanId);
 
         if (relationshipPairId) {
           try {

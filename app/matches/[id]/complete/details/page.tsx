@@ -2,22 +2,17 @@
 
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { db, auth } from "@/lib/firebase";
-import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import {db} from "@/lib/firebase";
+import {doc, getDoc, setDoc} from "firebase/firestore";
 import Image from "next/image";
 import withAuth from "@/components/withAuth";
 import { ComponentType } from "react";
 import { GiTennisBall } from "react-icons/gi";
 import ClientLayoutWrapper from "@/components/ClientLayoutWrapper";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
-import {
-  getPairId,
-  upsertCompletedMatchRelationship,
-  upsertMatchScoreRelationship,
-  withRelationshipFields,
-} from "@/lib/playerRelationships";
 import { trackEvent } from "@/lib/analytics";
 import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
+import {recordCompletedMatch} from "@/lib/recordCompletedMatchClient";
 
 type Player = {
   id: string;
@@ -303,126 +298,30 @@ const [matchComments, setMatchComments] = useState("");
     const scoreText = formatScoreline(clean);
     const winnerId = computeWinner(clean, playerA, playerB);
     const cleanMatchId = Array.isArray(matchId) ? matchId[0] : (matchId as string);
-    const actorId = auth.currentUser?.uid || playerA.id;
-
-    let relationshipPairId: string | null = null;
-    try {
-      relationshipPairId = getPairId(playerA.id, playerB.id);
-    } catch {
-      relationshipPairId = null;
-    }
-
 const cleanedSets = clean.map(s => ({
-  A: s.A,
-  B: s.B,
+  A: s.A!,
+  B: s.B!,
   ...(s.tieBreakA != null ? { tieBreakA: s.tieBreakA } : {}),
   ...(s.tieBreakB != null ? { tieBreakB: s.tieBreakB } : {}),
 }));
 
-const scorePayload: Record<string, any> = {
-    players: [playerA.id, playerB.id],
-    ...(fromInvite ? { inviteId: fromInvite } : {}),
-    livePoints,
-    tiebreakMode,
-    matchComments,
-    sets: cleanedSets,
-    updatedAt: serverTimestamp(),
-  };
-
-await setDoc(
-  doc(db, "match_scores", cleanMatchId),
-  relationshipPairId
-    ? withRelationshipFields(playerA.id, playerB.id, scorePayload)
-    : scorePayload,
-  { merge: true }
-);
-
-if (relationshipPairId) {
-  try {
-    await upsertMatchScoreRelationship(
-      db,
-      playerA.id,
-      playerB.id,
-      cleanMatchId,
-      actorId,
-      { latestScoreId: cleanMatchId }
-    );
-  } catch (error) {
-    console.warn("[player_relationships:stage3] match_scores relationship upsert failed", {
-      scoreId: cleanMatchId,
-      pairId: relationshipPairId,
-      players: [playerA.id, playerB.id],
-      error,
-    });
-  }
-}
-
-await updateDoc(doc(db, "match_requests", cleanMatchId), {
-  matchType: type,
-  score: scoreText,
-  completed: true,
-  status: "completed",
-  winnerId,
-  ...(fromInvite ? { inviteId: fromInvite, completedFrom: "invite" } : {}),
-});
-
-// ✅ CREATE / UPDATE MATCH HISTORY
-const historyPayload: Record<string, any> = {
-    matchRequestId: cleanMatchId,
-    players: [playerA.id, playerB.id],
-    fromUserId: playerA.id,
-    toUserId: playerB.id,
-    fromName: playerA.name ?? null,
-    toName: playerB.name ?? null,
-    fromPhotoURL: playerA.photoURL ?? null,
-    toPhotoURL: playerB.photoURL ?? null,
-    matchType: type ?? null,
+await recordCompletedMatch({
+  mode: "invite",
+  sourceId: cleanMatchId,
+  sourceType: "match_request",
+  result: {
+    outcome: "played",
     score: scoreText,
     sets: cleanedSets,
+    winnerId,
+    matchType: type,
     livePoints,
     tiebreakMode,
     matchComments,
-    completed: true,
-    status: "completed",
-    winnerId: winnerId ?? null,
-    completedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    ...(fromInvite ? { inviteId: fromInvite, completedFrom: "invite" } : {}),
-  };
+  },
+});
 
-await setDoc(
-  doc(db, "match_history", cleanMatchId),
-  relationshipPairId
-    ? withRelationshipFields(playerA.id, playerB.id, historyPayload)
-    : historyPayload,
-  { merge: true }
-);
-
-if (relationshipPairId) {
-  try {
-    await upsertCompletedMatchRelationship(
-      db,
-      playerA.id,
-      playerB.id,
-      cleanMatchId,
-      actorId,
-      "match_history",
-      {
-        latestHistoryId: cleanMatchId,
-        latestScoreId: cleanMatchId,
-      }
-    );
-  } catch (error) {
-    console.error("[player_relationships:stage3] match_history relationship upsert failed", {
-      historyId: cleanMatchId,
-      scoreId: cleanMatchId,
-      pairId: relationshipPairId,
-      players: [playerA.id, playerB.id],
-      error,
-    });
-  }
-}
-
+// The trusted callable creates Match History and derives both participants.
     // Love-hold badge if any 6–0
     if (clean.some(s => (s.A === 6 && s.B === 0) || (s.B === 6 && s.A === 0))) {
       if (winnerId) {

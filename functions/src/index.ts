@@ -16,6 +16,7 @@ export {
   submitOnboardingWaitlist,
 } from "./onboardingFoundation";
 export {finalizeOnboardingProfile} from "./onboardingFinalization";
+export {recordCompletedMatch} from "./recordCompletedMatch";
 import { fetchSuggestedCourtsForInvite } from "./suggestedCourtsForInvite";
 import {
   affectedUserIdsFromCompletedMatch,
@@ -28,10 +29,12 @@ import {
 } from "./messageNotifications";
 import { normalizeActivityOnMatchHistoryWrite } from "./activityLeaderboard/triggers";
 import { cleanupRetiredActivityGenerationsScheduled, recalculateDirtyActivityMonths } from "./activityLeaderboard/phase2Triggers";
+import { refreshActivityAvatarOnPlayerPhotoUpdate } from "./activityLeaderboard/profileAvatarRefresh";
 
 export { normalizeActivityOnMatchHistoryWrite };
 export { recalculateDirtyActivityMonths };
 export { cleanupRetiredActivityGenerationsScheduled };
+export { refreshActivityAvatarOnPlayerPhotoUpdate };
 
 
 // ✅ Set correct region for Firestore: australia-southeast2

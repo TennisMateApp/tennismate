@@ -12,16 +12,8 @@ import {
   startAt,
   endAt,
   limit,
-  addDoc,
-    updateDoc,
-  serverTimestamp,
 } from "firebase/firestore";
-import {
-  getPairId,
-  upsertCompletedMatchRelationship,
-  upsertMatchScoreRelationship,
-  withRelationshipFields,
-} from "@/lib/playerRelationships";
+import {recordCompletedMatch} from "@/lib/recordCompletedMatchClient";
 
 type MatchCheckInOverlayProps = {
   open: boolean;
@@ -265,199 +257,23 @@ const handleSaveMatch = async () => {
   setSaving(true);
 
   try {
-    const [currentPlayerSnap, otherPlayerSnap] = await Promise.all([
-      getDoc(doc(db, "players", currentUserId)),
-      getDoc(doc(db, "players", otherPlayerId)),
-    ]);
-
-    const currentPlayer = currentPlayerSnap.exists()
-      ? (currentPlayerSnap.data() as any)
-      : {};
-    const otherPlayer = otherPlayerSnap.exists()
-      ? (otherPlayerSnap.data() as any)
-      : {};
-
-    let relationshipPairId: string | null = null;
-    try {
-      relationshipPairId = getPairId(currentUserId, otherPlayerId);
-    } catch {
-      relationshipPairId = null;
-    }
-
     const locationName =
       selectedCourt?.name ||
       locationInput.trim() ||
       "";
-
-    const locationPayload = selectedCourt
-      ? {
-          id: selectedCourt.id || null,
-          name: selectedCourt.name || "",
-          address: selectedCourt.address || "",
-          suburb: selectedCourt.suburb || "",
-          state: selectedCourt.state || "",
-          postcode: selectedCourt.postcode || "",
-          bookingUrl: selectedCourt.bookingUrl || "",
-        }
-      : locationInput.trim()
-      ? {
-          name: locationInput.trim(),
-        }
-      : null;
-
-    const historyPayload: Record<string, any> = {
-      completed: true,
-      completedAt: serverTimestamp(),
-      completedFrom: "chat_check_in",
-      outcome: "played",
-      fromUserId: currentUserId,
-      toUserId: otherPlayerId,
-      fromName: currentPlayer?.name || "Player",
-      toName: otherPlayer?.name || "Player",
-      fromPhotoURL:
-        currentPlayer?.photoThumbURL ||
-        currentPlayer?.photoURL ||
-        currentPlayer?.avatar ||
-        "",
-      toPhotoURL:
-        otherPlayer?.photoThumbURL ||
-        otherPlayer?.photoURL ||
-        otherPlayer?.avatar ||
-        "",
-      inviteId: "",
-      matchRequestId: "",
-      players: [currentUserId, otherPlayerId],
-      status: "completed",
-      updatedAt: serverTimestamp(),
-      livePoints: "",
-      matchComments: "",
-      matchType: null,
-      tiebreakMode: false,
-      location: locationName,
-      court: locationPayload,
+    await recordCompletedMatch({
+      mode: "chat_check_in",
       conversationId,
-      playedDate,
-    };
-
-    if (hasScore) {
-      historyPayload.score = scoreSummary;
-      historyPayload.sets = enteredSets;
-      historyPayload.winnerId = derivedWinnerId || null;
-    } else {
-      historyPayload.score = "";
-      historyPayload.sets = [];
-      historyPayload.winnerId = null;
-    }
-
-    const historyDoc = relationshipPairId
-      ? withRelationshipFields(currentUserId, otherPlayerId, historyPayload)
-      : historyPayload;
-    const historyRef = await addDoc(collection(db, "match_history"), historyDoc);
-
-    if (relationshipPairId) {
-      try {
-        await upsertCompletedMatchRelationship(
-          db,
-          currentUserId,
-          otherPlayerId,
-          historyRef.id,
-          currentUserId,
-          "match_history",
-          { latestHistoryId: historyRef.id }
-        );
-      } catch (error) {
-        console.error("[player_relationships:stage3] match_history relationship upsert failed", {
-          historyId: historyRef.id,
-          pairId: relationshipPairId,
-          players: [currentUserId, otherPlayerId],
-          error,
-        });
-      }
-    }
-
-    await updateDoc(doc(db, "conversations", String(conversationId)), {
-  matchCheckInResolved: true,
-  updatedAt: serverTimestamp(),
-});
-
-    if (hasScore) {
-      const scorePayload: Record<string, any> = {
-        players: [currentUserId, otherPlayerId],
-        sets: enteredSets,
-        updatedAt: serverTimestamp(),
-      };
-      const scoreDocRef = await addDoc(
-        collection(db, "match_scores"),
-        relationshipPairId
-          ? withRelationshipFields(currentUserId, otherPlayerId, scorePayload)
-          : scorePayload
-      );
-
-      if (relationshipPairId) {
-        try {
-          await upsertMatchScoreRelationship(
-            db,
-            currentUserId,
-            otherPlayerId,
-            scoreDocRef.id,
-            currentUserId,
-            {
-              latestHistoryId: historyRef.id,
-              latestScoreId: scoreDocRef.id,
-            }
-          );
-        } catch (error) {
-          console.warn("[player_relationships:stage3] match_scores relationship upsert failed", {
-            scoreId: scoreDocRef.id,
-            historyId: historyRef.id,
-            pairId: relationshipPairId,
-            players: [currentUserId, otherPlayerId],
-            error,
-          });
-        }
-      }
-
-      const completedMatchPayload: Record<string, any> = {
-        fromUserId: currentUserId,
-        toUserId: otherPlayerId,
-        matchId: scoreDocRef.id,
-        winnerId: derivedWinnerId || null,
-        timestamp: serverTimestamp(),
-      };
-      const completedMatchRef = await addDoc(
-        collection(db, "completed_matches"),
-        relationshipPairId
-          ? withRelationshipFields(currentUserId, otherPlayerId, completedMatchPayload)
-          : completedMatchPayload
-      );
-
-      if (relationshipPairId) {
-        try {
-          await upsertCompletedMatchRelationship(
-            db,
-            currentUserId,
-            otherPlayerId,
-            completedMatchRef.id,
-            currentUserId,
-            "completed_matches",
-            {
-              latestHistoryId: historyRef.id,
-              latestScoreId: scoreDocRef.id,
-              latestCompletedMatchId: completedMatchRef.id,
-            }
-          );
-        } catch (error) {
-          console.warn("[player_relationships:stage3] completed_matches relationship upsert failed", {
-            completedMatchId: completedMatchRef.id,
-            scoreId: scoreDocRef.id,
-            historyId: historyRef.id,
-            pairId: relationshipPairId,
-            players: [currentUserId, otherPlayerId],
-            error,
-          });
-        }
-      }
-    }
+      result: {
+        outcome: "played",
+        playedDate,
+        score: hasScore ? scoreSummary : "",
+        sets: hasScore ? enteredSets : [],
+        winnerId: hasScore ? derivedWinnerId : null,
+        location: locationName || null,
+        courtId: selectedCourt?.id || null,
+      },
+    });
 
     onClose();
   } catch (error) {
@@ -477,92 +293,11 @@ const handleSaveNoMatch = async () => {
   setSaving(true);
 
   try {
-    const [currentPlayerSnap, otherPlayerSnap] = await Promise.all([
-      getDoc(doc(db, "players", currentUserId)),
-      getDoc(doc(db, "players", otherPlayerId)),
-    ]);
-
-    const currentPlayer = currentPlayerSnap.exists()
-      ? (currentPlayerSnap.data() as any)
-      : {};
-    const otherPlayer = otherPlayerSnap.exists()
-      ? (otherPlayerSnap.data() as any)
-      : {};
-
-    let relationshipPairId: string | null = null;
-    try {
-      relationshipPairId = getPairId(currentUserId, otherPlayerId);
-    } catch {
-      relationshipPairId = null;
-    }
-
-    const historyPayload: Record<string, any> = {
-      completed: false,
-      completedAt: null,
-      completedFrom: "chat_check_in",
-      outcome: "not_played",
-      fromUserId: currentUserId,
-      toUserId: otherPlayerId,
-      fromName: currentPlayer?.name || "Player",
-      toName: otherPlayer?.name || "Player",
-      fromPhotoURL:
-        currentPlayer?.photoThumbURL ||
-        currentPlayer?.photoURL ||
-        currentPlayer?.avatar ||
-        "",
-      toPhotoURL:
-        otherPlayer?.photoThumbURL ||
-        otherPlayer?.photoURL ||
-        otherPlayer?.avatar ||
-        "",
-      inviteId: "",
-      matchRequestId: "",
-      players: [currentUserId, otherPlayerId],
-      status: "not_played",
-      updatedAt: serverTimestamp(),
-      livePoints: "",
-      matchComments: "",
-      matchType: null,
-      tiebreakMode: false,
-      location: "",
-      court: null,
+    await recordCompletedMatch({
+      mode: "chat_check_in",
       conversationId,
-      playedDate: "",
-      score: "",
-      sets: [],
-      winnerId: null,
-    };
-
-    const historyDoc = relationshipPairId
-      ? withRelationshipFields(currentUserId, otherPlayerId, historyPayload)
-      : historyPayload;
-    const historyRef = await addDoc(collection(db, "match_history"), historyDoc);
-
-    if (relationshipPairId) {
-      try {
-        await upsertCompletedMatchRelationship(
-          db,
-          currentUserId,
-          otherPlayerId,
-          historyRef.id,
-          currentUserId,
-          "match_history",
-          { latestHistoryId: historyRef.id }
-        );
-      } catch (error) {
-        console.error("[player_relationships:stage3] not-played match_history relationship upsert failed", {
-          historyId: historyRef.id,
-          pairId: relationshipPairId,
-          players: [currentUserId, otherPlayerId],
-          error,
-        });
-      }
-    }
-
-    await updateDoc(doc(db, "conversations", String(conversationId)), {
-  matchCheckInResolved: true,
-  updatedAt: serverTimestamp(),
-});
+      result: {outcome: "not_played"},
+    });
 
     onClose();
   } catch (error) {
