@@ -115,21 +115,23 @@ test("the action runner reuses one promise for Strict Mode effect replay", async
   assert.equal(calls, 1);
 });
 
-test("successful verification has stable return instructions and no app-opening action", () => {
+test("the verification landing page is a static terminal confirmation", () => {
+  assert.doesNotMatch(actionPageSource, /use client|useEffect|useState|useSearchParams/);
+  assert.doesNotMatch(actionPageSource, /oobCode|mode|applyActionCode|processVerificationAction/);
+  assert.doesNotMatch(actionPageSource, /auth|firebase|checking|invalid|expired|error/i);
   assert.doesNotMatch(actionPageSource, /router\.(push|replace)/);
   assert.doesNotMatch(actionPageSource, /resolveAccountDestination/);
   assert.doesNotMatch(actionPageSource, /Open TennisMate/);
-  assert.doesNotMatch(actionPageSource, /<Link|window\.location\.(assign|replace|href)/);
-  assert.match(actionPageSource, /Your account is verified\./);
-  assert.match(actionPageSource, /Please navigate back to the TennisMate app to continue\./);
-  assert.match(actionPageSource, /Please return to the device where you started setting up TennisMate\./);
-  assert.match(actionPageSource, /!successful && view\.state !== "checking"/);
-  assert.match(actionPageSource, /Verification is taking longer than expected/);
+  assert.doesNotMatch(actionPageSource, /<Link|<button|window\.location/);
+  assert.match(actionPageSource, /Email verified/);
+  assert.match(actionPageSource, /Your account has been verified successfully\./);
+  assert.match(actionPageSource, /Please return to the TennisMate app to continue\./);
 });
 
 test("legacy /verified links remain understandable and code links use the canonical handler", () => {
   assert.match(legacyPageSource, /Email verified/);
-  assert.match(legacyPageSource, /Please return to the device where you started setting up TennisMate\./);
+  assert.match(legacyPageSource, /Your account has been verified successfully\./);
+  assert.match(legacyPageSource, /Please return to the TennisMate app to continue\./);
   assert.doesNotMatch(legacyPageSource, /Open TennisMate|href="\/login"/);
   assert.match(legacyPageSource, /new URL\("\/verify-complete"/);
   assert.match(legacyPageSource, /if \(code\)/);

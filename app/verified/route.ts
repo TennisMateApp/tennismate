@@ -27,8 +27,8 @@ export function GET(request: NextRequest) {
       <div class="brand"><img src="/logo.png" alt=""><span>TennisMate</span></div>
       <div class="icon" aria-hidden="true">✓</div>
       <h1>Email verified</h1>
-      <p>Your account is verified.</p>
-      <p>Please return to the device where you started setting up TennisMate.</p>
+      <p>Your account has been verified successfully.</p>
+      <p>Please return to the TennisMate app to continue.</p>
     </main>
   </body>
 </html>`,
