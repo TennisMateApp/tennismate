@@ -1,5 +1,4 @@
-import { isOnboardingV2Destination } from "@/lib/onboardingV2";
-import { classifyVerificationError, safeNextDestination } from "@/lib/verificationFlow";
+import { classifyVerificationError } from "@/lib/verificationFlow";
 
 export const VERIFICATION_ACTION_TIMEOUT_MS = 12_000;
 
@@ -91,9 +90,4 @@ export function createVerificationActionRunner() {
     activePromise = run();
     return activePromise;
   };
-}
-
-export function verificationOpenDestination(value: string | null | undefined) {
-  const safe = safeNextDestination(value, "/login");
-  return isOnboardingV2Destination(safe) ? safe : safe;
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { applyActionCode } from "firebase/auth";
@@ -12,7 +11,6 @@ import { auth } from "@/lib/firebaseConfig";
 import {
   createVerificationActionRunner,
   processVerificationAction,
-  verificationOpenDestination,
   type VerificationActionResult,
   type VerificationActionState,
 } from "@/lib/verificationAction";
@@ -50,7 +48,6 @@ export default function VerifyCompletePage() {
   const params = useSearchParams();
   const code = params.get("oobCode");
   const mode = params.get("mode");
-  const destination = verificationOpenDestination(params.get("next"));
   const runnerRef = useRef(createVerificationActionRunner());
   const trackedRef = useRef(false);
   const [view, setView] = useState<VerificationView>({ state: "checking", signedIn: false });
@@ -94,12 +91,13 @@ export default function VerifyCompletePage() {
   const timedOut = view.state === "networkError" && view.reason === "timeout";
   const display = view.state === "checking"
     ? { heading: "Verifying your email…", body: "This should only take a moment." }
-    : view.state === "success"
+    : view.state === "success" || view.state === "alreadyVerified"
       ? {
           heading: "Email verified",
-          body: view.signedIn
-            ? "Your TennisMate account has been verified. Return to the TennisMate app to continue setting up your profile."
-            : "Your email has been confirmed. Return to the device where you started setting up TennisMate.",
+          body: "Your account is verified.",
+          instruction: view.signedIn
+            ? "Please navigate back to the TennisMate app to continue."
+            : "Please return to the device where you started setting up TennisMate.",
         }
       : timedOut
         ? {
@@ -120,18 +118,16 @@ export default function VerifyCompletePage() {
         </div>
         <h1 className="mt-5 text-2xl font-semibold text-slate-950">{display.heading}</h1>
         <p className="mt-2 text-sm leading-6 text-slate-600">{display.body}</p>
+        {"instruction" in display ? (
+          <p className="mt-2 text-sm leading-6 text-slate-600">{display.instruction}</p>
+        ) : null}
 
-        {view.state !== "checking" ? (
+        {!successful && view.state !== "checking" ? (
           <div className="mt-6 space-y-3">
-            <Link href={destination} className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-[#0B3D2E] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#125540]">
-              Open TennisMate
-            </Link>
-            {!successful ? (
-              <button type="button" onClick={() => window.location.reload()} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 px-4 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-50">
-                <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                Try again
-              </button>
-            ) : null}
+            <button type="button" onClick={() => window.location.reload()} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 px-4 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-50">
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              Try again
+            </button>
             <p className="text-xs leading-5 text-slate-500">You can also close this page and switch back to the TennisMate app.</p>
           </div>
         ) : null}
