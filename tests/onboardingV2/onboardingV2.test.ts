@@ -180,7 +180,7 @@ test("step transitions are restrained and disabled for reduced-motion users", ()
   assert.match(globalsSource, /onboarding-v2-step-enter 200ms/);
   assert.match(globalsSource, /translateY\(5px\)/);
   assert.match(globalsSource, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(globalsSource, /\.onboarding-v2-step-content\s*\{\s*animation: none;/s);
+  assert.match(globalsSource, /\.onboarding-v2-step-content\s*\{\s*animation: none;/);
   assert.match(shellSource, /key=\{step\}/);
 });
 
@@ -193,7 +193,7 @@ test("floating feedback stays hidden on signup-v2 and V2 verification returns", 
 });
 
 test("analytics calls use stable reasons and omit email, birth year, and password", () => {
-  const analyticsCalls = [...flowSource.matchAll(/trackEvent\(([^;]+)\);/gs)].map((match) => match[1]);
+  const analyticsCalls = [...flowSource.matchAll(/trackEvent\(([^;]+)\);/g)].map((match) => match[1]);
   assert.ok(analyticsCalls.length >= 9);
   analyticsCalls.forEach((call) => {
     assert.doesNotMatch(call, /\bemail\b/);

@@ -16,14 +16,15 @@
     "test:home-welcome": "tsx --test tests/onboardingV2/homeWelcomeSuppression.test.ts",
     "test:verification": "tsx --test tests/verification/*.test.ts",
     "validate:activity-leaderboard-ui": "tsx scripts/validateActivityLeaderboardPhase3.ts",
+    "audit:activity-leaderboard-avatars": "tsx scripts/activityLeaderboardAvatarAudit.ts",
     "export:match-invites": "node scripts/exportMatchInvites.js"
   },
   "dependencies": {
     "@capacitor-firebase/messaging": "^7.4.0",
     "@capacitor/android": "7.4.4",
     "@capacitor/app": "^7.1.0",
-    "@capacitor/app-launcher": "7.0.2",
-    "@capacitor/browser": "7.0.5",
+    "@capacitor/app-launcher": "^8.0.0",
+    "@capacitor/browser": "^8.0.0",
     "@capacitor/core": "^7.4.4",
     "@capacitor/ios": "^7.4.4",
     "@capacitor/push-notifications": "^7.0.3",

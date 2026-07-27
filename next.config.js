@@ -1,5 +1,6 @@
 // next.config.js
 const defaultRuntimeCaching = require("next-pwa/cache");
+const path = require("path");
 
 const runtimeCaching = [
   {
@@ -51,6 +52,7 @@ const withPWA = require("next-pwa")({
 
 module.exports = withPWA({
   reactStrictMode: true,
+  outputFileTracingRoot: path.join(__dirname),
 
   async headers() {
     return [
