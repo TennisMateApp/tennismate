@@ -102,6 +102,7 @@ type ActivityFilter = "" | "online" | "recent" | "offline";
 
 export default function DesktopMatchPage(props: {
   loading: boolean;
+  recommendationsLoadError: boolean;
   myProfileHidden: boolean;
   sortedMatches: any[];
   visibleMatches: any[];
@@ -531,7 +532,12 @@ const handleInvite = useCallback(
                     )}
                   </div>
                 </div>
-              ) : visibleMatches.length === 0 ? (
+              ) : props.recommendationsLoadError ? (
+  <div className="rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm" role="alert">
+    <div className="font-extrabold text-slate-950">We couldn’t load player recommendations.</div>
+    <p className="mt-2 text-sm font-semibold text-slate-600">Please refresh and try again.</p>
+  </div>
+) : visibleMatches.length === 0 ? (
   <div className="rounded-2xl border bg-white p-6 text-center shadow-sm text-sm text-gray-700">
     {clubEmptyState ? (
       <><div className="font-extrabold text-emerald-950">{clubEmptyState.title}</div><p className="mt-2 font-semibold text-emerald-950/55">{clubEmptyState.body}</p></>

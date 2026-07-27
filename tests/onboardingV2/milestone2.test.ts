@@ -192,7 +192,7 @@ test("resume selects the earliest actual missing required step", () => {
 test("verification pending preserves progress and blocks trusted activation", () => {
   assert.match(flowSource, /Email verification pending/);
   assert.match(flowSource, /One final step: verify your email to start finding players\./);
-  assert.match(flowSource, /if \(!emailVerified\)/);
+  assert.match(flowSource, /if \(!verifiedSession\.verified \|\| !verifiedSession\.tokenReady\)/);
   assert.match(flowSource, /I’ve verified — continue/);
   assert.match(flowSource, /window\.addEventListener\("focus"/);
   assert.match(flowSource, /visibilitychange/);

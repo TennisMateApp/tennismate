@@ -57,6 +57,7 @@ import {
 import {SKILL_OPTIONS, skillFromUTR, type SkillBand} from "@/lib/skill";
 import {safeNextDestination, verificationContinueUrl} from "@/lib/verificationFlow";
 import {markOnboardingV2EntrySource} from "@/lib/onboardingGuidance";
+import {ensureVerifiedAuthSession} from "@/lib/verifiedAuthSession";
 import {
   buildOnboardingV2AvailabilityUpdate,
   buildOnboardingV2ClubUpdate,
@@ -203,8 +204,8 @@ export default function OnboardingV2Flow() {
     const user = auth.currentUser;
     if (!user) return false;
     try {
-      await user.reload();
-      if (user.emailVerified) {
+      const session = await ensureVerifiedAuthSession(user);
+      if (session.verified && session.tokenReady) {
         markVerified();
         return true;
       }
@@ -212,9 +213,7 @@ export default function OnboardingV2Flow() {
         setNotice({kind: "info", text: "Not verified yet. Open the link in your email, then try again."});
       }
     } catch {
-      if (showPendingMessage) {
-        setNotice({kind: "error", text: "We couldn’t check your status. Check your connection and try again."});
-      }
+      setNotice({kind: "error", text: "We couldn’t refresh your verified session. Check your connection and try again."});
     }
     return false;
   }, [markVerified]);
@@ -235,8 +234,8 @@ export default function OnboardingV2Flow() {
       setNotice({kind: "success", text: "Verification email sent. Check your inbox."});
       void trackEvent("verification_sent", {send_type: "initial_resume", flow: "onboarding_v2"});
     }
-    await user.reload();
-    if (user.emailVerified) markVerified();
+    const session = await ensureVerifiedAuthSession(user);
+    if (session.verified && session.tokenReady) markVerified();
     return initialized;
   }, [markVerified, resumeHref]);
 
@@ -288,8 +287,6 @@ export default function OnboardingV2Flow() {
     resumedUserRef.current = user.uid;
     void (async () => {
       try {
-        await user.reload();
-        if (user.emailVerified) setVerified(true);
         await prepareExistingAccount(user);
         const stored = await loadStoredProfile(user);
         if (stored.user.accountStatus === "waitlisted") {
@@ -663,10 +660,9 @@ export default function OnboardingV2Flow() {
         setStep(missingStep);
         return;
       }
-      await currentUser.reload();
-      const emailVerified = currentUser.emailVerified;
-      setVerified(emailVerified);
-      if (!emailVerified) {
+      const verifiedSession = await ensureVerifiedAuthSession(currentUser);
+      setVerified(verifiedSession.verified && verifiedSession.tokenReady);
+      if (!verifiedSession.verified || !verifiedSession.tokenReady) {
         setActivated(false);
         setStep("ready");
         return;
@@ -689,6 +685,27 @@ export default function OnboardingV2Flow() {
     } catch (error) {
       console.error("[OnboardingV2] finalisation failed", error);
       setNotice({kind: "error", text: "We couldn’t finish profile setup. Your progress is safe—please try again."});
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openMatchFromReady() {
+    const user = auth.currentUser;
+    if (!user || busy) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const session = await ensureVerifiedAuthSession(user);
+      if (!session.verified || !session.tokenReady) {
+        setVerified(false);
+        setNotice({kind: "info", text: "Verify your email before finding players."});
+        return;
+      }
+      markOnboardingV2EntrySource("ready_primary");
+      router.push("/match");
+    } catch {
+      setNotice({kind: "error", text: "We couldn’t refresh your verified session. Check your connection and try again."});
     } finally {
       setBusy(false);
     }
@@ -759,5 +776,5 @@ export default function OnboardingV2Flow() {
 
   const skillLabel = SKILL_OPTIONS.find((option) => option.value === playerData.skillBand)?.label || "—";
   const readyPhoto = photoThumbURL || photoURL;
-  return <OnboardingV2Shell step="ready" heading={activated ? "You’re ready to play" : "Your profile is ready"} headingRef={headingRef} helper={activated ? "Your TennisMate profile is complete." : "One final step: verify your email to start finding players."} status={status}><div className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><div className="flex items-center gap-4">{readyPhoto ? <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-full"><Image src={readyPhoto} alt="Your profile photo" fill sizes="64px" className="object-cover" unoptimized /></div> : null}<div><p className="text-lg font-semibold text-slate-950">{String(playerData.name || currentUser?.displayName || account.name || "TennisMate player")}</p><p className="text-sm text-slate-600">{skillLabel} · {postcode}</p></div></div><dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="font-semibold text-slate-500">Availability</dt><dd className="mt-1 text-slate-900">{availability.join(", ")}</dd></div>{club.clubStatus === "member" && club.clubName ? <div><dt className="font-semibold text-slate-500">Club</dt><dd className="mt-1 text-slate-900">{club.clubName}</dd></div> : null}</dl></div>{activated ? <div className="mt-6 space-y-3"><button type="button" className={primaryButton} onClick={() => {markOnboardingV2EntrySource("ready_primary"); router.push("/match");}}>Find my first match</button><button type="button" className={secondaryButton} onClick={() => {markOnboardingV2EntrySource("ready_secondary"); router.push("/home");}}>Go to Home</button></div> : <div className="mt-6 space-y-3"><button type="button" className={primaryButton} disabled={busy} onClick={async () => {const isVerified = await checkVerification(true); if (isVerified) await showReady();}}>I’ve verified — continue</button><button type="button" className={secondaryButton} disabled={busy || cooldown > 0} onClick={() => void resendVerification()}>{cooldown > 0 ? `Resend in ${cooldown}s` : "Resend email"}</button><button type="button" className={textButton} onClick={() => move("verify")}>Return to verification instructions</button></div>}</OnboardingV2Shell>;
+  return <OnboardingV2Shell step="ready" heading={activated ? "You’re ready to play" : "Your profile is ready"} headingRef={headingRef} helper={activated ? "Your TennisMate profile is complete." : "One final step: verify your email to start finding players."} status={status}><div className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><div className="flex items-center gap-4">{readyPhoto ? <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-full"><Image src={readyPhoto} alt="Your profile photo" fill sizes="64px" className="object-cover" unoptimized /></div> : null}<div><p className="text-lg font-semibold text-slate-950">{String(playerData.name || currentUser?.displayName || account.name || "TennisMate player")}</p><p className="text-sm text-slate-600">{skillLabel} · {postcode}</p></div></div><dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="font-semibold text-slate-500">Availability</dt><dd className="mt-1 text-slate-900">{availability.join(", ")}</dd></div>{club.clubStatus === "member" && club.clubName ? <div><dt className="font-semibold text-slate-500">Club</dt><dd className="mt-1 text-slate-900">{club.clubName}</dd></div> : null}</dl></div>{activated ? <div className="mt-6 space-y-3"><button type="button" className={primaryButton} disabled={busy} onClick={() => void openMatchFromReady()}>{busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />Checking session…</> : "Find my first match"}</button><button type="button" className={secondaryButton} onClick={() => {markOnboardingV2EntrySource("ready_secondary"); router.push("/home");}}>Go to Home</button></div> : <div className="mt-6 space-y-3"><button type="button" className={primaryButton} disabled={busy} onClick={async () => {const isVerified = await checkVerification(true); if (isVerified) await showReady();}}>I’ve verified — continue</button><button type="button" className={secondaryButton} disabled={busy || cooldown > 0} onClick={() => void resendVerification()}>{cooldown > 0 ? `Resend in ${cooldown}s` : "Resend email"}</button><button type="button" className={textButton} onClick={() => move("verify")}>Return to verification instructions</button></div>}</OnboardingV2Shell>;
 }

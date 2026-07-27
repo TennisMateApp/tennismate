@@ -664,6 +664,7 @@ export default function MatchPage() {
   const [rawMatches, setRawMatches] = useState<Player[]>([]);
   const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [recommendationsLoadError, setRecommendationsLoadError] = useState(false);
   const [blockedMatchUserIds, setBlockedMatchUserIds] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<string>("score");
   const PAGE_SIZE = 10;
@@ -1463,6 +1464,7 @@ const refreshMatches = useCallback(async () => {
   refreshingRef.current = true;
 
   setRefreshing(true);
+  setRecommendationsLoadError(false);
 
   try {
     // 1) Load my profile
@@ -1627,6 +1629,7 @@ const refreshMatches = useCallback(async () => {
   } catch (error) {
     console.warn("[MATCH] refreshMatches failed:", error);
     setRawMatches([]);
+    setRecommendationsLoadError(true);
   } finally {
     refreshingRef.current = false;
     setRefreshing(false);
@@ -3308,6 +3311,7 @@ if (isDesktop) {
 
             <DesktopMatchPage
   loading={loading}
+  recommendationsLoadError={recommendationsLoadError}
   myProfileHidden={myProfileHidden}
   sortedMatches={sortedMatches}
   visibleMatches={visibleMatches}
@@ -4372,6 +4376,11 @@ return (
         ))}
       </ul>
     )}
+  </div>
+) : recommendationsLoadError ? (
+  <div className="rounded-3xl border border-red-200 bg-white px-5 py-8 text-center shadow-sm" role="alert">
+    <p className="text-sm font-extrabold text-slate-950">We couldn’t load player recommendations.</p>
+    <p className="mt-2 text-sm font-semibold text-slate-600">Please refresh and try again.</p>
   </div>
 ) : sortedMatches.length === 0 ? (
   clubEmptyState ? (

@@ -54,8 +54,8 @@ test("removed legacy state is neither read nor written by the shared runtime hoo
   assert.doesNotMatch(progressSource, /setDoc|patchOnboarding/);
 });
 
-test("Ready actions route directly and set only a non-sensitive session source signal", () => {
-  assert.match(readySource, /markOnboardingV2EntrySource\("ready_primary"\); router\.push\("\/match"\)/);
+test("Ready actions route after verified token readiness and set only a non-sensitive session source signal", () => {
+  assert.match(readySource, /await ensureVerifiedAuthSession\(user\)[\s\S]*markOnboardingV2EntrySource\("ready_primary"\);[\s\S]*router\.push\("\/match"\)/);
   assert.match(readySource, /markOnboardingV2EntrySource\("ready_secondary"\); router\.push\("\/home"\)/);
   assert.match(readySource, /\{activated \? <div/);
   assert.doesNotMatch(readySource, /router\.push\("\/home"\)[\s\S]*router\.push\("\/match"\)/);

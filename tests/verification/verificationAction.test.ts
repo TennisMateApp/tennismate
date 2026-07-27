@@ -138,7 +138,7 @@ test("legacy /verified links remain understandable and code links use the canoni
 test("the original onboarding session still detects verification on focus and foreground", () => {
   assert.match(onboardingSource, /window\.addEventListener\("focus"/);
   assert.match(onboardingSource, /visibilitychange/);
-  assert.match(onboardingSource, /await user\.reload\(\)/);
+  assert.match(onboardingSource, /await ensureVerifiedAuthSession\(user\)/);
   assert.match(onboardingSource, /I’ve verified my email/);
   assert.match(onboardingSource, /Continue profile setup/);
 });
