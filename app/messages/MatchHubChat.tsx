@@ -31,6 +31,12 @@ import { trackEvent as trackAnalyticsEvent } from "@/lib/analytics";
 import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 import { shouldTrackRematchInviteAccepted } from "@/lib/rematchAnalytics";
 import {
+  fallbackScrollTopFromBottomDistance,
+  shouldSuppressIOSKeyboardScroll,
+  viewportMeasurementsEqual,
+  type IOSKeyboardScrollSource,
+} from "@/lib/iosChatScrollTransition";
+import {
   createRematchInviteFromPrevious,
   dismissRematchPrompt,
   findEligibleRematchInvite,
@@ -192,6 +198,7 @@ const DEFAULT_SYSTEM_AVATAR = "/images/default-avatar.jpg";
 
 type MatchHubTab = "chat" | "matches" | "profile";
 type MatchHubActionSheet = "lastMatch" | null;
+type ChatScrollDiagnosticSource = IOSKeyboardScrollSource;
 
 function isIOSViewportPlatform() {
   if (typeof window === "undefined") return false;
@@ -1515,10 +1522,31 @@ const activeCourt = selectedCourt || suggestedCourt || null;
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
+  const chatRootRef = useRef<HTMLDivElement>(null);
+  const diagnosticEventIdRef = useRef(0);
+  const diagnosticUiStateRef = useRef({ isComposerFocused, isTypingCompact });
+  const previousViewportStateRef = useRef({ vvBottomInset, mobileViewportHeight, inputBarH });
+  const iosKeyboardTransitionActiveRef = useRef(false);
+  const iosKeyboardTransitionPhaseRef = useRef<"opening" | "closing" | null>(null);
+  const iosKeyboardAnchorRef = useRef<{
+    element: HTMLElement | null;
+    offset: number | null;
+    distanceFromBottom: number;
+    nearBottom: boolean;
+    scrollTop: number;
+    scrollHeight: number;
+    clientHeight: number;
+  } | null>(null);
+  const iosKeyboardOuterScrollRef = useRef({ x: 0, y: 0 });
+  const iosKeyboardSettleTimerRef = useRef<number | null>(null);
+  const iosKeyboardRestoreRafRef = useRef<number | null>(null);
+  const iosKeyboardLastMeasurementsRef = useRef<readonly number[] | null>(null);
+  diagnosticUiStateRef.current = { isComposerFocused, isTypingCompact };
 
   // --- auto-scroll helpers ---
 const hasInitialScrolledRef = useRef(false);
 const pendingAutoScrollRef = useRef<"auto" | "smooth" | null>(null);
+const pendingAutoScrollSourceRef = useRef<"snapshot-update" | "post-send" | null>(null);
 const forceNextSnapshotScrollRef = useRef(false);
 const wasNearBottomOnTabLeaveRef = useRef(true);
 const chatScrollTopRef = useRef(0);
@@ -1531,13 +1559,252 @@ const isNearBottom = () => {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
 };
 
-const scrollToBottom = (smooth = false) => {
+const chatDiagnosticEnabled =
+  process.env.NODE_ENV !== "production" &&
+  typeof window !== "undefined" &&
+  isIOSViewportPlatform();
+
+const describeDiagnosticElement = (element: Element | null) => {
+  if (!element) return null;
+  if (element === inputRef.current) return "textarea:composer";
+  if (element === listRef.current) return "div:message-list";
+  return element.tagName.toLowerCase();
+};
+
+const logChatDiagnostic = (event: string, details: Record<string, unknown> = {}) => {
+  if (!chatDiagnosticEnabled) return;
+
+  const list = listRef.current;
+  const vv = window.visualViewport;
+  const maxScrollTop = list ? Math.max(0, list.scrollHeight - list.clientHeight) : null;
+  const keyboardBottomInset = vv
+    ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop))
+    : null;
+
+  console.debug("[TM_IOS_CHAT_SCROLL]", {
+    eventId: ++diagnosticEventIdRef.current,
+    event,
+    timestamp: performance.now(),
+    scrollTop: list?.scrollTop ?? null,
+    scrollHeight: list?.scrollHeight ?? null,
+    clientHeight: list?.clientHeight ?? null,
+    maxScrollTop,
+    nearBottom: list
+      ? list.scrollHeight - list.scrollTop - list.clientHeight < 120
+      : null,
+    activeElement: describeDiagnosticElement(document.activeElement),
+    composerFocusedState: diagnosticUiStateRef.current.isComposerFocused,
+    compactModeState: diagnosticUiStateRef.current.isTypingCompact,
+    windowInnerHeight: window.innerHeight,
+    documentClientHeight: document.documentElement.clientHeight,
+    visualViewportHeight: vv?.height ?? null,
+    visualViewportOffsetTop: vv?.offsetTop ?? null,
+    visualViewportPageTop: vv?.pageTop ?? null,
+    keyboardBottomInset,
+    rootChatHeight: chatRootRef.current?.getBoundingClientRect().height ?? null,
+    composerHeight: inputBarRef.current?.getBoundingClientRect().height ?? null,
+    windowScrollY: window.scrollY,
+    ...details,
+  });
+};
+
+const clearIOSKeyboardTransitionScheduling = () => {
+  if (iosKeyboardSettleTimerRef.current !== null) {
+    window.clearTimeout(iosKeyboardSettleTimerRef.current);
+    iosKeyboardSettleTimerRef.current = null;
+  }
+  if (iosKeyboardRestoreRafRef.current !== null) {
+    cancelAnimationFrame(iosKeyboardRestoreRafRef.current);
+    iosKeyboardRestoreRafRef.current = null;
+  }
+};
+
+const measureIOSKeyboardViewport = (): readonly number[] => {
+  const vv = window.visualViewport;
+  return [
+    vv?.height ?? window.innerHeight,
+    vv?.offsetTop ?? 0,
+    chatRootRef.current?.getBoundingClientRect().height ?? 0,
+    listRef.current?.clientHeight ?? 0,
+    inputBarRef.current?.getBoundingClientRect().height ?? 0,
+  ];
+};
+
+const captureIOSKeyboardAnchor = () => {
+  const list = listRef.current;
+  if (!list) return null;
+
+  const listRect = list.getBoundingClientRect();
+  const anchorElement = Array.from(
+    list.querySelectorAll<HTMLElement>("[data-chat-scroll-anchor]"),
+  ).find((element) => element.getBoundingClientRect().bottom > listRect.top) ?? null;
+  const anchor = {
+    element: anchorElement,
+    offset: anchorElement ? anchorElement.getBoundingClientRect().top - listRect.top : null,
+    distanceFromBottom: Math.max(0, list.scrollHeight - list.scrollTop - list.clientHeight),
+    nearBottom: list.scrollHeight - list.scrollTop - list.clientHeight < 120,
+    scrollTop: list.scrollTop,
+    scrollHeight: list.scrollHeight,
+    clientHeight: list.clientHeight,
+  };
+  iosKeyboardAnchorRef.current = anchor;
+  iosKeyboardOuterScrollRef.current = { x: window.scrollX, y: window.scrollY };
+  logChatDiagnostic("anchor-captured", {
+    source: "anchor-captured",
+    capturedScrollTop: anchor.scrollTop,
+    capturedScrollHeight: anchor.scrollHeight,
+    capturedClientHeight: anchor.clientHeight,
+    capturedDistanceFromBottom: anchor.distanceFromBottom,
+    capturedNearBottom: anchor.nearBottom,
+    capturedElementAnchor: Boolean(anchor.element),
+    capturedElementOffset: anchor.offset,
+  });
+  return anchor;
+};
+
+const finishIOSKeyboardTransition = () => {
+  clearIOSKeyboardTransitionScheduling();
+  iosKeyboardTransitionActiveRef.current = false;
+  iosKeyboardTransitionPhaseRef.current = null;
+  iosKeyboardAnchorRef.current = null;
+  iosKeyboardLastMeasurementsRef.current = null;
+};
+
+const restoreIOSKeyboardAnchor = () => {
+  const list = listRef.current;
+  const anchor = iosKeyboardAnchorRef.current;
+  if (!iosKeyboardTransitionActiveRef.current || !list || !anchor) {
+    finishIOSKeyboardTransition();
+    return;
+  }
+
+  const outer = iosKeyboardOuterScrollRef.current;
+  if (window.scrollX !== outer.x || window.scrollY !== outer.y) {
+    window.scrollTo({ left: outer.x, top: outer.y, behavior: "auto" });
+    logChatDiagnostic("outer-document-scroll-restored", {
+      source: "outer-document-scroll-restored",
+      restoredOuterX: outer.x,
+      restoredOuterY: outer.y,
+    });
+  }
+
+  if (anchor.nearBottom) {
+    logChatDiagnostic("scroll-before", { source: "bottom-restored" });
+    list.scrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+    logChatDiagnostic("bottom-restored", { source: "bottom-restored" });
+    logChatDiagnostic("scroll-after", { source: "bottom-restored" });
+    finishIOSKeyboardTransition();
+    return;
+  }
+
+  if (anchor.element?.isConnected && anchor.offset !== null) {
+    const listTop = list.getBoundingClientRect().top;
+    const currentOffset = anchor.element.getBoundingClientRect().top - listTop;
+    logChatDiagnostic("scroll-before", { source: "anchor-restored" });
+    list.scrollTop += currentOffset - anchor.offset;
+    logChatDiagnostic("anchor-restored", {
+      source: "anchor-restored",
+      requestedOffset: anchor.offset,
+      offsetBeforeRestore: currentOffset,
+    });
+    logChatDiagnostic("scroll-after", { source: "anchor-restored" });
+    finishIOSKeyboardTransition();
+    return;
+  }
+
+  const fallbackScrollTop = fallbackScrollTopFromBottomDistance(
+    list.scrollHeight,
+    list.clientHeight,
+    anchor.distanceFromBottom,
+  );
+  logChatDiagnostic("scroll-before", { source: "fallback-restoration", fallbackScrollTop });
+  list.scrollTop = fallbackScrollTop;
+  logChatDiagnostic("fallback-restoration-used", {
+    source: "fallback-restoration-used",
+    capturedDistanceFromBottom: anchor.distanceFromBottom,
+  });
+  logChatDiagnostic("scroll-after", { source: "fallback-restoration", fallbackScrollTop });
+  finishIOSKeyboardTransition();
+};
+
+const scheduleIOSKeyboardSettleCheck = (source: string) => {
+  if (!iosKeyboardTransitionActiveRef.current) return;
+  if (iosKeyboardRestoreRafRef.current !== null) {
+    cancelAnimationFrame(iosKeyboardRestoreRafRef.current);
+    iosKeyboardRestoreRafRef.current = null;
+  }
+  if (iosKeyboardSettleTimerRef.current !== null) {
+    window.clearTimeout(iosKeyboardSettleTimerRef.current);
+  }
+  iosKeyboardLastMeasurementsRef.current = measureIOSKeyboardViewport();
+  logChatDiagnostic("keyboard-transition-measurement", { source });
+  iosKeyboardSettleTimerRef.current = window.setTimeout(() => {
+    iosKeyboardSettleTimerRef.current = null;
+    if (!iosKeyboardTransitionActiveRef.current) return;
+    const measurements = measureIOSKeyboardViewport();
+    const previous = iosKeyboardLastMeasurementsRef.current;
+    if (!previous || !viewportMeasurementsEqual(previous, measurements)) {
+      iosKeyboardLastMeasurementsRef.current = measurements;
+      scheduleIOSKeyboardSettleCheck("measurement-still-changing");
+      return;
+    }
+    logChatDiagnostic("viewport-settled", {
+      source: "viewport-settled",
+      transitionPhase: iosKeyboardTransitionPhaseRef.current,
+    });
+    iosKeyboardRestoreRafRef.current = requestAnimationFrame(() => {
+      iosKeyboardRestoreRafRef.current = null;
+      restoreIOSKeyboardAnchor();
+    });
+  }, 150);
+};
+
+const beginIOSKeyboardTransition = (phase: "opening" | "closing") => {
+  if (!isIOSViewportPlatform() || embeddedDesktop) return;
+  if (iosKeyboardTransitionActiveRef.current && iosKeyboardTransitionPhaseRef.current === phase) {
+    scheduleIOSKeyboardSettleCheck(`${phase}-continued`);
+    return;
+  }
+  clearIOSKeyboardTransitionScheduling();
+  if (!captureIOSKeyboardAnchor()) return;
+  iosKeyboardTransitionActiveRef.current = true;
+  iosKeyboardTransitionPhaseRef.current = phase;
+  iosKeyboardLastMeasurementsRef.current = measureIOSKeyboardViewport();
+  logChatDiagnostic("keyboard-transition-started", {
+    source: "keyboard-transition-started",
+    transitionPhase: phase,
+  });
+  scheduleIOSKeyboardSettleCheck(`${phase}-started`);
+};
+
+const scrollToBottom = (smooth = false, source: ChatScrollDiagnosticSource) => {
   const el = listRef.current;
   if (!el) return;
+  if (shouldSuppressIOSKeyboardScroll(
+    isIOSViewportPlatform(),
+    iosKeyboardTransitionActiveRef.current,
+    source,
+  )) {
+    logChatDiagnostic("automatic-scroll-suppressed", {
+      source,
+      transitionPhase: iosKeyboardTransitionPhaseRef.current,
+    });
+    return;
+  }
+  logChatDiagnostic("scroll-before", { source, behavior: smooth ? "smooth" : "auto" });
   el.scrollTo({
     top: el.scrollHeight,
     behavior: smooth ? "smooth" : "auto",
   });
+  logChatDiagnostic("scroll-after", { source, behavior: smooth ? "smooth" : "auto" });
+};
+
+const restoreChatScrollTop = (scrollTop: number) => {
+  const el = listRef.current;
+  if (!el) return;
+  logChatDiagnostic("scroll-before", { source: "tab-restore", requestedScrollTop: scrollTop });
+  el.scrollTop = scrollTop;
+  logChatDiagnostic("scroll-after", { source: "tab-restore", requestedScrollTop: scrollTop });
 };
 
 const shouldAutoFocusComposer = () => embeddedDesktop || !isMobileViewport();
@@ -1545,11 +1812,13 @@ const shouldAutoFocusComposer = () => embeddedDesktop || !isMobileViewport();
 useEffect(() => {
   hasInitialScrolledRef.current = false;
   pendingAutoScrollRef.current = null;
+  pendingAutoScrollSourceRef.current = null;
   forceNextSnapshotScrollRef.current = false;
   wasNearBottomOnTabLeaveRef.current = true;
   chatScrollTopRef.current = 0;
   pendingChatTabReturnRef.current = false;
   setShowScrollDown(false);
+  return () => finishIOSKeyboardTransition();
 }, [conversationID]);
 
 useEffect(() => {
@@ -2157,21 +2426,27 @@ setShowMatchPrompt(
     const el = inputBarRef.current;
     if (!el) return;
 
-    const setH = () => {
+    const setH = (source: "initial-measure" | "input-bar-resize" | "window-resize") => {
+      logChatDiagnostic("input-bar-measure", {
+        source,
+        measuredComposerHeight: el.clientHeight || 56,
+      });
       setInputBarH(el.clientHeight || 56);
       setInputBarMeasured(true);
+      scheduleIOSKeyboardSettleCheck(source);
     };
-    setH();
+    setH("initial-measure");
 
     let ro: ResizeObserver | null = null;
     if ("ResizeObserver" in window) {
-      ro = new ResizeObserver(setH);
+      ro = new ResizeObserver(() => setH("input-bar-resize"));
       ro.observe(el);
     }
-    window.addEventListener("resize", setH);
+    const onWindowResize = () => setH("window-resize");
+    window.addEventListener("resize", onWindowResize);
     return () => {
       ro?.disconnect();
-      window.removeEventListener("resize", setH);
+      window.removeEventListener("resize", onWindowResize);
     };
   }, []);
 
@@ -2191,12 +2466,31 @@ setShowMatchPrompt(
     return;
   }
 
-  const computeInset = () => {
+  const computeInset = (event?: Event) => {
     const visibleHeight = Math.max(320, vv.height);
     const topInset = Math.max(0, vv.offsetTop);
     const keyboardDelta = Math.max(0, window.innerHeight - visibleHeight);
     const bottomInset = Math.max(0, window.innerHeight - (visibleHeight + vv.offsetTop));
     const keyboardVisible = keyboardDelta > 80;
+
+    logChatDiagnostic("viewport-event", {
+      source: event?.type === "resize" && event.currentTarget === window
+        ? "window.resize"
+        : event?.type
+          ? `visualViewport.${event.type}`
+          : "listener-init",
+      nextVisibleHeight: visibleHeight,
+      nextTopInset: topInset,
+      nextBottomInset: bottomInset,
+      nextKeyboardVisible: keyboardVisible,
+    });
+    scheduleIOSKeyboardSettleCheck(
+      event?.type === "resize" && event.currentTarget === window
+        ? "window.resize"
+        : event?.type
+          ? `visualViewport.${event.type}`
+          : "listener-init",
+    );
 
     // iOS Safari/PWA keeps layout viewport and visual viewport out of sync while the
     // keyboard animates. On iOS, visualViewport.height is the reliable visible area.
@@ -2241,11 +2535,77 @@ setShowMatchPrompt(
   // If the textarea is focused (keyboard up), always keep latest visible.
   // Otherwise, only stick if user was already near bottom.
   if (document.activeElement === inputRef.current) {
-    scrollToBottom(false);
+    const previous = previousViewportStateRef.current;
+    const source = inputBarH !== previous.inputBarH ? "input-bar-resize" : "viewport-change";
+    scrollToBottom(false, source);
   } else if (isNearBottom()) {
-    scrollToBottom(false);
+    const previous = previousViewportStateRef.current;
+    const source = inputBarH !== previous.inputBarH ? "input-bar-resize" : "viewport-change";
+    scrollToBottom(false, source);
   }
+  previousViewportStateRef.current = { vvBottomInset, mobileViewportHeight, inputBarH };
 }, [vvBottomInset, mobileViewportHeight, inputBarH]);
+
+useEffect(() => {
+  logChatDiagnostic("root-height-state-committed", {
+    mobileViewportHeightState: mobileViewportHeight,
+    vvTopInsetState: vvTopInset,
+    vvBottomInsetState: vvBottomInset,
+    inputBarHeightState: inputBarH,
+    keyboardOpenState: isKeyboardOpen,
+  });
+  scheduleIOSKeyboardSettleCheck("root-height-state-committed");
+}, [inputBarH, isKeyboardOpen, mobileViewportHeight, vvBottomInset, vvTopInset]);
+
+useEffect(() => {
+  if (!isIOSViewportPlatform() || embeddedDesktop) return;
+
+  const restoreOuterDocumentScroll = () => {
+    if (!iosKeyboardTransitionActiveRef.current) return;
+    const outer = iosKeyboardOuterScrollRef.current;
+    if (window.scrollX === outer.x && window.scrollY === outer.y) return;
+    window.scrollTo({ left: outer.x, top: outer.y, behavior: "auto" });
+    logChatDiagnostic("outer-document-scroll-restored", {
+      source: "outer-document-scroll-restored",
+      restoredOuterX: outer.x,
+      restoredOuterY: outer.y,
+    });
+  };
+
+  window.addEventListener("scroll", restoreOuterDocumentScroll, { passive: true });
+  document.addEventListener("scroll", restoreOuterDocumentScroll, { capture: true, passive: true });
+  return () => {
+    window.removeEventListener("scroll", restoreOuterDocumentScroll);
+    document.removeEventListener("scroll", restoreOuterDocumentScroll, true);
+  };
+}, [embeddedDesktop]);
+
+useEffect(() => () => finishIOSKeyboardTransition(), []);
+
+useEffect(() => {
+  if (!chatDiagnosticEnabled) return;
+
+  const onWindowScroll = () => {
+    logChatDiagnostic("window-scroll", { source: "native-or-indirect-focus-scroll" });
+  };
+  const onDocumentScroll = (event: Event) => {
+    logChatDiagnostic("document-scroll", {
+      source: "native-or-indirect-focus-scroll",
+      scrollTarget: event.target instanceof Element
+        ? describeDiagnosticElement(event.target)
+        : event.target === document
+          ? "document"
+          : "unknown",
+    });
+  };
+
+  window.addEventListener("scroll", onWindowScroll, { passive: true });
+  document.addEventListener("scroll", onDocumentScroll, { capture: true, passive: true });
+  return () => {
+    window.removeEventListener("scroll", onWindowScroll);
+    document.removeEventListener("scroll", onDocumentScroll, true);
+  };
+}, [chatDiagnosticEnabled]);
 
 
   // ===== LOAD PARTICIPANT PROFILES (TOP-LEVEL EFFECT) =====
@@ -2588,13 +2948,21 @@ setShowMatchPrompt(
 const unsub = onSnapshot(q, async (snap) => {
   const msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
+  const forcedBySend = forceNextSnapshotScrollRef.current;
   const shouldStick =
-    forceNextSnapshotScrollRef.current ||
+    forcedBySend ||
     (hasInitialScrolledRef.current && isNearBottom());
   forceNextSnapshotScrollRef.current = false;
   setMessages(msgs);
 
-  if (shouldStick) pendingAutoScrollRef.current = "smooth";
+  if (shouldStick) {
+    pendingAutoScrollRef.current = "smooth";
+    pendingAutoScrollSourceRef.current = forcedBySend ? "post-send" : "snapshot-update";
+    logChatDiagnostic("snapshot-auto-scroll-queued", {
+      source: pendingAutoScrollSourceRef.current,
+      messageCount: msgs.length,
+    });
+  }
 
   if (!user) return;
 
@@ -3259,9 +3627,9 @@ useEffect(() => {
 }, [embeddedDesktop]);
 
 useEffect(() => {
+  logChatDiagnostic("compact-mode-transition", { nextCompactModeState: isTypingCompact });
   if (!isTypingCompact) return;
-
-  const raf = requestAnimationFrame(() => scrollToBottom(false));
+  const raf = requestAnimationFrame(() => scrollToBottom(false, "compact-mode"));
   return () => cancelAnimationFrame(raf);
 }, [isTypingCompact]);
 
@@ -3394,10 +3762,10 @@ useEffect(() => {
 
     raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(() => {
-        scrollToBottom(false);
+        scrollToBottom(false, "initial-position");
         hasInitialScrolledRef.current = true;
         setShowScrollDown(false);
-        timer = window.setTimeout(() => scrollToBottom(false), 80);
+        timer = window.setTimeout(() => scrollToBottom(false, "initial-position-retry"), 80);
       });
     });
 
@@ -3420,9 +3788,11 @@ useEffect(() => {
     const pending = pendingAutoScrollRef.current;
     if (!pending) return;
     pendingAutoScrollRef.current = null;
+    const source = pendingAutoScrollSourceRef.current ?? "snapshot-update";
+    pendingAutoScrollSourceRef.current = null;
 
     const raf = requestAnimationFrame(() => {
-      scrollToBottom(pending === "smooth");
+      scrollToBottom(pending === "smooth", source);
     });
 
     return () => cancelAnimationFrame(raf);
@@ -3444,10 +3814,10 @@ useEffect(() => {
         if (!el) return;
 
         if (wasNearBottomOnTabLeaveRef.current) {
-          scrollToBottom(false);
+          scrollToBottom(false, "tab-restore");
           setShowScrollDown(false);
         } else {
-          el.scrollTop = chatScrollTopRef.current;
+          restoreChatScrollTop(chatScrollTopRef.current);
           setShowScrollDown(true);
         }
       });
@@ -3462,6 +3832,7 @@ useEffect(() => {
   // ===== RENDER =====
   return (
    <div
+    ref={chatRootRef}
     className={
       embeddedDesktop
         ? "flex h-full min-h-0 flex-col bg-white overflow-hidden"
@@ -3899,6 +4270,7 @@ useEffect(() => {
   onScroll={() => {
     const el = listRef.current;
     if (!el) return;
+    logChatDiagnostic("message-list-scroll", { source: "scroll-event" });
     chatScrollTopRef.current = el.scrollTop;
     const nearBottom = isNearBottom();
     wasNearBottomOnTabLeaveRef.current = nearBottom;
@@ -3913,7 +4285,7 @@ useEffect(() => {
         // ... paste your existing row render EXACTLY as-is ...
         if (row.type === "day") {
           return (
-            <div key={row.key} className="my-3 text-center">
+            <div key={row.key} data-chat-scroll-anchor className="my-3 text-center">
               <span className="inline-block px-3 py-1 text-[12px] font-extrabold tracking-[0.22em]"
   style={{ color: "rgba(15,23,42,0.35)" }}
 >
@@ -3926,7 +4298,7 @@ useEffect(() => {
 
         if (row.type === "unread") {
           return (
-            <div key={row.key} className="my-2 flex items-center gap-3">
+            <div key={row.key} data-chat-scroll-anchor className="my-2 flex items-center gap-3">
               <div className="h-px flex-1 bg-red-200" />
               <span className="text-[11px] font-medium text-red-600">New</span>
               <div className="h-px flex-1 bg-red-200" />
@@ -3950,6 +4322,7 @@ const avatarURL = system
         return (
           <div
   key={row.key}
+  data-chat-scroll-anchor
   className={[
     "mb-1.5 flex",
     system ? "justify-center" : isOther ? "justify-start" : "justify-end",
@@ -4101,7 +4474,7 @@ style={{
       {/* Scroll-to-bottom FAB */}
 {activeTab === "chat" && showScrollDown && (
   <button
-    onClick={() => scrollToBottom(true)}
+    onClick={() => scrollToBottom(true, "jump-to-latest")}
     className="fixed right-4 rounded-full bg-white border shadow px-3 py-1.5 text-xs text-gray-700"
     style={{ bottom: inputBarH + 16 }}
   >
@@ -4163,9 +4536,19 @@ style={{
         className="w-full resize-none bg-transparent outline-none text-[16px] leading-snug"
         placeholder="Type a message..."
         value={input}
+        onPointerDown={(event) => {
+          beginIOSKeyboardTransition("opening");
+          logChatDiagnostic("composer-pointer-down", { pointerType: event.pointerType });
+        }}
+        onTouchStart={() => {
+          beginIOSKeyboardTransition("opening");
+          logChatDiagnostic("composer-touch-start");
+        }}
         onFocus={() => {
+          beginIOSKeyboardTransition("opening");
+          logChatDiagnostic("composer-focus", { nextComposerFocusedState: true });
           setIsComposerFocused(true);
-          requestAnimationFrame(() => scrollToBottom(false));
+          requestAnimationFrame(() => scrollToBottom(false, "composer-focus"));
         }}
         onChange={(e) => {
           setInput(e.target.value);
@@ -4178,6 +4561,8 @@ style={{
           }
         }}
         onBlur={() => {
+          beginIOSKeyboardTransition("closing");
+          logChatDiagnostic("composer-blur", { nextComposerFocusedState: false });
           setIsComposerFocused(false);
           updateTypingStatus(false);
         }}
