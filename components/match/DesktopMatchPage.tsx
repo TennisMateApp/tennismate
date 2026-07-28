@@ -4,9 +4,11 @@ import Image from "next/image";
 import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import ClubDiscoveryFilter from "@/components/match/ClubDiscoveryFilter";
+import MatchDistanceFilter from "@/components/match/MatchDistanceFilter";
 import MatchClubAffiliation from "@/components/match/MatchClubAffiliation";
 import { clubFilterEmptyState, type ClubFilter, type ClubMembershipLike } from "@/lib/matchClubDiscovery";
 import { CalendarDays, MapPin, X } from "lucide-react";
+import type { MatchDistanceKm } from "@/lib/matchDistance";
 
 const TM = {
   forest: "#0B3D2E",
@@ -131,6 +133,8 @@ setActivityFilter: (v: ActivityFilter) => void;
   clubFilter: ClubFilter;
   currentPlayer: ClubMembershipLike | null;
   setClubFilter: (v: ClubFilter) => void;
+  matchDistanceKm: MatchDistanceKm;
+  setMatchDistanceKm: (v: MatchDistanceKm) => void;
 
   hideContacted: boolean;
   setHideContacted: (v: boolean) => void;
@@ -198,6 +202,8 @@ setActivityFilter: (v: ActivityFilter) => void;
     clubFilter,
     currentPlayer,
     setClubFilter,
+    matchDistanceKm,
+    setMatchDistanceKm,
     hideContacted,
     setHideContacted,
     onResetFilters,
@@ -370,6 +376,11 @@ const handleInvite = useCallback(
 
             {/* GRID */}
             <main className="mt-6">
+              {refreshing && visibleMatches.length > 0 ? (
+                <div className="mb-3 text-xs font-semibold text-emerald-950/60" role="status" aria-live="polite">
+                  Updating matches…
+                </div>
+              ) : null}
               <div className="mb-5 inline-flex rounded-full bg-white p-1 ring-1 ring-black/10">
                 <button
                   type="button"
@@ -735,6 +746,11 @@ const handleInvite = useCallback(
                 value={clubFilter}
                 currentPlayer={currentPlayer}
                 onChange={setClubFilter}
+              />
+
+              <MatchDistanceFilter
+                value={matchDistanceKm}
+                onChange={setMatchDistanceKm}
               />
 
               <div>

@@ -2,6 +2,7 @@
 
 import { httpsCallable } from "firebase/functions";
 import { getFunctionsClient } from "@/lib/getFunctionsClient";
+import { isMatchDistanceKm } from "@/lib/matchDistance";
 
 export type NearbyPlayerResponseItem = {
   uid: string;
@@ -37,6 +38,9 @@ export type GetNearbyPlayersResponse = {
 export async function getNearbyPlayers(
   request: GetNearbyPlayersRequest
 ): Promise<GetNearbyPlayersResponse> {
+  if (request.radiusKm != null && !isMatchDistanceKm(request.radiusKm)) {
+    throw new RangeError("Unsupported Match Me distance.");
+  }
   const fn = httpsCallable<GetNearbyPlayersRequest, GetNearbyPlayersResponse>(
     getFunctionsClient(),
     "getNearbyPlayers"

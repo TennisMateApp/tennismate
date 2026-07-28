@@ -41,6 +41,7 @@ import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
 import { useOnboardingProgress } from "@/lib/useOnboardingProgress";
 import NotificationPrompt from "@/components/notifications/NotificationPrompt";
 import ClubDiscoveryFilter from "@/components/match/ClubDiscoveryFilter";
+import MatchDistanceFilter from "@/components/match/MatchDistanceFilter";
 import MatchClubAffiliation from "@/components/match/MatchClubAffiliation";
 import { loadUniqueClubs } from "@/lib/clubs";
 import {
@@ -60,6 +61,11 @@ import {
 } from "@/lib/analytics";
 import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 import { profileRecoveryReady } from "@/lib/profileReadiness";
+import {
+  DEFAULT_MATCH_DISTANCE_KM,
+  normalizeMatchDistanceKm,
+  type MatchDistanceKm,
+} from "@/lib/matchDistance";
 import MatchMeContextualIntro from "@/components/onboarding-v2/MatchMeContextualIntro";
 import {
   consumeOnboardingV2EntrySource,
@@ -668,10 +674,11 @@ export default function MatchPage() {
   const [sortBy, setSortBy] = useState<string>("score");
   const PAGE_SIZE = 10;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const MAX_DISTANCE_KM = 50; // hard cutoff to prevent interstate matches
   const [matchMode, setMatchMode] = useState<"auto"|"skill"|"utr">("auto");
   const [myProfileHidden, setMyProfileHidden] = useState(false);
-  const refreshingRef = useRef(false);
+  const matchRequestVersionRef = useRef(0);
+  const lastUpdatedRef = useRef<number | null>(null);
+  const initialMatchLoadCompleteRef = useRef(false);
   const matchPageTrackedRef = useRef(false);
   const [profileOpenId, setProfileOpenId] = useState<string | null>(null);
   const [recommendedMatches, setRecommendedMatches] = useState<RecommendedMatchPlayer[]>([]);
@@ -722,6 +729,9 @@ const [clubFilter, setClubFilterState] = useState<ClubFilter>(ANY_CLUB_FILTER);
 
 const router = useRouter();
 const params = useSearchParams();
+const [matchDistanceKm, setMatchDistanceKmState] = useState<MatchDistanceKm>(() =>
+  normalizeMatchDistanceKm(params.get("distance"))
+);
 
 const setQuery = (key: string, value?: string) => {
   const p = new URLSearchParams(params.toString());
@@ -732,6 +742,12 @@ const setQuery = (key: string, value?: string) => {
 
 const setClubFilter = (next: ClubFilter) => {
   setClubFilterState(next);
+  void trackAnalyticsEvent(
+    next.mode === "any"
+      ? ANALYTICS_EVENTS.MATCH_CLUB_FILTER_CLEARED
+      : ANALYTICS_EVENTS.MATCH_CLUB_FILTER_SELECTED,
+    { club_filter_mode: next.mode }
+  );
   const p = new URLSearchParams(params.toString());
   const urlValue = clubFilterUrlValue(next);
   p.delete("club");
@@ -740,6 +756,16 @@ const setClubFilter = (next: ClubFilter) => {
   if (urlValue.clubId) p.set("clubId", urlValue.clubId);
   const queryString = p.toString();
   router.replace(queryString ? `?${queryString}` : "/match", { scroll: false });
+};
+
+const setMatchDistance = (next: MatchDistanceKm) => {
+  setMatchDistanceKmState(next);
+  const p = new URLSearchParams(params.toString());
+  if (next === DEFAULT_MATCH_DISTANCE_KM) p.delete("distance");
+  else p.set("distance", String(next));
+  const queryString = p.toString();
+  router.replace(queryString ? `?${queryString}` : "/match", { scroll: false });
+  void trackAnalyticsEvent(ANALYTICS_EVENTS.MATCH_DISTANCE_FILTER_CHANGED, { radius_km: next });
 };
 
 const clearRecommendedMatchQuery = () => {
@@ -756,7 +782,6 @@ const [justVerified, setJustVerified] = useState(false);
 const [hideContacted, setHideContacted] = useState(true);
 
 const [refreshing, setRefreshing] = useState(false);
-const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 const [dismissedPlayerIds, setDismissedPlayerIds] = useState<Set<string>>(new Set());
 const [recommendationImpressions, setRecommendationImpressions] = useState<Record<string, MatchRecommendationImpression>>({});
 const recommendationImpressionWriteRef = useRef<Set<string>>(new Set());
@@ -800,6 +825,7 @@ const filtersActive =
   genderFilter !== "" ||
   activityFilter !== "" ||
   clubFilter.mode !== "any" ||
+  matchDistanceKm !== DEFAULT_MATCH_DISTANCE_KM ||
   hideContacted !== true;
 
   useEffect(() => {
@@ -1450,17 +1476,19 @@ const loadBlockedMatchUserIds = useCallback(async (currentUid: string) => {
   return blocked;
 }, []);
 
-const refreshMatches = useCallback(async () => {
+const refreshMatches = useCallback(async (
+  options: { force?: boolean; radiusKm?: MatchDistanceKm } = {}
+) => {
   if (!auth.currentUser) return;
 
   // âœ… throttle refresh frequency (do this BEFORE locking the ref)
-  if (lastUpdated && Date.now() - lastUpdated < REFRESH_MIN_MS) {
+  if (!options.force && lastUpdatedRef.current && Date.now() - lastUpdatedRef.current < REFRESH_MIN_MS) {
     return;
   }
 
   // âœ… prevent duplicate refresh calls while one is already running
-  if (refreshingRef.current) return;
-  refreshingRef.current = true;
+  const requestVersion = ++matchRequestVersionRef.current;
+  const requestedRadiusKm = options.radiusKm ?? matchDistanceKm;
 
   setRefreshing(true);
 
@@ -1477,8 +1505,10 @@ const refreshMatches = useCallback(async () => {
     const myPrivateData = myPrivateSnap.exists() ? myPrivateSnap.data() : null;
     if (!profileRecoveryReady(myData, myPrivateData).ready) {
       setMyProfileHidden(false);
-      setRawMatches([]);
-      setLastUpdated(Date.now());
+      if (requestVersion === matchRequestVersionRef.current) {
+        setRawMatches([]);
+        lastUpdatedRef.current = Date.now();
+      }
       return;
     }
 
@@ -1495,8 +1525,10 @@ const refreshMatches = useCallback(async () => {
     setMyProfileHidden(hidden);
 
     if (hidden) {
-      setRawMatches([]);
-      setLastUpdated(Date.now());
+      if (requestVersion === matchRequestVersionRef.current) {
+        setRawMatches([]);
+        lastUpdatedRef.current = Date.now();
+      }
       return;
     }
 
@@ -1548,7 +1580,7 @@ const refreshMatches = useCallback(async () => {
     setBlockedMatchUserIds(blockedIds);
 
     // 3) Load nearby players via callable (caller location comes from players_private)
-    const allPlayers = await loadNearbyPlayers(MAX_DISTANCE_KM);
+    const allPlayers = await loadNearbyPlayers(requestedRadiusKm);
 
     const meRating = (myData.skillRating ?? myData.utr) ?? null;
 
@@ -1597,7 +1629,7 @@ const refreshMatches = useCallback(async () => {
       if (typeof p.distance === "number" && Number.isFinite(p.distance)) {
         distance = p.distance;
 
-        if (distance > MAX_DISTANCE_KM) continue;
+        if (distance > requestedRadiusKm) continue;
 
         if (distance < 5) score += 3;
         else if (distance < 10) score += 2;
@@ -1622,16 +1654,16 @@ const refreshMatches = useCallback(async () => {
       });
     }
 
+    if (requestVersion !== matchRequestVersionRef.current) return;
     setRawMatches(scoredPlayers);
-    setLastUpdated(Date.now());
+    lastUpdatedRef.current = Date.now();
   } catch (error) {
     console.warn("[MATCH] refreshMatches failed:", error);
-    setRawMatches([]);
+    // Preserve the last successful cards when a background refresh fails.
   } finally {
-    refreshingRef.current = false;
-    setRefreshing(false);
+    if (requestVersion === matchRequestVersionRef.current) setRefreshing(false);
   }
-}, [matchMode, lastUpdated, loadNearbyPlayers, loadBlockedMatchUserIds]);
+}, [matchDistanceKm, matchMode, loadNearbyPlayers, loadBlockedMatchUserIds]);
 
 
 
@@ -1743,7 +1775,8 @@ useEffect(() => {
   const load = async () => {
     setLoading(true);
 
-    const isVerifyAction = params.get("mode") === "verifyEmail" && !!params.get("oobCode");
+    const currentParams = new URLSearchParams(window.location.search);
+    const isVerifyAction = currentParams.get("mode") === "verifyEmail" && !!currentParams.get("oobCode");
 
     // redirect unverified-but-required users (skip if we're consuming a verify action)
     const userDoc = await getDoc(doc(db, "users", user.uid));
@@ -1776,11 +1809,13 @@ useEffect(() => {
     try {
       await refreshMatches();
       if (cancelled) return;
+      initialMatchLoadCompleteRef.current = true;
       setLoading(false);
       window.dispatchEvent(new CustomEvent("tm:matchMeReady"));
     } catch (error) {
       if (cancelled) return;
       console.error("[MatchPage] failed to load match page", error);
+      initialMatchLoadCompleteRef.current = true;
       setLoading(false);
     }
   };
@@ -1790,7 +1825,14 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [user, isCheckingBirthYear, needsBirthYear, router, params, refreshMatches]);
+  // URL-backed filters must not restart the initial page-loading lifecycle.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [user?.uid, user?.emailVerified, isCheckingBirthYear, needsBirthYear]);
+
+useEffect(() => {
+  if (!initialMatchLoadCompleteRef.current) return;
+  void refreshMatches({ force: true, radiusKm: matchDistanceKm });
+}, [matchDistanceKm, refreshMatches]);
 
 useEffect(() => {
   matchPageTrackedRef.current = false;
@@ -3109,7 +3151,7 @@ const browseAvailabilityCards = useMemo(() => {
 
 useEffect(() => {
   setVisibleCount(PAGE_SIZE);
-}, [sortBy, hideContacted, matchMode, ageBand, genderFilter, activityFilter, clubFilter]);
+}, [sortBy, hideContacted, matchMode, ageBand, genderFilter, activityFilter, clubFilter, matchDistanceKm]);
 
 useEffect(() => {
   const qSort = params.get("sort");
@@ -3119,6 +3161,7 @@ useEffect(() => {
   const qSurface = params.get("surface");
   const qClub = params.get("club");
   const qClubId = params.get("clubId");
+  const qDistance = params.get("distance");
 
   if (qSort) setSortBy(qSort);
   if (qHide === "0" || qHide === "1") setHideContacted(qHide === "1");
@@ -3129,6 +3172,7 @@ useEffect(() => {
   if (qSurface === "availability" || qSurface === "players") {
     setMatchSurface(qSurface);
   }
+  setMatchDistanceKmState(normalizeMatchDistanceKm(qDistance));
   if (qClub === "my") {
     setClubFilterState({ mode: "my", clubId: null, clubName: null });
   } else if (qClubId) {
@@ -3168,8 +3212,9 @@ const resetFilters = () => {
   setActivityFilter("");
   setHideContacted(true);
   setClubFilterState(ANY_CLUB_FILTER);
+  setMatchDistanceKmState(DEFAULT_MATCH_DISTANCE_KM);
   const p = new URLSearchParams(params.toString());
-  ["sort", "mode", "age", "gender", "activity", "hide", "club", "clubId"].forEach((key) => p.delete(key));
+  ["sort", "mode", "age", "gender", "activity", "hide", "club", "clubId", "distance"].forEach((key) => p.delete(key));
   const queryString = p.toString();
   router.replace(queryString ? `?${queryString}` : "/match", { scroll: false });
 };
@@ -3330,6 +3375,8 @@ if (isDesktop) {
   clubFilter={clubFilter}
   currentPlayer={myProfile}
   setClubFilter={setClubFilter}
+  matchDistanceKm={matchDistanceKm}
+  setMatchDistanceKm={setMatchDistance}
   hideContacted={hideContacted}
   setHideContacted={setHideContacted}
   onResetFilters={resetFilters}
@@ -3806,6 +3853,12 @@ return (
             tone="dark"
           />
 
+          <MatchDistanceFilter
+            value={matchDistanceKm}
+            onChange={setMatchDistance}
+            tone="dark"
+          />
+
           {/* Row 3: Age/Gender */}
           <div className="grid grid-cols-2 gap-3 sm:flex sm:items-end sm:gap-4">
             <div className="min-w-0">
@@ -4228,7 +4281,13 @@ return (
   </div>
 )}
 
- {matchSurface === "availability" ? (
+{refreshing && matchSurface === "players" && visibleMatches.length > 0 ? (
+  <div className="mb-3 px-1 text-xs font-semibold text-emerald-950/60" role="status" aria-live="polite">
+    Updating matches…
+  </div>
+) : null}
+
+{matchSurface === "availability" ? (
   <div className="space-y-4">
     {activeAvailability ? (
       <button
