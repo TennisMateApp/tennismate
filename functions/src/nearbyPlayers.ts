@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { HttpsError } from "firebase-functions/v2/https";
 import { geohashQueryBounds } from "geofire-common";
 import { backendCandidateReadiness } from "./profileReadiness";
+import { normalizeMatchDistanceKm } from "./matchDistance";
 
 const db = admin.firestore();
 
@@ -32,7 +33,6 @@ type NearbyPlayerResult = {
   distanceKm: number;
 };
 
-const DEFAULT_RADIUS_KM = 50;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 600;
 const QUERY_LIMIT_MULTIPLIER = 5;
@@ -58,12 +58,6 @@ function toTimestampMillis(value: unknown): number | undefined {
   }
 
   return undefined;
-}
-
-function clampRadiusKm(value: unknown): number {
-  const n = toFiniteNumber(value);
-  if (n == null) return DEFAULT_RADIUS_KM;
-  return Math.max(1, Math.min(200, n));
 }
 
 function clampLimit(value: unknown): number {
@@ -102,7 +96,15 @@ export async function fetchNearbyPlayersForUser(
   const requestedRadiusKm = requestData.radiusKm;
   const requestedActiveWithinHours = requestData.activeWithinHours;
   const requestedLimit = requestData.limit;
-  const radiusKm = clampRadiusKm(requestData.radiusKm);
+  let radiusKm: number;
+  try {
+    radiusKm = normalizeMatchDistanceKm(requestData.radiusKm);
+  } catch {
+    throw new HttpsError(
+      "invalid-argument",
+      "radiusKm must be one of 5, 10, 15, 20, 30, or 50 kilometres."
+    );
+  }
   const activeWithinHours = normalizeActiveWithinHours(requestData.activeWithinHours);
   const limit = clampLimit(requestData.limit);
   const perBoundLimit = Math.min(

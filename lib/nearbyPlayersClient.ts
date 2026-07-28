@@ -7,6 +7,7 @@ import {
   ensureVerifiedAuthSession,
   type VerifiedAuthUser,
 } from "@/lib/verifiedAuthSession";
+import { isMatchDistanceKm } from "@/lib/matchDistance";
 
 export type NearbyPlayerResponseItem = {
   uid: string;
@@ -125,6 +126,9 @@ export async function invokeNearbyPlayersWithVerifiedTokenRecovery(
 export async function getNearbyPlayers(
   request: GetNearbyPlayersRequest
 ): Promise<GetNearbyPlayersResponse> {
+  if (request.radiusKm != null && !isMatchDistanceKm(request.radiusKm)) {
+    throw new RangeError("Unsupported Match Me distance.");
+  }
   const fn = httpsCallable<GetNearbyPlayersRequest, GetNearbyPlayersResponse>(
     getFunctionsClient(),
     "getNearbyPlayers"
