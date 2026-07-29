@@ -243,7 +243,7 @@ export default function MatchFeedbackPage() {
       <div className="mb-4">
         <div className="flex items-center gap-3">
           <GiTennisBall className="h-6 w-6 text-green-600" aria-hidden="true" />
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Match Feedback</h1>
+          <h1 className="text-center text-[22px] font-extrabold tracking-tight text-[#0B3D2E] lg:text-[28px]">Match Feedback</h1>
         </div>
         <p className="mt-1 ml-9 text-[15px] sm:text-base text-gray-700">
           Takes ~20 seconds. Your opponent won’t see your comments.

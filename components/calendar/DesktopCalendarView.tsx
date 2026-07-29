@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import InviteOverlayCard from "@/components/invites/InviteOverlayCard";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
+import AppPageHeader from "@/components/AppPageHeader";
 
 type MiniProfile = {
   name?: string;
@@ -78,16 +79,11 @@ function dayToneClasses(opts: { isSelected: boolean; hasEvents: boolean }) {
   return (
     <div className="w-full">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Calendar</h1>
-          <p className="text-sm text-slate-500">
-            Manage your matches and training sessions
-          </p>
-        </div>
-
-        {/* Month selector pill */}
-        <div className="flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3 py-2 shadow-sm">
+      <AppPageHeader
+        className="mb-6"
+        title="Calendar"
+        subtitle="Manage your matches and training sessions"
+        actions={<div className="flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3 py-2 shadow-sm">
           <button
             type="button"
             onClick={onPrevMonth}
@@ -109,8 +105,8 @@ function dayToneClasses(opts: { isSelected: boolean; hasEvents: boolean }) {
           >
             <ChevronRight size={18} />
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {/* Main grid: Calendar + Right panel */}
       <div className="grid grid-cols-12 gap-6">

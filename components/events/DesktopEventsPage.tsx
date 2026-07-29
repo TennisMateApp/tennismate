@@ -5,6 +5,7 @@ import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import { Plus, CalendarDays, MapPin, Heart } from "lucide-react";
 import { getEventFilledSpots } from "@/lib/eventCapacity";
 import { resolveEventEnd } from "@/lib/eventDuration";
+import AppPageHeader from "@/components/AppPageHeader";
 
 export type Player = {
   name?: string;
@@ -163,25 +164,18 @@ return (
             <section className="min-w-0">
               {/* Header */}
               <div className="rounded-3xl border border-black/10 bg-white p-7 2xl:p-8">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <h1 className="text-xl font-extrabold text-gray-900">
-                      Trending Events
-                    </h1>
-                    <p className="mt-1 text-sm text-gray-600">
-                      Discover popular games and sessions in your area
-                    </p>
-                  </div>
-
-                  <Link
+                <AppPageHeader
+                  title="Trending Events"
+                  subtitle="Discover popular games and sessions in your area"
+                  actions={<Link
                     href="/events/new"
                     className="inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-2 text-sm font-extrabold"
                     style={{ background: "#39FF14", color: "#0B3D2E" }}
                   >
                     <Plus className="h-4 w-4" />
                     Create Event
-                  </Link>
-                </div>
+                  </Link>}
+                />
               </div>
 
               {/* Content */}

@@ -17,7 +17,7 @@ import {
   orderBy,      // ✅ ADD
   limit,        // ✅ ADD
 } from "firebase/firestore";
-import { ChevronLeft, CalendarDays } from "lucide-react";
+import { CalendarDays } from "lucide-react";
 
 import DesktopCreateEventPage from "@/components/events/DesktopCreateEventPage";
 import { useIsDesktop } from "@/lib/useIsDesktop";
@@ -30,6 +30,7 @@ import {
   formatEventDuration,
   resolveEventDurationMinutes,
 } from "@/lib/eventDuration";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 type EventType = "practice" | "social" | "competitive";
 
@@ -511,14 +512,7 @@ useEffect(() => {
         <div className="bg-white rounded-b-2xl shadow-sm">
           <div className="px-4 pt-4 pb-3">
             <div className="relative flex items-center justify-center">
-              <button
-                type="button"
-                onClick={handleBack}
-                aria-label="Back"
-                className="absolute left-0 inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-gray-100"
-              >
-                <ChevronLeft className="h-6 w-6" style={{ color: TM.forest }} />
-              </button>
+              <div className="absolute left-0"><CourtsBackButton onClick={handleBack} /></div>
 
               <div className="text-[15px] font-extrabold" style={{ color: TM.forest }}>
                 {isEditing ? "Edit Event" : "Create New Event"}

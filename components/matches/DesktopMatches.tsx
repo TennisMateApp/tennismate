@@ -30,6 +30,7 @@ import { suggestCourt } from "@/lib/suggestCourt";
 import { track } from "@/lib/track";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
+import AppPageHeader from "@/components/AppPageHeader";
 import { createMatchRequestWithRelationship, getPairId } from "@/lib/playerRelationships";
 import NotificationPrompt from "@/components/notifications/NotificationPrompt";
 import {
@@ -1760,13 +1761,11 @@ const handleEnableIncomingRequestNotifications = async () => {
               {/* LEFT COLUMN */}
               <section className="min-w-0">
                 {/* Header row */}
-                <div className="flex items-start justify-between gap-6">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-[22px] font-black tracking-tight text-gray-900">
-                        Match Center
-                      </div>
-
+                <AppPageHeader
+                  title="Match Center"
+                  subtitle="Manage your confirmed games, pending requests, and match history."
+                  actions={
+                    <div className="flex flex-wrap items-center justify-center gap-3">
                       <span
                         className="rounded-full px-3 py-1 text-xs font-extrabold"
                         style={{
@@ -1786,15 +1785,7 @@ const handleEnableIncomingRequestNotifications = async () => {
                           ? "results"
                           : "requests"}
                       </span>
-                    </div>
-
-                    <div className="mt-1 text-[12px] text-gray-600">
-                      Manage your confirmed games, pending requests, and match history.
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <div className="relative w-[360px]">
+                      <div className="relative w-[360px]">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-black/40" />
                       <input
                         value={queryText}
@@ -1802,23 +1793,25 @@ const handleEnableIncomingRequestNotifications = async () => {
                         placeholder="Search matches…"
                         className="h-10 w-full rounded-full bg-white pl-10 pr-4 text-sm ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-[#39FF14]"
                       />
-                    </div>
+                      </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        track("desktop_find_a_match_clicked", { source: "match_center" });
-                        router.push("/match");
-                      }}
-                      className="h-10 rounded-full px-4 text-sm font-extrabold text-[#0B3D2E]"
-                      style={{ background: "#39FF14" }}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        <ArrowRight className="h-4 w-4" /> Find a Match
-                      </span>
-                    </button>
-                  </div>
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          track("desktop_find_a_match_clicked", { source: "match_center" });
+                          router.push("/match");
+                        }}
+                        className="h-10 shrink-0 rounded-full px-4 text-sm font-extrabold text-[#0B3D2E]"
+                        style={{ background: "#39FF14" }}
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <ArrowRight className="h-4 w-4" /> Find a Match
+                        </span>
+                      </button>
+                    </div>
+                  }
+                  stackActions
+                />
 
                 <div className="mt-6 flex items-center gap-8 border-b border-black/10">
                   <button

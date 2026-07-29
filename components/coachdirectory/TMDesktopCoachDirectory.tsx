@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { MapPin, Search } from "lucide-react";
+import AppPageHeader from "@/components/AppPageHeader";
 
 export type CoachListItem = {
   id: string;
@@ -46,21 +47,10 @@ export function TMDesktopCoachDirectory(props: {
   return (
     <div className="min-w-0">
       {/* Top bar (title + subtext) */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1
-            className="text-[28px] font-extrabold tracking-tight"
-            style={{ color: TM.forest }}
-          >
-            Coach Directory
-          </h1>
-          <div className="mt-1 text-sm" style={{ color: "rgba(11,61,46,0.60)" }}>
-            {totalCoaches != null
-              ? `${totalCoaches} total coaches`
-              : `${coaches.length} coaches`}
-          </div>
-        </div>
-      </div>
+      <AppPageHeader
+        title="Coach Directory"
+        subtitle={totalCoaches != null ? `${totalCoaches} total coaches` : `${coaches.length} coaches`}
+      />
 
       {/* Search row (same as DesktopDirectoryPage) */}
       <div

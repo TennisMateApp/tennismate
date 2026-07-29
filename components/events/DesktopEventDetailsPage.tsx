@@ -21,6 +21,7 @@ import {
   resolveEventDisplayDurationMinutes,
   resolveEventEnd,
 } from "@/lib/eventDuration";
+import AppPageHeader from "@/components/AppPageHeader";
 
 
 export type EventDoc = {
@@ -269,9 +270,77 @@ export default function DesktopEventDetailsPage(props: {
     return out;
   }, [event.participants, event.hostId, hostProfile, participantProfiles, total]);
 
-    const pendingRequests = useMemo(
+  const pendingRequests = useMemo(
     () => (requests || []).filter((r) => r.status === "pending"),
     [requests]
+  );
+
+  const unavailableJoinLabel = authLoading
+    ? "Loading…"
+    : isParticipant
+    ? "You’ve Joined"
+    : isFull
+    ? "Full"
+    : status === "cancelled"
+    ? "Cancelled"
+    : status === "completed"
+    ? "Completed"
+    : "Unavailable";
+
+  const unavailableJoinTitle = authLoading
+    ? "Checking your account…"
+    : isParticipant
+    ? "You’ve already joined"
+    : isFull
+    ? "Event is full"
+    : status === "cancelled"
+    ? "Event was cancelled"
+    : status === "completed"
+    ? "Event has finished"
+    : "Join unavailable";
+
+  const headerActions = (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <StatusPill status={event.status as any} />
+      {event.type ? (
+        <span className="rounded-full bg-[#0B3D2E]/10 px-3 py-1 text-xs font-bold text-[#0B3D2E]">
+          {event.type.toString()}
+        </span>
+      ) : null}
+
+      {!isHost ? (
+        hasPendingRequest ? (
+          <button type="button" disabled className="inline-flex min-h-11 items-center rounded-xl bg-gray-200 px-4 text-sm font-extrabold text-gray-700" title="Your join request is awaiting approval">
+            Request Pending
+          </button>
+        ) : canRequest ? (
+          <button type="button" onClick={onJoinRequest} disabled={sendingJoin} className="inline-flex min-h-11 items-center rounded-xl px-4 text-sm font-extrabold shadow-sm disabled:opacity-70" style={{ background: TM.neon, color: TM.forest }} title="Request to join this event">
+            {sendingJoin ? "Sending…" : "Request to Join"}
+          </button>
+        ) : (
+          <button type="button" disabled className="inline-flex min-h-11 items-center rounded-xl bg-gray-200 px-4 text-sm font-extrabold text-gray-700" title={unavailableJoinTitle}>
+            {unavailableJoinLabel}
+          </button>
+        )
+      ) : null}
+
+      {conversationId && status !== "cancelled" ? (
+        <Link href={`/messages/${conversationId}`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#0B3D2E]/15 bg-white px-4 text-sm font-extrabold text-[#0B3D2E] shadow-sm hover:bg-[#0B3D2E]/5" title="Open group chat">
+          <MessageCircle className="h-4 w-4" /> Group Chat
+        </Link>
+      ) : null}
+
+      {isHost && status !== "cancelled" && status !== "completed" ? (
+        <>
+          <Link href={`/events/new?edit=${eventId}`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#0B3D2E]/15 bg-white px-4 text-sm font-extrabold text-[#0B3D2E] shadow-sm hover:bg-[#0B3D2E]/5" title="Edit this event">
+            <Pencil className="h-4 w-4" /> Edit Event
+          </Link>
+          <button type="button" onClick={onCancelEvent} disabled={cancelling} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-70" title="Cancel this event">
+            <XCircle className="h-4 w-4" /> {cancelling ? "Cancelling…" : "Cancel Event"}
+          </button>
+        </>
+      ) : null}
+    </div>
   );
 
   return (
@@ -286,6 +355,12 @@ export default function DesktopEventDetailsPage(props: {
           <div className="mt-2 grid gap-8 2xl:gap-10">
             {/* Left column content */}
             <section className="min-w-0">
+              <AppPageHeader
+                className="mb-4"
+                title={event.title || "Tennis Event"}
+                actions={headerActions}
+                stackActions
+              />
               {/* Hero */}
               <div className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm">
                 <div className="relative h-[210px] w-full">
@@ -306,11 +381,11 @@ export default function DesktopEventDetailsPage(props: {
                     </span>
                   </div>
 
-                  <div className="absolute bottom-6 left-6 right-6 flex items-end justify-between gap-4">
+                  <div className="hidden">
                     <div className="min-w-0">
-                      <h1 className="text-3xl font-extrabold text-white drop-shadow-sm line-clamp-2">
+                      <div className="line-clamp-2 text-[28px] font-extrabold leading-tight tracking-tight text-white drop-shadow-sm">
                         {event.title || "Tennis Event"}
-                      </h1>
+                      </div>
 
                       <div className="mt-2 flex items-center gap-3">
                         <StatusPill status={event.status as any} />

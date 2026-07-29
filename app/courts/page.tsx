@@ -30,6 +30,8 @@ import { MapPin, Search, SlidersHorizontal, X, ArrowLeft } from "lucide-react";
 
 // ✅ NEW
 import DesktopCourtsDirectory from "@/components/desktop_layout/DesktopCourtsDirectory";
+import AppPageHeader, { appPageHeaderButtonClass } from "@/components/AppPageHeader";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 type LatLng = { lat: number; lng: number };
 
@@ -420,28 +422,13 @@ return (
   <div className="min-h-screen bg-[#F4F6F8] text-gray-900">
     <div className="mx-auto w-full max-w-[520px] px-4 pb-10 pt-4">
       {/* Top bar */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="h-10 w-10 rounded-full bg-white ring-1 ring-gray-200 flex items-center justify-center hover:bg-gray-50"
-            aria-label="Back"
-            title="Back"
-          >
-            <ArrowLeft className="h-5 w-5 text-gray-700" />
-          </button>
-
-          <div className="flex items-center gap-2">
-            <GiTennisCourt className="h-6 w-6 text-[#0B3D2E]" />
-            <h1 className="text-2xl font-extrabold tracking-tight">Courts</h1>
-          </div>
-        </div>
-
-        <button
+      <AppPageHeader
+        title="Courts"
+        leading={<CourtsBackButton onClick={handleBack} />}
+        actions={<button
           type="button"
           onClick={() => setShowFilters((v) => !v)}
-          className="h-10 w-10 rounded-full bg-white ring-1 ring-gray-200 flex items-center justify-center hover:bg-gray-50"
+          className={appPageHeaderButtonClass}
           aria-label="Filters"
           title="Filters"
         >
@@ -450,8 +437,8 @@ return (
           ) : (
             <SlidersHorizontal className="h-5 w-5 text-gray-700" />
           )}
-        </button>
-      </div>
+        </button>}
+      />
 
       {/* Centered subtitle */}
       <div className="mt-2 text-center">

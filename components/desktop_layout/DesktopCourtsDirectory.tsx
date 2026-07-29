@@ -4,6 +4,7 @@
 import React from "react";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import { MapPin, Search, SlidersHorizontal, X } from "lucide-react";
+import AppPageHeader from "@/components/AppPageHeader";
 
 type LatLng = { lat: number; lng: number };
 
@@ -82,19 +83,10 @@ export default function DesktopCourtsDirectory(props: {
           <main className="min-w-0">
             <div className="rounded-3xl border border-black/10 bg-white p-7 2xl:p-8">
               {/* Header row */}
-              <div className="flex items-start justify-between gap-6">
-                <div>
-                  <h1 className="text-2xl font-extrabold text-black/90">
-                    Court Directory
-                  </h1>
-                  <div className="mt-1 text-sm text-black/55">
-                    {userPostcode ? `Near ${userPostcode}` : "Find courts near you"} •{" "}
-                    {filteredCourts.length} result
-                    {filteredCourts.length === 1 ? "" : "s"}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
+              <AppPageHeader
+                title="Court Directory"
+                subtitle={<>{userPostcode ? `Near ${userPostcode}` : "Find courts near you"} •{" "}{filteredCourts.length} result{filteredCourts.length === 1 ? "" : "s"}</>}
+                actions={<div className="flex flex-wrap items-center justify-center gap-3">
                   {/* Search */}
                   <div className="relative w-[360px]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-black/35" />
@@ -121,8 +113,9 @@ export default function DesktopCourtsDirectory(props: {
                       <SlidersHorizontal className="h-5 w-5 text-black/70" />
                     )}
                   </button>
-                </div>
-              </div>
+                </div>}
+                stackActions
+              />
 
               {/* Filters panel */}
               {showFilters && (

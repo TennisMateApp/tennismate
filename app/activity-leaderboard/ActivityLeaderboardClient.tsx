@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {onAuthStateChanged} from "firebase/auth";
 import {useRouter, useSearchParams} from "next/navigation";
-import {AlertCircle, ArrowLeft, ChevronDown, Info, Trophy} from "lucide-react";
+import {AlertCircle, ChevronDown, Info} from "lucide-react";
 import {auth} from "@/lib/firebaseConfig";
 import {
   clearActivityLeaderboardCache,
@@ -15,6 +14,8 @@ import {
 import {activityLeaderboardViewState, defaultPublishedMonth, formatActivityMonth} from "@/lib/activityLeaderboardModel";
 import LeaderboardRows, {LeaderboardRow} from "@/components/activityLeaderboard/LeaderboardRows";
 import {ANALYTICS_EVENTS} from "@/lib/analyticsEvents";
+import AppPageHeader from "@/components/AppPageHeader";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 const INITIAL_ROW_COUNT = 10;
 const trackActivityEvent = async (eventName: string, params?: Record<string, string>) => {
@@ -98,11 +99,15 @@ export default function ActivityLeaderboardClient() {
   return (
     <div className="min-h-screen bg-[#F7FAF8] px-4 pb-28 pt-5 sm:px-6 lg:pb-12 lg:pt-8">
       <div className="mx-auto max-w-3xl">
-        <div className="mb-5 flex items-center justify-between gap-3">
-          <Link href="/home" className="inline-flex min-h-11 items-center gap-2 rounded-full px-2 text-sm font-bold text-emerald-950 hover:bg-black/5">
-            <ArrowLeft className="h-5 w-5" /> Home
-          </Link>
-          {months.length > 0 && selectedMonth && (
+        <AppPageHeader
+          className="mb-5"
+          title="Activity Leaderboard"
+          eyebrow="Monthly activity"
+          subtitle="A friendly celebration of completed matches recorded in TennisMate and the people you play with."
+          leading={
+            <CourtsBackButton href="/home" label="Back to Home" title="Back to Home" />
+          }
+          actions={months.length > 0 && selectedMonth ? (
             <label className="relative">
               <span className="sr-only">Leaderboard month</span>
               <select
@@ -115,20 +120,8 @@ export default function ActivityLeaderboardClient() {
               </select>
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             </label>
-          )}
-        </div>
-
-        <header className="relative overflow-hidden rounded-[28px] bg-emerald-950 px-5 py-6 text-white shadow-lg sm:px-7 sm:py-8">
-          <div className="absolute -right-10 -top-16 h-44 w-44 rounded-full bg-lime-300/15" />
-          <div className="relative flex items-start gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-lime-300 text-emerald-950"><Trophy className="h-6 w-6" /></div>
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.2em] text-lime-300">Monthly activity</p>
-              <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">Activity Leaderboard</h1>
-              <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">A friendly celebration of completed matches recorded in TennisMate and the people you play with.</p>
-            </div>
-          </div>
-        </header>
+          ) : undefined}
+        />
 
         <main className="mt-5 rounded-[28px] border border-black/10 bg-white p-3 shadow-sm sm:p-5">
           {selectedMonth && <div className="mb-4 px-1"><h2 className="text-lg font-black text-slate-900">{formatActivityMonth(selectedMonth)}</h2><p className="text-xs font-medium text-slate-500">Published monthly standings</p></div>}

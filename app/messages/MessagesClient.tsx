@@ -22,6 +22,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { getPlayerPhotoUrl, resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import withAuth from "@/components/withAuth";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar"; // adjust path
+import AppPageHeader, { appPageHeaderButtonClass } from "@/components/AppPageHeader";
 // optional (if you have it):
 import { useIsDesktop } from "@/lib/useIsDesktop";
 
@@ -459,10 +460,11 @@ return (
         <main className="min-h-0 min-w-0 overflow-y-auto">
           <div>
             {/* Top bar */}
-            <div className="flex items-center gap-3">
-              <button
+            <AppPageHeader
+              title="Messages"
+              leading={<button
                 type="button"
-                className="h-10 w-10 rounded-full overflow-hidden ring-2 ring-green-400 bg-gray-100 flex items-center justify-center"
+                className={`${appPageHeaderButtonClass} overflow-hidden bg-gray-100`}
                 aria-label="Open profile"
                 onClick={() => router.push("/profile")}
               >
@@ -476,12 +478,8 @@ return (
                 ) : (
                   <span className="text-xs text-gray-600">🙂</span>
                 )}
-              </button>
-
-              <h1 className="text-3xl font-extrabold tracking-tight text-gray-900">
-                Messages
-              </h1>
-            </div>
+              </button>}
+            />
 
             {/* Search */}
             <div className="mt-5">
@@ -620,11 +618,12 @@ return (
       {/* Paste your existing MOBILE UI here */}
 
       {/* Top bar */}
-     <div className="flex items-center justify-between px-3">
-        <div className="flex items-center gap-2">
-          <button
+     <AppPageHeader
+        className="px-3"
+        title="Messages"
+        leading={<button
             type="button"
-            className="h-9 w-9 rounded-full overflow-hidden ring-2 ring-green-400 bg-gray-100 flex items-center justify-center"
+            className={`${appPageHeaderButtonClass} overflow-hidden bg-gray-100`}
             aria-label="Open profile"
             onClick={() => router.push("/profile")}
           >
@@ -638,11 +637,8 @@ return (
             ) : (
               <span className="text-xs text-gray-600">🙂</span>
             )}
-          </button>
-
-          <h1 className="text-3xl font-extrabold tracking-tight">Messages</h1>
-        </div>
-      </div>
+          </button>}
+      />
 
       {/* Search */}
       <div className="mt-4 px-3">

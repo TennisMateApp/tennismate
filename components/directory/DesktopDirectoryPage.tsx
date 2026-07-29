@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { Search } from "lucide-react";
+import AppPageHeader from "@/components/AppPageHeader";
 
 type Player = {
   id: string;
@@ -48,17 +49,11 @@ export default function DesktopDirectoryPage(props: {
 
   return (
     <div className="min-w-0">
-      {/* Top bar (title + icons) */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-[28px] font-extrabold tracking-tight" style={{ color: TM.forest }}>
-            Directory
-          </h1>
-          <div className="mt-1 text-sm" style={{ color: "rgba(11,61,46,0.60)" }}>
-            {totalPlayers != null ? `${totalPlayers} total players` : "Directory"}
-          </div>
-        </div>
-      </div>
+      {/* Source-of-truth desktop page header */}
+      <AppPageHeader
+        title="Directory"
+        subtitle={totalPlayers != null ? `${totalPlayers} total players` : "Directory"}
+      />
 
       {/* Search + quick filter row (visual only for now) */}
       <div className="mt-4 rounded-2xl border bg-white p-3 shadow-sm"

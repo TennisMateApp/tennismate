@@ -13,6 +13,7 @@ import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import { trackEvent } from "@/lib/analytics";
 import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 import {recordCompletedMatch} from "@/lib/recordCompletedMatchClient";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 type Player = {
   id: string;
@@ -351,14 +352,7 @@ return (
     <div className="mx-auto max-w-md px-3 pt-3 pb-36">
       {/* Top bar */}
       <div className="mb-3 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="h-9 w-9 rounded-full bg-white shadow-sm border border-gray-200 grid place-items-center"
-          aria-label="Back"
-        >
-          ←
-        </button>
+        <CourtsBackButton onClick={() => router.back()} />
 
         <div className="text-sm font-extrabold text-[#0B3D2E]">
           Score Tracker

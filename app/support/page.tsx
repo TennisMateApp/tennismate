@@ -106,7 +106,7 @@ function SupportPage() {
   return (
     <div className="mx-auto max-w-3xl p-4 sm:p-6">
       {/* Need Help? (top) */}
-      <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Need Help?</h1>
+      <h1 className="text-center text-[22px] font-extrabold tracking-tight text-[#0B3D2E] lg:text-[28px]">Need Help?</h1>
       <section className="mt-3 rounded-2xl border bg-white p-5 sm:p-6 shadow-sm">
         <p className="text-sm text-gray-600">
           If you’re stuck or found a bug, message us below or email support. We’ll include your account
