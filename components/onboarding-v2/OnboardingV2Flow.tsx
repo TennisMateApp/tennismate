@@ -23,6 +23,7 @@ import {
   sendEmailVerification,
   signOut,
   updateProfile,
+  validatePassword,
   type User,
 } from "firebase/auth";
 import {
@@ -69,6 +70,8 @@ import {
   maskEmail,
   onboardingV2AuthError,
   onboardingV2Href,
+  onboardingV2PasswordPolicyError,
+  onboardingV2SignupFailureDetails,
   ONBOARDING_V2_AVAILABILITY,
   ONBOARDING_V2_PREAUTH_STEP_KEY,
   ONBOARDING_V2_RESEND_COOLDOWN_SECONDS,
@@ -82,6 +85,7 @@ import {
   validateOnboardingV2Tmr,
   type OnboardingV2AccountFields,
   type OnboardingV2Availability,
+  type OnboardingV2SignupStage,
   type OnboardingV2Step,
 } from "@/lib/onboardingV2";
 
@@ -395,28 +399,46 @@ export default function OnboardingV2Flow() {
     setBusy(true);
     accountSubmissionRef.current = true;
     void trackEvent("account_creation_started", {flow: "onboarding_v2"});
+    let signupStage: OnboardingV2SignupStage = "referral_attribution";
+    let authAccountCreated = false;
     try {
+      const candidates = referralCandidates();
+      signupStage = "password_policy";
+      const passwordStatus = await validatePassword(auth, validation.values.password);
+      const passwordError = onboardingV2PasswordPolicyError(passwordStatus);
+      if (passwordError) {
+        setErrors({password: passwordError});
+        return;
+      }
+      signupStage = "input_revalidation";
       const result = await createOnboardingV2Account({
         fields: account,
         birthYear,
-        referralCandidates: referralCandidates(),
+        referralCandidates: candidates,
         createAuthUser: async (email, password) => {
+          signupStage = "auth_create";
           const credential = await createUserWithEmailAndPassword(auth, email, password);
+          authAccountCreated = true;
+          signupStage = "auth_profile";
           await updateProfile(credential.user, {displayName: account.name.trim()});
           setCurrentUser(credential.user);
           void trackEvent("account_created", {method: "email_password"});
           return credential.user;
         },
-        initializeAccount: ({user, displayName, birthYear: year, referralCandidates: candidates}) =>
-          initializeOrRepairAccount({
+        initializeAccount: ({user, displayName, birthYear: year, referralCandidates: referralInputs}) => {
+          signupStage = "account_initialization";
+          return initializeOrRepairAccount({
             user,
             displayName,
             birthYear: year,
-            referralCandidates: candidates,
+            referralCandidates: referralInputs,
             journey: "onboarding_v2",
-          }),
-        sendInitialVerification: ({user, shouldSendVerification}) =>
-          sendInitialVerificationIfClaimed({user, shouldSendVerification, next: resumeHref}),
+          });
+        },
+        sendInitialVerification: ({user, shouldSendVerification}) => {
+          signupStage = "verification_send";
+          return sendInitialVerificationIfClaimed({user, shouldSendVerification, next: resumeHref});
+        },
       });
       void trackEvent("account_initialization_completed", {
         repaired_document_count: result.initialization.repairedDocuments.length,
@@ -432,6 +454,10 @@ export default function OnboardingV2Flow() {
       setStep("verify");
     } catch (error) {
       const code = (error as {code?: string})?.code;
+      console.error(
+        "[OnboardingV2] signup failed",
+        onboardingV2SignupFailureDetails(signupStage, error, authAccountCreated)
+      );
       setNotice({kind: "error", text: onboardingV2AuthError(code)});
       if (code === "auth/email-already-in-use") {
         setErrors({email: "This email is already linked to an account."});
@@ -745,7 +771,7 @@ export default function OnboardingV2Flow() {
   }
 
   if (step === "account") {
-    return <OnboardingV2Shell step={step} heading="Create your TennisMate account" headingRef={headingRef} helper="Use an email address you can open now. We’ll send a verification link automatically." onBack={() => move("eligibility")} status={status}><form onSubmit={submitAccount} noValidate className="space-y-5">{(["name", "email"] as const).map((field) => <div key={field}><label htmlFor={`onboarding-v2-${field}`} className="text-sm font-semibold capitalize text-slate-800">{field}</label><input id={`onboarding-v2-${field}`} className={inputClass} type={field === "email" ? "email" : "text"} autoComplete={field} value={account[field]} onChange={(event) => {setAccount((current) => ({...current, [field]: event.target.value})); setErrors((current) => ({...current, [field]: undefined}));}} required aria-invalid={Boolean(errors[field])} aria-describedby={errors[field] ? fieldErrorId(field) : undefined} />{errors[field] ? <p id={fieldErrorId(field)} className="mt-2 text-sm font-medium text-red-700">{errors[field]}</p> : null}</div>)}<div><label htmlFor="onboarding-v2-password" className="text-sm font-semibold text-slate-800">Password</label><div className="relative"><input id="onboarding-v2-password" className={`${inputClass} pr-12`} type={showPassword ? "text" : "password"} autoComplete="new-password" value={account.password} onChange={(event) => {setAccount((current) => ({...current, password: event.target.value})); setErrors((current) => ({...current, password: undefined}));}} required aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? fieldErrorId("password") : "onboarding-v2-password-help"} /><button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-1 top-3 grid h-10 w-10 place-items-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff className="h-5 w-5" aria-hidden="true" /> : <Eye className="h-5 w-5" aria-hidden="true" />}</button></div><p id="onboarding-v2-password-help" className="mt-2 text-xs text-slate-500">Use at least 6 characters.</p>{errors.password ? <p id={fieldErrorId("password")} className="mt-2 text-sm font-medium text-red-700">{errors.password}</p> : null}</div><p className="text-xs leading-5 text-slate-500">By creating an account, you agree to our <Link href="/terms" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-800 underline">Terms</Link> and <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-800 underline">Privacy Policy</Link>.</p><button type="submit" className={primaryButton} disabled={busy}>{busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />Creating account…</> : "Create account"}</button>{errors.email?.includes("already linked") ? <Link href={`/login?next=${encodeURIComponent(resumeHref)}&email=${encodeURIComponent(account.email.trim())}`} className={secondaryButton}>Sign in to continue</Link> : null}</form></OnboardingV2Shell>;
+    return <OnboardingV2Shell step={step} heading="Create your TennisMate account" headingRef={headingRef} helper="Use an email address you can open now. We’ll send a verification link automatically." onBack={() => move("eligibility")} status={status}><form onSubmit={submitAccount} noValidate className="space-y-5">{(["name", "email"] as const).map((field) => <div key={field}><label htmlFor={`onboarding-v2-${field}`} className="text-sm font-semibold capitalize text-slate-800">{field}</label><input id={`onboarding-v2-${field}`} className={inputClass} type={field === "email" ? "email" : "text"} autoComplete={field} value={account[field]} onChange={(event) => {setAccount((current) => ({...current, [field]: event.target.value})); setErrors((current) => ({...current, [field]: undefined}));}} required aria-invalid={Boolean(errors[field])} aria-describedby={errors[field] ? fieldErrorId(field) : undefined} />{errors[field] ? <p id={fieldErrorId(field)} className="mt-2 text-sm font-medium text-red-700">{errors[field]}</p> : null}</div>)}<div><label htmlFor="onboarding-v2-password" className="text-sm font-semibold text-slate-800">Password</label><div className="relative"><input id="onboarding-v2-password" className={`${inputClass} pr-12`} type={showPassword ? "text" : "password"} autoComplete="new-password" value={account.password} onChange={(event) => {setAccount((current) => ({...current, password: event.target.value})); setErrors((current) => ({...current, password: undefined}));}} required aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? fieldErrorId("password") : "onboarding-v2-password-help"} /><button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-1 top-3 grid h-10 w-10 place-items-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff className="h-5 w-5" aria-hidden="true" /> : <Eye className="h-5 w-5" aria-hidden="true" />}</button></div><p id="onboarding-v2-password-help" className="mt-2 text-xs text-slate-500">Use at least 6 characters, including an uppercase letter and a special character.</p>{errors.password ? <p id={fieldErrorId("password")} className="mt-2 text-sm font-medium text-red-700">{errors.password}</p> : null}</div><p className="text-xs leading-5 text-slate-500">By creating an account, you agree to our <Link href="/terms" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-800 underline">Terms</Link> and <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-800 underline">Privacy Policy</Link>.</p><button type="submit" className={primaryButton} disabled={busy}>{busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />Creating account…</> : "Create account"}</button>{errors.email?.includes("already linked") ? <Link href={`/login?next=${encodeURIComponent(resumeHref)}&email=${encodeURIComponent(account.email.trim())}`} className={secondaryButton}>Sign in to continue</Link> : null}</form></OnboardingV2Shell>;
   }
 
   if (step === "verify") {

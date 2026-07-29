@@ -294,6 +294,8 @@ export type OnboardingV2AccountFields = {
   password: string;
 };
 
+const ONBOARDING_V2_SPECIAL_CHARACTER = /[\^$*.\[\]{}()?"!@#%&/\\,><':;|_~]/;
+
 export function validateOnboardingV2Account(fields: OnboardingV2AccountFields) {
   const errors: Partial<Record<keyof OnboardingV2AccountFields, string>> = {};
   const name = fields.name.trim();
@@ -310,9 +312,79 @@ export function validateOnboardingV2Account(fields: OnboardingV2AccountFields) {
   if (!fields.password) errors.password = "Password is required.";
   else if (fields.password.length < 6) {
     errors.password = "Password must be at least 6 characters.";
+  } else if (!/[A-Z]/.test(fields.password)) {
+    errors.password = "Password must include an uppercase letter.";
+  } else if (!ONBOARDING_V2_SPECIAL_CHARACTER.test(fields.password)) {
+    errors.password = "Password must include a special character.";
   }
 
   return { errors, values: { name, email, password: fields.password } };
+}
+
+export type OnboardingV2PasswordValidationStatus = {
+  isValid: boolean;
+  meetsMinPasswordLength?: boolean;
+  meetsMaxPasswordLength?: boolean;
+  containsLowercaseLetter?: boolean;
+  containsUppercaseLetter?: boolean;
+  containsNumericCharacter?: boolean;
+  containsNonAlphanumericCharacter?: boolean;
+  passwordPolicy?: {
+    customStrengthOptions?: {
+      minPasswordLength?: number;
+      maxPasswordLength?: number;
+    };
+  };
+};
+
+export function onboardingV2PasswordPolicyError(status: OnboardingV2PasswordValidationStatus) {
+  if (status.isValid) return null;
+  const missing: string[] = [];
+  const strength = status.passwordPolicy?.customStrengthOptions;
+  if (status.meetsMinPasswordLength === false) {
+    missing.push(`at least ${strength?.minPasswordLength || 6} characters`);
+  }
+  if (status.meetsMaxPasswordLength === false) {
+    missing.push(`no more than ${strength?.maxPasswordLength || 4096} characters`);
+  }
+  if (status.containsLowercaseLetter === false) missing.push("a lowercase letter");
+  if (status.containsUppercaseLetter === false) missing.push("an uppercase letter");
+  if (status.containsNumericCharacter === false) missing.push("a number");
+  if (status.containsNonAlphanumericCharacter === false) missing.push("a special character");
+  return missing.length
+    ? `Password must include ${missing.join(", ")}.`
+    : "Password does not meet the current security requirements.";
+}
+
+export type OnboardingV2SignupStage =
+  | "referral_attribution"
+  | "password_policy"
+  | "input_revalidation"
+  | "auth_create"
+  | "auth_profile"
+  | "account_initialization"
+  | "verification_send";
+
+function safeSignupErrorCode(error: unknown) {
+  const candidate =
+    typeof (error as {code?: unknown})?.code === "string"
+      ? (error as {code: string}).code
+      : error instanceof Error
+        ? error.message
+        : "unknown";
+  return /^[a-z0-9_/-]{1,80}$/i.test(candidate) ? candidate : "unknown";
+}
+
+export function onboardingV2SignupFailureDetails(
+  stage: OnboardingV2SignupStage,
+  error: unknown,
+  authAccountCreated: boolean
+) {
+  return {
+    stage,
+    code: safeSignupErrorCode(error),
+    auth_account_created: authAccountCreated,
+  };
 }
 
 export function maskEmail(email: string | null | undefined) {
@@ -327,6 +399,9 @@ export function onboardingV2AuthError(code: string | undefined) {
     return "An account already exists for this email.";
   }
   if (code === "auth/weak-password") return "Password must be at least 6 characters.";
+  if (code === "auth/password-does-not-meet-requirements") {
+    return "Password does not meet the current security requirements.";
+  }
   if (code === "auth/invalid-email") return "Enter a valid email address.";
   if (code === "auth/network-request-failed") {
     return "Check your connection and try again.";

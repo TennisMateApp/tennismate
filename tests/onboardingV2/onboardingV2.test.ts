@@ -8,12 +8,15 @@ import {
   maskEmail,
   onboardingV2AuthError,
   onboardingV2Href,
+  onboardingV2PasswordPolicyError,
+  onboardingV2SignupFailureDetails,
   ONBOARDING_V2_PATH,
   ONBOARDING_V2_NUMBERED_STEPS,
   ONBOARDING_V2_RESEND_COOLDOWN_SECONDS,
   ONBOARDING_V2_STEP_META,
   resumableOnboardingV2PreAuthStep,
   validateAdultBirthYear,
+  validateOnboardingV2Account,
 } from "../../lib/onboardingV2";
 
 const flowSource = readFileSync("components/onboarding-v2/OnboardingV2Flow.tsx", "utf8");
@@ -27,7 +30,7 @@ const nextConfigSource = readFileSync("next.config.js", "utf8");
 
 function validInput() {
   return {
-    fields: { name: "Alex Player", email: "alex@example.com", password: "secret7" },
+    fields: { name: "Alex Player", email: "alex@example.com", password: "Secret!7" },
     birthYear: "1990",
     referralCandidates: [{ code: "CLUB25", source: "ref" as const }],
   };
@@ -123,6 +126,73 @@ test("valid adult account creation initializes exactly once and preserves referr
   assert.equal(result.verificationSent, true);
 });
 
+test("apostrophes, uppercase surnames, and common name punctuation all reach Auth unchanged", async () => {
+  const names = [
+    "Michael O'BRIEN",
+    "Michael OBrien",
+    "MICHAEL OBRIEN",
+    "Michael O’Brien",
+    "Michael O-BRIEN",
+    "Michael O.BRIEN",
+    "Michael (Mick) OBRIEN",
+  ];
+
+  for (const name of names) {
+    let authCalls = 0;
+    let receivedName = "";
+    const result = validateOnboardingV2Account({
+      name,
+      email: "michael.obrien@example.com",
+      password: "Valid!1",
+    });
+    assert.deepEqual(result.errors, {});
+    assert.equal(result.values.name, name);
+
+    await createOnboardingV2Account({
+      fields: {...result.values},
+      birthYear: "1990",
+      referralCandidates: [],
+      createAuthUser: async (email) => {
+        authCalls += 1;
+        return {uid: "new", email};
+      },
+      initializeAccount: async ({displayName}) => {
+        receivedName = displayName;
+        return {initialized: true, repairedDocuments: [], shouldSendVerification: false, referralCaptured: false};
+      },
+      sendInitialVerification: async () => false,
+    });
+    assert.equal(authCalls, 1, `${name} should reach accounts:signUp`);
+    assert.equal(receivedName, name);
+  }
+});
+
+test("account validation matches the enforced uppercase and special-character password policy", () => {
+  assert.equal(validateOnboardingV2Account({name: "Player", email: "p@example.com", password: "lower!1"}).errors.password, "Password must include an uppercase letter.");
+  assert.equal(validateOnboardingV2Account({name: "Player", email: "p@example.com", password: "Upper11"}).errors.password, "Password must include a special character.");
+  assert.equal(validateOnboardingV2Account({name: "Player", email: "p@example.com", password: "Upper'1"}).errors.password, undefined);
+  assert.equal(onboardingV2PasswordPolicyError({
+    isValid: false,
+    containsUppercaseLetter: false,
+    containsNonAlphanumericCharacter: false,
+  }), "Password must include an uppercase letter, a special character.");
+});
+
+test("signup failure diagnostics include only stage, safe code, and account-created state", () => {
+  assert.deepEqual(
+    onboardingV2SignupFailureDetails(
+      "auth_create",
+      {code: "auth/password-does-not-meet-requirements", password: "never-log-this"},
+      false
+    ),
+    {stage: "auth_create", code: "auth/password-does-not-meet-requirements", auth_account_created: false}
+  );
+  assert.deepEqual(
+    onboardingV2SignupFailureDetails("referral_attribution", new Error("user value: secret"), false),
+    {stage: "referral_attribution", code: "unknown", auth_account_created: false}
+  );
+});
+
 test("adult validation enforces the agreed 18 to 110 range", () => {
   const year = new Date().getFullYear();
   assert.equal(validateAdultBirthYear(String(year - 18)).valid, true);
@@ -130,6 +200,29 @@ test("adult validation enforces the agreed 18 to 110 range", () => {
   assert.equal(validateAdultBirthYear(String(year - 17)).valid, false);
   assert.equal(validateAdultBirthYear(String(year - 111)).valid, false);
   assert.equal(validateAdultBirthYear("99").valid, false);
+});
+
+test("invalid required account fields stop before Auth", async () => {
+  const invalidFields = [
+    {name: "", email: "p@example.com", password: "Valid!1"},
+    {name: "Player", email: "", password: "Valid!1"},
+    {name: "Player", email: "invalid", password: "Valid!1"},
+    {name: "Player", email: "p@example.com", password: ""},
+    {name: "Player", email: "p@example.com", password: "lower!1"},
+    {name: "Player", email: "p@example.com", password: "Upper11"},
+  ];
+  for (const fields of invalidFields) {
+    let authCalls = 0;
+    await assert.rejects(() => createOnboardingV2Account({
+      fields,
+      birthYear: "1990",
+      referralCandidates: [],
+      createAuthUser: async () => { authCalls += 1; return {uid: "new"}; },
+      initializeAccount: async () => ({initialized: true, repairedDocuments: [], shouldSendVerification: false, referralCaptured: false}),
+      sendInitialVerification: async () => false,
+    }), /account_fields_invalid/);
+    assert.equal(authCalls, 0);
+  }
 });
 
 test("refresh preserves safe pre-Auth progress but requires birth year again before account creation", () => {
@@ -141,6 +234,7 @@ test("refresh preserves safe pre-Auth progress but requires birth year again bef
 
 test("duplicate-email recovery is useful and the verification screen uses the frozen cooldown", () => {
   assert.equal(onboardingV2AuthError("auth/email-already-in-use"), "An account already exists for this email.");
+  assert.equal(onboardingV2AuthError("auth/password-does-not-meet-requirements"), "Password does not meet the current security requirements.");
   assert.match(flowSource, /Sign in to continue/);
   assert.equal(ONBOARDING_V2_RESEND_COOLDOWN_SECONDS, 60);
   assert.match(flowSource, /window\.addEventListener\("focus"/);
