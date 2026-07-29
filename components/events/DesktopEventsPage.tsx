@@ -155,7 +155,7 @@ return (
     <div className="w-full px-8 2xl:px-12 py-8">
       <div className="grid gap-8 2xl:gap-10 xl:grid-cols-[300px_1fr]">
         {/* Sidebar (match home) */}
-        <TMDesktopSidebar active="Calendar" player={null} />
+        <TMDesktopSidebar player={null} />
 
         {/* Main (match home spacing) */}
         <main className="min-w-0">

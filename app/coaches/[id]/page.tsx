@@ -300,7 +300,6 @@ return (
         <div className="grid gap-3 xl:grid-cols-[300px_1fr]">
           {/* LEFT: Sidebar */}
           <TMDesktopSidebar
-            active="Search"
             player={{
               name: sidebarPlayer.name,
               skillLevel: sidebarPlayer.skillLevel,

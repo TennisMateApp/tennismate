@@ -66,6 +66,7 @@ import {useOnboardingProgress} from "@/lib/useOnboardingProgress";
 import { initializeOrRepairAccount } from "@/lib/accountLifecycle";
 import { profileRecoveryReady } from "@/lib/profileReadiness";
 import { isOnboardingV2Destination, ONBOARDING_V2_PATH } from "@/lib/onboardingV2";
+import { getRouteNavigation } from "@/lib/routeNavigation";
 
 const TM = {
   forest: "#0B3D2E",
@@ -200,6 +201,7 @@ const isDesktop = useIsDesktop(1024);
 const isApp = Capacitor.isNativePlatform();
 const isDesktopWeb = isDesktop && !isApp;
 const onboarding = useOnboardingProgress(user?.uid);
+const activeNavigation = getRouteNavigation(pathname);
 
 
 
@@ -291,23 +293,6 @@ useEffect(() => {
     })
     .catch(() => {});
 }, [user?.uid, pathname, privatePlayerData]);
-
-
-// Show "Matches" instead of "Events" when the user is in the match flow
-const inMatchFlow =
-  pathname.startsWith("/match") ||
-  pathname.startsWith("/matches") ||
-  pathname.startsWith("/messages");
-
-  const inEventsFlow =
-  pathname.startsWith("/events") ||
-  pathname.startsWith("/calendar");
-
-// Show "Matches" in the footer by default instead of "Events"
-const footerTabs = inEventsFlow
-  ? ["home", "calendar", "events"]        // still show Events + Calendar when you're in the events flow
-  : ["home", "match", "matches"];        // default (Home, Match Me, Matches)
-
 
 
 // Existing hides
@@ -831,8 +816,9 @@ return (
       <div className="flex items-center justify-around py-3 text-sm">
         {/* 🏠 HOME */}
         <Link
-          href="/home"
-          aria-label="Home"
+           href="/home"
+           aria-label="Home"
+           aria-current={activeNavigation.mobileActiveDestination === "Home" ? "page" : undefined}
           className="flex flex-col items-center gap-1"
           style={{ color: isActive("/home") ? FOOTER.active : FOOTER.inactive }}
         >
@@ -844,6 +830,7 @@ return (
         <Link
           href="/messages"
           aria-label="Chat"
+          aria-current={activeNavigation.mobileActiveDestination === "Chat" ? "page" : undefined}
           className="relative flex flex-col items-center gap-1"
           style={{
             color: isActive("/messages") ? FOOTER.active : FOOTER.inactive,
@@ -863,6 +850,7 @@ return (
         <Link
           href="/directory"
           aria-label="Search"
+          aria-current={activeNavigation.mobileActiveDestination === "Search" ? "page" : undefined}
           className="flex flex-col items-center gap-1"
           style={{
             color: isActive("/directory") ? FOOTER.active : FOOTER.inactive,
@@ -876,6 +864,7 @@ return (
         <Link
           href="/profile"
           aria-label="Profile"
+          aria-current={activeNavigation.mobileActiveDestination === "Profile" ? "page" : undefined}
           className="flex flex-col items-center gap-1"
           style={{
             color: isActive("/profile") ? FOOTER.active : FOOTER.inactive,

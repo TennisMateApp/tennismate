@@ -555,7 +555,7 @@ setPreviewURL(photoThumbURL || photoURL);
         <div className="grid grid-cols-[280px_minmax(0,1fr)_360px] gap-6 items-start">
          {/* LEFT */}
 <aside className="sticky top-6 self-start">
-  <TMDesktopSidebar active="Profile" player={null} />
+  <TMDesktopSidebar player={null} />
 
   {/* Danger Zone (Delete Account) */}
   <div className="mt-4 rounded-2xl border p-4"

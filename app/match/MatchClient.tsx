@@ -43,6 +43,7 @@ import NotificationPrompt from "@/components/notifications/NotificationPrompt";
 import ClubDiscoveryFilter from "@/components/match/ClubDiscoveryFilter";
 import MatchDistanceFilter from "@/components/match/MatchDistanceFilter";
 import MatchClubAffiliation from "@/components/match/MatchClubAffiliation";
+import { Button, FilterChip } from "@/components/ui";
 import { loadUniqueClubs } from "@/lib/clubs";
 import {
   ANY_CLUB_FILTER,
@@ -3727,43 +3728,27 @@ return (
       </div>
     </div>
 
-    <button
-      type="button"
+    <Button
       onClick={() => setAvailabilityRequestOpen(true)}
-      className="shrink-0 rounded-full px-4 py-3 text-[14px] font-extrabold"
-      style={{
-        background: TM.forest,
-        color: "white",
-        boxShadow: "0 10px 24px rgba(11,61,46,0.18)",
-      }}
+      className="shrink-0"
     >
       Post Availability
-    </button>
+    </Button>
   </div>
 </div>
 
 <div className="mb-4 inline-flex rounded-full bg-[#F3F5F7] p-1 ring-1 ring-black/5">
-  <button
-    type="button"
+  <FilterChip
+    selected={matchSurface === "players"}
     onClick={() => setMatchSurface("players")}
-    className="rounded-full px-4 py-2 text-sm font-extrabold transition"
-    style={
-      matchSurface === "players"
-        ? { background: TM.neon, color: TM.forest }
-        : { background: "transparent", color: "rgba(11,61,46,0.62)" }
-    }
+    className="min-h-10 border-0"
   >
     Players
-  </button>
-  <button
-    type="button"
+  </FilterChip>
+  <FilterChip
+    selected={matchSurface === "availability"}
     onClick={() => setMatchSurface("availability")}
-    className="rounded-full px-4 py-2 text-sm font-extrabold transition"
-    style={
-      matchSurface === "availability"
-        ? { background: TM.neon, color: TM.forest }
-        : { background: "transparent", color: "rgba(11,61,46,0.62)" }
-    }
+    className="min-h-10 border-0"
   >
     <span className="inline-flex items-center gap-1.5">
       Actively Looking
@@ -3773,7 +3758,7 @@ return (
         </span>
       ) : null}
     </span>
-  </button>
+  </FilterChip>
 </div>
 
 

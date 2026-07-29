@@ -76,7 +76,7 @@ export default function DesktopCourtsDirectory(props: {
         {/* ✅ EXACT same grid columns + gap */}
         <div className="grid gap-8 2xl:gap-10 xl:grid-cols-[300px_1fr]">
           {/* ✅ Sidebar placement copied from DesktopDashboardHome */}
-          <TMDesktopSidebar active="Search" />
+          <TMDesktopSidebar />
 
           {/* Main */}
           <main className="min-w-0">

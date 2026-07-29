@@ -505,7 +505,7 @@ const [deleteError, setDeleteError] = useState<string | null>(null);
       
   {/* LEFT: Sidebar pinned left */}
 <aside className="sticky top-6 h-[calc(100vh-48px)]">
-<TMDesktopSidebar active="Profile" />
+<TMDesktopSidebar />
 
 </aside>
 
@@ -536,7 +536,7 @@ return (
 
         {/* LEFT: Desktop Sidebar pinned left */}
 <aside className="sticky top-6 self-start">
-  <TMDesktopSidebar active="Profile" />
+  <TMDesktopSidebar />
 </aside>
 
 

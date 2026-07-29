@@ -445,7 +445,6 @@ return (
       <div className="grid h-full min-h-0 grid-cols-[300px_minmax(360px,420px)_minmax(0,1fr)] gap-6">
         {/* Sidebar (same as Home) */}
         <TMDesktopSidebar
-          active="Chat"
           player={{
             name: user?.displayName || "Me",
             skillLevel: "",

@@ -9,6 +9,7 @@
     "lint": "next lint",
     "typecheck:operations": "tsc -p tsconfig.operations.json --noEmit",
     "test:activity-leaderboard-ui": "tsx --test tests/activityLeaderboard/*.test.tsx",
+    "test:ux-foundation": "tsx --test tests/uxFoundation/*.test.tsx",
     "test:onboarding-foundation": "tsx --test tests/onboardingFoundation/*.test.ts",
     "test:onboarding-v2": "tsx --test tests/onboardingV2/*.test.ts",
     "test:onboarding-v2-milestone2": "tsx --test tests/onboardingV2/milestone2.test.ts",

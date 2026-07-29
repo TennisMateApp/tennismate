@@ -326,7 +326,6 @@ export default function CoachesListPage() {
           <div className="grid gap-4 xl:grid-cols-[280px_1fr]">
             {/* Sidebar */}
             <TMDesktopSidebar
-              active="Search"
               player={{
                 name: sidebarPlayer.name,
                 skillLevel: sidebarPlayer.skillLevel,

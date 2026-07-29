@@ -21,6 +21,7 @@ import { auth, db } from "@/lib/firebaseConfig";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { signOut } from "firebase/auth";
+import { getRouteNavigation, PRIMARY_NAVIGATION_ITEMS } from "@/lib/routeNavigation";
 
 type Player = {
   name?: string | null;
@@ -162,10 +163,8 @@ function formatNotifTime(ts: any): string {
 }
 
 export default function TMDesktopSidebar({
-  active,
   player,
 }: {
-  active?: "Home" | "Chat" | "Calendar" | "Search" | "Profile";
   player?: Player | null;
 }) {
 
@@ -383,38 +382,7 @@ setUnreadMsgCount(unreadMessages);
     .toUpperCase();
 
 
-const navItems: Array<{
-  label: "Home" | "Chat" | "Calendar" | "Search" | "Profile";
-  href: string;
-}> = [
-  { label: "Home", href: "/home" },
-  { label: "Chat", href: "/messages" },
-
-  // ✅ NEW: Calendar link (under Chat)
-  { label: "Calendar", href: "/calendar" },
-
-  { label: "Search", href: "/directory" },
-  { label: "Profile", href: "/profile" },
-];
-
-const derivedActive: (typeof navItems)[number]["label"] | undefined = (() => {
-  if (pathname.startsWith("/profile")) return "Profile";
-  if (pathname.startsWith("/directory")) return "Search"; // ✅ Search only here
-  if (pathname.startsWith("/calendar")) return "Calendar";
-  if (pathname.startsWith("/messages")) return "Chat";
-  if (pathname.startsWith("/home")) return "Home";
-
-  // ✅ Match flows should NOT highlight Search
-  if (
-    pathname.startsWith("/match") ||
-    pathname.startsWith("/matches") ||
-    pathname.startsWith("/match")
-  ) {
-    return undefined;
-  }
-
-  return undefined; // ✅ no default highlight
-})();
+const navItems = PRIMARY_NAVIGATION_ITEMS;
 
 const handleLogout = async () => {
   try {
@@ -425,8 +393,7 @@ const handleLogout = async () => {
   }
 };
 
-const isMatchesRoute = pathname.startsWith("/matches") || pathname.startsWith("/match");
-const activeLabel = derivedActive ?? (isMatchesRoute ? undefined : active);
+const activeLabel = getRouteNavigation(pathname).desktopActiveDestination;
 
 function computeNotifPos() {
   const btn = bellBtnRef.current;
@@ -612,9 +579,10 @@ useEffect(() => {
       const isActive = activeLabel === i.label;
 
       return (
-       <Link
+ <Link
   key={i.label}
   href={i.href}
+  aria-current={isActive ? "page" : undefined}
   className={[
     "relative block w-full rounded-2xl px-3 py-2 text-left text-sm font-semibold transition-colors",
     isActive

@@ -26,7 +26,6 @@ import { useRouter } from "next/navigation";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import DesktopCalendarView from "@/components/calendar/DesktopCalendarView";
 import { useIsDesktop } from "@/lib/useIsDesktop";
-import ClientLayoutWrapper from "@/components/ClientLayoutWrapper";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
 /* ---------------------------- Helper Functions ---------------------------- */
@@ -259,7 +258,7 @@ if (isDesktop) {
         <div className="grid grid-cols-[320px_1fr] gap-8 items-start">
           {/* Sidebar pinned to far left */}
           <div className="sticky top-6 self-start">
-            <TMDesktopSidebar active="Home" />
+            <TMDesktopSidebar />
           </div>
 
           {/* Main content spans the rest */}
@@ -305,7 +304,6 @@ router.push(`/events/${e.eventId}`);
   /* ----------------------------- Mobile UI Layout -------------------------- */
 /* ----------------------------- Mobile UI Layout -------------------------- */
 return (
-  <ClientLayoutWrapper>
     <div className="w-full bg-[#F6FAF7]">
       {/* ✅ wrapper handles bottom nav, so we do normal page padding */}
       <div className="w-full px-4 pb-8">
@@ -513,6 +511,5 @@ return (
         </div>
       </div>
     </div>
-  </ClientLayoutWrapper>
 );
 }

@@ -9,6 +9,7 @@ import MatchClubAffiliation from "@/components/match/MatchClubAffiliation";
 import { clubFilterEmptyState, type ClubFilter, type ClubMembershipLike } from "@/lib/matchClubDiscovery";
 import { CalendarDays, MapPin, X } from "lucide-react";
 import type { MatchDistanceKm } from "@/lib/matchDistance";
+import { Button, FilterChip } from "@/components/ui";
 
 const TM = {
   forest: "#0B3D2E",
@@ -361,18 +362,12 @@ const handleInvite = useCallback(
                 </div>
               </div>
 
-              <button
-                type="button"
+              <Button
                 onClick={onOpenAvailabilityRequest}
-                className="shrink-0 rounded-full px-4 py-2.5 text-sm font-extrabold"
-                style={{
-                  background: TM.forest,
-                  color: "white",
-                  boxShadow: "0 10px 24px rgba(11,61,46,0.18)",
-                }}
+                className="shrink-0"
               >
                 Post Availability
-              </button>
+              </Button>
             </div>
 
             {/* GRID */}
@@ -383,27 +378,17 @@ const handleInvite = useCallback(
                 </div>
               ) : null}
               <div className="mb-5 inline-flex rounded-full bg-white p-1 ring-1 ring-black/10">
-                <button
-                  type="button"
+                <FilterChip
+                  selected={matchSurface === "players"}
                   onClick={() => setMatchSurface("players")}
-                  className="rounded-full px-4 py-2 text-sm font-extrabold transition"
-                  style={
-                    matchSurface === "players"
-                      ? { background: TM.neon, color: TM.forest }
-                      : { background: "transparent", color: "rgba(11,61,46,0.62)" }
-                  }
+                  className="min-h-10 border-0"
                 >
                   Players
-                </button>
-                <button
-                  type="button"
+                </FilterChip>
+                <FilterChip
+                  selected={matchSurface === "availability"}
                   onClick={() => setMatchSurface("availability")}
-                  className="rounded-full px-4 py-2 text-sm font-extrabold transition"
-                  style={
-                    matchSurface === "availability"
-                      ? { background: TM.neon, color: TM.forest }
-                      : { background: "transparent", color: "rgba(11,61,46,0.62)" }
-                  }
+                  className="min-h-10 border-0"
                 >
                   <span className="inline-flex items-center gap-1.5">
                     Actively Looking
@@ -413,7 +398,7 @@ const handleInvite = useCallback(
                       </span>
                     ) : null}
                   </span>
-                </button>
+                </FilterChip>
               </div>
 
               {matchSurface === "availability" ? (

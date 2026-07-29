@@ -321,7 +321,6 @@ const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
         <div className="grid gap-8 2xl:gap-10 xl:grid-cols-[300px_1fr]">
           {/* Sidebar */}
           <TMDesktopSidebar
-            active="Home"
             player={{
               name: userName,
               skillLevel: levelLabel,

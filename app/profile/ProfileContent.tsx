@@ -938,7 +938,7 @@ const handleDeleteProfile = async () => {
     <div className="min-h-screen" style={{ background: TM.cream }}>
       <div className="mx-auto max-w-7xl px-6 py-6">
         <div className="grid grid-cols-[300px_1fr] gap-8 items-start">
-          <TMDesktopSidebar active="Profile" />
+          <TMDesktopSidebar />
           <div className="min-w-0">
             {/* ✅ Put your DESKTOP profile UI here */}
           </div>

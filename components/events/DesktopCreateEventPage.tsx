@@ -414,7 +414,7 @@ useEffect(() => {
       <div className="flex w-full gap-6 px-6 py-6">
         {/* LEFT SIDEBAR */}
         <aside className="w-[280px] shrink-0">
-          <TMDesktopSidebar active="Home" player={null} />
+          <TMDesktopSidebar player={null} />
         </aside>
 
         {/* CONTENT */}

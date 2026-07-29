@@ -15,6 +15,7 @@ import {
 import {activityLeaderboardViewState, defaultPublishedMonth, formatActivityMonth} from "@/lib/activityLeaderboardModel";
 import LeaderboardRows, {LeaderboardRow} from "@/components/activityLeaderboard/LeaderboardRows";
 import {ANALYTICS_EVENTS} from "@/lib/analyticsEvents";
+import { Button } from "@/components/ui";
 
 const INITIAL_ROW_COUNT = 10;
 const trackActivityEvent = async (eventName: string, params?: Record<string, string>) => {
@@ -134,7 +135,7 @@ export default function ActivityLeaderboardClient() {
           {selectedMonth && <div className="mb-4 px-1"><h2 className="text-lg font-black text-slate-900">{formatActivityMonth(selectedMonth)}</h2><p className="text-xs font-medium text-slate-500">Published monthly standings</p></div>}
           {viewState === "loading" && <LoadingState />}
           {viewState === "error" && (
-            <div className="rounded-2xl bg-rose-50 p-6 text-center"><AlertCircle className="mx-auto h-7 w-7 text-rose-600" /><h2 className="mt-2 font-black text-slate-900">We couldn&apos;t load the leaderboard</h2><p className="mt-1 text-sm text-slate-600">Please check your connection and try again.</p><button onClick={retry} className="mt-4 min-h-11 rounded-full bg-emerald-950 px-5 text-sm font-black text-white">Try again</button></div>
+            <div className="rounded-2xl bg-rose-50 p-6 text-center"><AlertCircle className="mx-auto h-7 w-7 text-rose-600" /><h2 className="mt-2 font-black text-slate-900">We couldn&apos;t load the leaderboard</h2><p className="mt-1 text-sm text-slate-600">Please check your connection and try again.</p><Button onClick={retry} className="mt-4">Try again</Button></div>
           )}
           {viewState === "unavailable" && (
             <div className="rounded-2xl bg-slate-50 p-7 text-center"><Info className="mx-auto h-7 w-7 text-slate-500" /><h2 className="mt-2 font-black text-slate-900">No published leaderboard for this month</h2><p className="mt-1 text-sm text-slate-600">Choose another published month, or check back after the next update.</p></div>

@@ -279,7 +279,7 @@ export default function DesktopEventDetailsPage(props: {
     <div className="w-full px-8 2xl:px-12 py-8">
       <div className="grid gap-8 2xl:gap-10 xl:grid-cols-[300px_1fr]">
         {/* Sidebar (match home) */}
-        <TMDesktopSidebar active="Calendar" player={null} />
+        <TMDesktopSidebar player={null} />
 
         {/* Main (match home) */}
         <main className="min-w-0 xl:pr-[460px] 2xl:pr-[520px]">

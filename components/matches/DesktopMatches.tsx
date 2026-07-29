@@ -37,6 +37,7 @@ import {
   shouldShowNotificationPrompt,
 } from "@/lib/notificationPromptState";
 import { registerTennisMateNotifications } from "@/lib/registerNotifications";
+import { Button } from "@/components/ui";
 
 /* ---------------------------- Helpers (same as mobile) ---------------------------- */
 
@@ -1744,7 +1745,6 @@ const handleEnableIncomingRequestNotifications = async () => {
         <div className="grid gap-8 2xl:gap-10 xl:grid-cols-[300px_1fr]">
           {/* Sidebar (MATCHES DASHBOARD) */}
           <TMDesktopSidebar
-            active="Chat"
             player={{
               name: userName,
               skillLevel: levelLabel,
@@ -1804,19 +1804,18 @@ const handleEnableIncomingRequestNotifications = async () => {
                       />
                     </div>
 
-                    <button
-                      type="button"
+                    <Button
+                      variant="secondary"
                       onClick={() => {
                         track("desktop_find_a_match_clicked", { source: "match_center" });
                         router.push("/match");
                       }}
-                      className="h-10 rounded-full px-4 text-sm font-extrabold text-[#0B3D2E]"
-                      style={{ background: "#39FF14" }}
+                      className="shrink-0"
                     >
                       <span className="inline-flex items-center gap-2">
                         <ArrowRight className="h-4 w-4" /> Find a Match
                       </span>
-                    </button>
+                    </Button>
                   </div>
                 </div>
 

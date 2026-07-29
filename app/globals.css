@@ -5,6 +5,52 @@
   --background: #ffffff;
   --foreground: #171717;
 
+  /* TennisMate semantic colours */
+  --tm-color-brand-primary: #0b3d2e;
+  --tm-color-brand-accent: #39ff14;
+  --tm-color-page-background: #f7faf8;
+  --tm-color-surface: #ffffff;
+  --tm-color-text-primary: #0f172a;
+  --tm-color-text-secondary: #475569;
+  --tm-color-text-muted: #64748b;
+  --tm-color-border: rgba(11, 61, 46, 0.14);
+  --tm-color-focus: rgba(32, 164, 100, 0.42);
+  --tm-color-success: #15803d;
+  --tm-color-warning: #b45309;
+  --tm-color-error: #b91c1c;
+  --tm-color-disabled: #e2e8f0;
+
+  /* 4px-based spacing scale */
+  --tm-space-1: 0.25rem;
+  --tm-space-2: 0.5rem;
+  --tm-space-3: 0.75rem;
+  --tm-space-4: 1rem;
+  --tm-space-6: 1.5rem;
+  --tm-space-8: 2rem;
+  --tm-space-12: 3rem;
+
+  /* Typography */
+  --tm-text-page-title: 1.25rem;
+  --tm-text-section-heading: 1.125rem;
+  --tm-text-card-heading: 1rem;
+  --tm-text-body: 1rem;
+  --tm-text-supporting: 0.875rem;
+  --tm-text-caption: 0.75rem;
+  --tm-text-button: 0.875rem;
+  --tm-text-field-label: 0.875rem;
+  --tm-text-field-error: 0.875rem;
+
+  /* Shape and elevation */
+  --tm-radius-button: 0.75rem;
+  --tm-radius-input: 0.75rem;
+  --tm-radius-card: 1rem;
+  --tm-radius-chip: 999px;
+  --tm-radius-dialog: 1.5rem;
+  --tm-border-width: 1px;
+  --tm-shadow-button: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --tm-shadow-card: 0 1px 3px rgba(15, 23, 42, 0.07);
+  --tm-shadow-dialog: 0 20px 45px rgba(15, 23, 42, 0.2);
+
   /* Modern safe-area vars */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -32,6 +78,10 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-tm-brand: var(--tm-color-brand-primary);
+  --color-tm-accent: var(--tm-color-brand-accent);
+  --color-tm-page: var(--tm-color-page-background);
+  --color-tm-surface: var(--tm-color-surface);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -48,6 +98,49 @@ body {
 
 body {
   @apply bg-white text-gray-900;
+}
+
+/* Shared semantic typography */
+.tm-type-page-title {
+  font-size: var(--tm-text-page-title);
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.tm-type-section-heading {
+  font-size: var(--tm-text-section-heading);
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+.tm-type-card-heading {
+  font-size: var(--tm-text-card-heading);
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.tm-type-body {
+  font-size: var(--tm-text-body);
+  line-height: 1.6;
+}
+
+.tm-type-supporting {
+  font-size: var(--tm-text-supporting);
+  line-height: 1.5;
+}
+
+.tm-type-caption {
+  font-size: var(--tm-text-caption);
+  line-height: 1.4;
+}
+
+.tm-type-button,
+.tm-type-field-label,
+.tm-type-field-error {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  font-weight: 600;
 }
 
 /* ---------- Safe-area helpers ---------- */

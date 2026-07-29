@@ -352,7 +352,7 @@ useEffect(() => {
         <div className="w-full px-4 lg:px-8 2xl:px-12 py-6">
           <div className="flex items-start gap-6">
             {/* Left sidebar */}
-            <TMDesktopSidebar active="Search" player={null} />
+            <TMDesktopSidebar player={null} />
 
             {/* Main content */}
             <div className="flex-1 min-w-0">

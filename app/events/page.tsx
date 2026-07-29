@@ -18,6 +18,7 @@ import { CalendarDays, MapPin, Users, Plus, CircleCheck } from "lucide-react";
 import DesktopEventsPage from "@/components/events/DesktopEventsPage";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { getEventFilledSpots } from "@/lib/eventCapacity";
+import { FilterChip } from "@/components/ui";
 
 type EventItem = {
   id: string;
@@ -231,22 +232,17 @@ const ev: EnrichedEvent = { ...data, id: d.id };
         {(["all", "singles", "doubles", "social", "mine"] as Filter[]).map((f) => {
           const isActive = filter === f;
           return (
-            <button
+            <FilterChip
               key={f}
               onClick={() => setFilter(f)}
-              className={[
-                "rounded-full px-3 py-1.5 text-sm font-medium transition",
-                isActive
-                  ? "bg-green-600 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200",
-              ].join(" ")}
+              selected={isActive}
             >
               {f === "all"
                 ? "All"
                 : f === "mine"
                 ? "Mine"
                 : f[0].toUpperCase() + f.slice(1)}
-            </button>
+            </FilterChip>
           );
         })}
       </div>
