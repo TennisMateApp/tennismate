@@ -334,7 +334,7 @@ const handleComplete = async () => {
       <div className="mb-3 text-left">
         <div className="flex items-center gap-3">
           <GiTennisBall className="h-6 w-6 text-green-600" aria-hidden="true" />
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Match Summary</h1>
+          <h1 className="text-center text-[22px] font-extrabold tracking-tight text-[#0B3D2E] lg:text-[28px]">Match Summary</h1>
         </div>
         <p className="mt-1 ml-9 text-sm text-gray-600">Nice work! Here’s how the sets finished up.</p>
       </div>

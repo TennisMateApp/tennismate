@@ -25,6 +25,8 @@ import { useRouter } from "next/navigation";
 
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import DesktopCalendarView from "@/components/calendar/DesktopCalendarView";
+import AppPageHeader from "@/components/AppPageHeader";
+import CourtsBackButton from "@/components/CourtsBackButton";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 
@@ -308,25 +310,16 @@ return (
       {/* ✅ wrapper handles bottom nav, so we do normal page padding */}
       <div className="w-full px-4 pb-8">
         {/* Top App Bar */}
-        <div className="flex items-center justify-between pt-4 bg-transparent">
-          <button
-            type="button"
+        <AppPageHeader
+          className="pt-4"
+          title="Calendar"
+          leading={<CourtsBackButton
             onClick={() => {
               if (typeof window !== "undefined" && window.history.length > 1) router.back();
               else router.push("/");
             }}
-            className="h-10 w-10 rounded-full flex items-center justify-center"
-            style={{ background: "transparent" }}
-            aria-label="Back"
-          >
-            <ArrowLeft size={20} className="text-[#0B3D2E]" />
-          </button>
-
-          <div className="text-[16px] font-semibold text-slate-900">Calendar</div>
-
-          {/* Spacer to keep title centered */}
-          <div className="h-10 w-10" />
-        </div>
+          />}
+        />
 
         {/* Calendar Card */}
         <div className="mt-4 rounded-3xl bg-white border border-slate-200/50 shadow-sm p-5">

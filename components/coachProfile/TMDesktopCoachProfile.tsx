@@ -99,7 +99,7 @@ export default function TMDesktopCoachProfile(props: {
             {/* name + sub */}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-[18px] font-extrabold" style={{ color: TM.forest }}>
+                <h1 className="text-center text-[28px] font-extrabold tracking-tight" style={{ color: TM.forest }}>
                   {coach.name || "Coach"}
                 </h1>
 

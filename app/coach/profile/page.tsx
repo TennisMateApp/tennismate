@@ -18,6 +18,7 @@ import Cropper from "react-easy-crop";
 import getCroppedImg from "../../utils/cropImage";
 import { httpsCallable } from "firebase/functions";
 import { getFunctionsClient } from "@/lib/getFunctionsClient";
+import AppPageHeader from "@/components/AppPageHeader";
 
 
 type GalleryPhoto = { url: string; path: string; createdAt: number };
@@ -590,7 +591,7 @@ function cancelAvatarCrop() {
   if (!isCoach) {
     return (
       <div className="max-w-3xl mx-auto p-4">
-        <h1 className="text-xl font-semibold">Coach Profile</h1>
+        <h1 className="text-center text-[22px] font-extrabold tracking-tight text-[#0B3D2E] lg:text-[28px]">Coach Profile</h1>
         <p className="mt-2 text-sm opacity-80">
           This area is invite-only for coaches.
         </p>
@@ -614,13 +615,10 @@ function cancelAvatarCrop() {
 
   return (
     <div className="max-w-3xl mx-auto p-4 pb-24">
- <div className="flex items-start justify-between gap-3">
-  <div>
-    <h1 className="text-xl font-semibold">My Coach Profile</h1>
-    <p className="text-sm opacity-70">Edit your coach details and photos.</p>
-  </div>
-
-  <div className="flex items-center gap-2">
+ <AppPageHeader
+  title="My Coach Profile"
+  subtitle="Edit your coach details and photos."
+  actions={<div className="flex flex-wrap items-center justify-center gap-2">
     {status !== "active" ? (
       <button
         onClick={publishCoachProfile}
@@ -642,8 +640,9 @@ function cancelAvatarCrop() {
     >
       {saving ? "Saving…" : "Save draft"}
     </button>
-  </div>
-</div>
+  </div>}
+  stackActions
+ />
 
 
       {success && (

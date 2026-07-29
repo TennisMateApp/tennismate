@@ -8,6 +8,7 @@ import { Phone, MessageSquare, MapPin, ArrowLeft, X, Pencil } from "lucide-react
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import TMDesktopCoachProfile from "@/components/coachProfile/TMDesktopCoachProfile";
 import { onAuthStateChanged } from "firebase/auth";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 type GalleryPhoto = { url: string; path?: string; createdAt?: number };
 
@@ -341,17 +342,11 @@ return (
 
     {/* Top bar like screenshot */}
     <div className="mt-3 flex items-center justify-between">
-      <button
-        onClick={() => router.back()}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
-        aria-label="Back"
-      >
-        <ArrowLeft size={18} />
-      </button>
+      <CourtsBackButton onClick={() => router.back()} />
 
       <div className="text-sm font-semibold text-gray-900">Coach Profile</div>
 
-      <div className="h-9 w-9" />
+      <div className="h-11 w-11" />
     </div>
 
     {/* Profile Card */}

@@ -23,6 +23,7 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import { trackEvent } from "@/lib/mixpanel";
 import { shouldTrackRematchInviteAccepted } from "@/lib/rematchAnalytics";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 const TM = {
   ink: "#0B3D2E",
@@ -449,13 +450,7 @@ await addDoc(
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b px-4">
         <div className="h-[64px] flex items-center gap-3">
-<button
-  onClick={handleBack}
-  className="h-10 w-10 rounded-full grid place-items-center hover:bg-black/5"
-  aria-label="Back"
->
-  <ArrowLeft className="w-5 h-5 text-gray-800" />
-</button>
+<CourtsBackButton onClick={handleBack} />
 
           <div className="flex-1 min-w-0">
             <div className="truncate text-[18px] font-extrabold text-gray-900">{title}</div>

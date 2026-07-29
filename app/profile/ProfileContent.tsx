@@ -41,6 +41,7 @@ import type { ClubStatus } from "@/lib/clubs";
 import { safeNextDestination } from "@/lib/verificationFlow";
 import { trackEvent as trackAnalyticsEvent } from "@/lib/analytics";
 import { getClubMembershipPresentation } from "@/lib/clubMembershipPresentation";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 
 const TM = {
@@ -956,24 +957,16 @@ return (
   <>
     {/* TOP BAR */}
     <div className="flex items-center justify-between pt-2">
-      <button
-  type="button"
-  onClick={() => router.push("/home")}
-  className="h-10 w-10 rounded-full grid place-items-center"
-  style={{ background: "rgba(0,0,0,0.04)" }}
-  aria-label="Back"
->
-  <span className="text-xl" style={{ color: TM.forest }}>‹</span>
-</button>
+      <CourtsBackButton onClick={() => router.push("/home")} />
 
-      <div className="text-base font-extrabold" style={{ color: TM.forest }}>
+      <div className="text-[22px] font-extrabold leading-tight tracking-tight" style={{ color: TM.forest }}>
         My Profile
       </div>
 
       <button
         type="button"
         onClick={() => router.push("/profile?edit=true")}
-        className="h-10 w-10 rounded-full grid place-items-center"
+        className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#0B3D2E]/15 bg-white shadow-sm"
         style={{ background: "rgba(0,0,0,0.04)" }}
         aria-label="Edit profile"
       >
@@ -1258,15 +1251,7 @@ return (
   <>
     {/* EDIT TOP BAR (like screenshot) */}
     <div className="flex items-center justify-between pt-2">
-      <button
-        type="button"
-        onClick={() => router.push("/profile")}
-        className="h-10 w-10 rounded-full grid place-items-center"
-        style={{ background: "rgba(0,0,0,0.04)" }}
-        aria-label="Back"
-      >
-        <span className="text-xl" style={{ color: TM.forest }}>‹</span>
-      </button>
+      <CourtsBackButton onClick={() => router.push("/profile")} />
 
       <div className="text-base font-extrabold" style={{ color: TM.forest }}>
         Edit Profile

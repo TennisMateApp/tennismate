@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 
 // ✅ ADD: desktop component
 import { TMDesktopCoachDirectory } from "@/components/coachdirectory/TMDesktopCoachDirectory";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 
@@ -376,15 +377,8 @@ export default function CoachesListPage() {
         <div className="mx-auto max-w-4xl px-4 pb-24">
           <div className="sticky top-0 z-10 bg-[#F7FAF8] pt-4 pb-3">
             <div className="flex items-center justify-center relative">
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className="absolute left-0 inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
-                aria-label="Back"
-              >
-                <ChevronLeft size={20} />
-              </button>
-              <div className="text-base font-semibold">Coach Directory</div>
+              <div className="absolute left-0"><CourtsBackButton onClick={() => router.back()} /></div>
+              <h1 className="text-[22px] font-extrabold leading-tight tracking-tight text-[#0B3D2E]">Coach Directory</h1>
             </div>
             <div className="mt-3">
               <div className="flex items-center gap-2 rounded-2xl border bg-white px-3 py-2">
@@ -411,15 +405,8 @@ export default function CoachesListPage() {
         <div className="mx-auto max-w-4xl px-4 pb-24">
           <div className="sticky top-0 z-10 bg-[#F7FAF8] pt-4 pb-3">
             <div className="flex items-center justify-center relative">
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className="absolute left-0 inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
-                aria-label="Back"
-              >
-                <ChevronLeft size={20} />
-              </button>
-              <div className="text-base font-semibold">Coach Directory</div>
+              <div className="absolute left-0"><CourtsBackButton onClick={() => router.back()} /></div>
+              <h1 className="text-[22px] font-extrabold leading-tight tracking-tight text-[#0B3D2E]">Coach Directory</h1>
             </div>
           </div>
 
@@ -436,15 +423,8 @@ export default function CoachesListPage() {
       <div className="mx-auto max-w-4xl px-4 pb-24">
         <div className="sticky top-0 z-10 bg-[#F7FAF8] pt-4 pb-3">
           <div className="flex items-center justify-center relative">
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="absolute left-0 inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
-              aria-label="Back"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <div className="text-base font-semibold">Coach Directory</div>
+            <div className="absolute left-0"><CourtsBackButton onClick={() => router.back()} /></div>
+            <h1 className="text-[22px] font-extrabold leading-tight tracking-tight text-[#0B3D2E]">Coach Directory</h1>
           </div>
 
           <div className="mt-3">

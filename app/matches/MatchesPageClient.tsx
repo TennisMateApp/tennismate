@@ -42,6 +42,8 @@ import { suggestCourt } from "@/lib/suggestCourt";
 import { track } from "@/lib/track";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import DesktopMatches from "@/components/matches/DesktopMatches";
+import AppPageHeader from "@/components/AppPageHeader";
+import CourtsBackButton from "@/components/CourtsBackButton";
 import { trackEvent } from "@/lib/mixpanel";
 import { createMatchRequestWithRelationship, getPairId } from "@/lib/playerRelationships";
 import NotificationPrompt from "@/components/notifications/NotificationPrompt";
@@ -2323,24 +2325,10 @@ return (
     {/* Top bar + segmented control */}
     <div className="sticky top-[var(--safe-top)] z-30 bg-[#F3F5F7]">
       <div className="mx-auto w-full max-w-xl px-3 sm:px-4 pt-4">
-        <div className="relative flex items-center justify-between">
-          {/* Back */}
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="h-10 w-10 grid place-items-center rounded-full hover:bg-black/5"
-            aria-label="Back"
-          >
-            <ArrowLeft className="h-5 w-5 text-gray-700" />
-          </button>
-
-          {/* Title */}
-          <div className="absolute left-1/2 -translate-x-1/2 text-[15px] font-semibold text-gray-900">
-            My Matches
-          </div>
-
-       <div className="h-10 w-10" />
-        </div>
+        <AppPageHeader
+          title="My Matches"
+          leading={<CourtsBackButton onClick={() => router.back()} />}
+        />
 {/* Segmented control */}
 <div className="mt-3 rounded-full bg-white/80 p-1 ring-1 ring-black/5">
   <div className="grid grid-cols-3 gap-1">

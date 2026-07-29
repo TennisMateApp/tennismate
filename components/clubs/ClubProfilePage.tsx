@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Building2, CalendarDays, ExternalLink, MapPin, Users } from "lucide-react";
+import CourtsBackButton from "@/components/CourtsBackButton";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import ClubMemberCard from "@/components/clubs/ClubMemberCard";
 import { useIsDesktop } from "@/lib/useIsDesktop";
@@ -59,9 +60,7 @@ export default function ClubProfilePage({ courtId }: { courtId: string }) {
     <StateCard title="Club not found" body="This court is no longer available in TennisMate." />
   ) : (
     <div className="min-w-0">
-      <Link href="/courts" className="inline-flex items-center gap-2 text-sm font-extrabold text-emerald-950/65 hover:text-emerald-950">
-        <ArrowLeft size={17} aria-hidden="true" /> Courts
-      </Link>
+      <CourtsBackButton href="/courts" label="Back to Courts" title="Back to Courts" />
 
       <header className="relative -mx-4 mt-4 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#0B3D2E_0%,#07523B_55%,#0B3D2E_100%)] py-3.5 text-white shadow-md lg:mx-0 lg:rounded-[24px] lg:p-5">
         <svg
@@ -77,20 +76,20 @@ export default function ClubProfilePage({ courtId }: { courtId: string }) {
           </g>
         </svg>
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-emerald-950/35 via-transparent to-emerald-950/10" />
-        <div className="relative pl-[max(1.25rem,var(--safe-left))] pr-[max(1.25rem,var(--safe-right))] lg:px-0">
-          <div className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 bg-white/[0.08] text-[#39FF14]">
+        <div className="relative pl-[max(1.25rem,var(--safe-left))] pr-[max(1.25rem,var(--safe-right))] text-center lg:px-0">
+          <div className="mx-auto grid h-7 w-7 place-items-center rounded-lg border border-white/10 bg-white/[0.08] text-[#39FF14]">
             <Building2 size={18} aria-hidden="true" />
           </div>
-          <h1 className="mt-1.5 max-w-3xl break-words text-[1.75rem] font-black leading-[1.12] tracking-tight lg:text-3xl">{club.name}</h1>
+          <h1 className="mt-1.5 max-w-3xl break-words text-[22px] font-extrabold leading-tight tracking-tight lg:text-[28px]">{club.name}</h1>
           <p className="mt-1 text-sm font-bold text-white/70">Community Tennis Club</p>
           {(club.suburb || club.postcode) ? (
-            <div className="mt-1.5 flex items-center gap-1.5 text-sm font-semibold text-white/85">
+            <div className="mt-1.5 flex items-center justify-center gap-1.5 text-sm font-semibold text-white/85">
               <MapPin size={16} className="shrink-0 text-[#39FF14]" aria-hidden="true" />
               <span>{[club.suburb, club.postcode].filter(Boolean).join(" ")}</span>
             </div>
           ) : null}
           {(club.officialWebsiteUrl || club.bookingUrl) ? (
-            <div className="mb-2.5 mt-2.5 flex flex-wrap gap-2.5">
+            <div className="mb-2.5 mt-2.5 flex flex-wrap justify-center gap-2.5">
               {club.officialWebsiteUrl ? (
                 <a href={club.officialWebsiteUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3.5 py-2 text-sm font-extrabold text-white shadow-sm">
                   Club Website <ExternalLink size={15} aria-hidden="true" />
