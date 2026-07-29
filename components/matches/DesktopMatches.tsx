@@ -30,6 +30,7 @@ import { suggestCourt } from "@/lib/suggestCourt";
 import { track } from "@/lib/track";
 import PlayerProfileView from "@/components/players/PlayerProfileView";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
+import AppPageHeader from "@/components/AppPageHeader";
 import { createMatchRequestWithRelationship, getPairId } from "@/lib/playerRelationships";
 import NotificationPrompt from "@/components/notifications/NotificationPrompt";
 import {
@@ -1760,14 +1761,10 @@ const handleEnableIncomingRequestNotifications = async () => {
               {/* LEFT COLUMN */}
               <section className="min-w-0">
                 {/* Header row */}
-                <div className="flex items-start justify-between gap-6">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-[22px] font-black tracking-tight text-gray-900">
-                        Match Center
-                      </div>
-
-                      <span
+                <AppPageHeader
+                  title="Match Center"
+                  subtitle="Manage your confirmed games, pending requests, and match history."
+                  actions={<div className="flex flex-wrap items-center justify-center gap-3"><span
                         className="rounded-full px-3 py-1 text-xs font-extrabold"
                         style={{
                           background: "rgba(11,61,46,0.10)",
@@ -1786,14 +1783,6 @@ const handleEnableIncomingRequestNotifications = async () => {
                           ? "results"
                           : "requests"}
                       </span>
-                    </div>
-
-                    <div className="mt-1 text-[12px] text-gray-600">
-                      Manage your confirmed games, pending requests, and match history.
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3">
                     <div className="relative w-[360px]">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-black/40" />
                       <input
@@ -1817,8 +1806,9 @@ const handleEnableIncomingRequestNotifications = async () => {
                         <ArrowRight className="h-4 w-4" /> Find a Match
                       </span>
                     </button>
-                  </div>
-                </div>
+                  </div>}
+                  stackActions
+                />
 
                 <div className="mt-6 flex items-center gap-8 border-b border-black/10">
                   <button

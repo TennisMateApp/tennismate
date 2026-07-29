@@ -7,6 +7,7 @@ import ClubDiscoveryFilter from "@/components/match/ClubDiscoveryFilter";
 import MatchClubAffiliation from "@/components/match/MatchClubAffiliation";
 import { clubFilterEmptyState, type ClubFilter, type ClubMembershipLike } from "@/lib/matchClubDiscovery";
 import { CalendarDays, MapPin, X } from "lucide-react";
+import AppPageHeader from "@/components/AppPageHeader";
 
 const TM = {
   forest: "#0B3D2E",
@@ -328,14 +329,10 @@ const handleInvite = useCallback(
         <div className="grid grid-cols-[minmax(0,1fr)_340px] gap-8 items-start">
           {/* LEFT */}
           <div className="min-w-0">
-            <div className="flex items-start justify-between gap-6">
-              <div>
-                <div className="flex items-center gap-3">
-                  <div className="text-[22px] font-black tracking-tight text-gray-900">
-                    Find a Match
-                  </div>
-
-                  <span
+            <AppPageHeader
+              title="Find a Match"
+              subtitle="Recommended tennis players based on your profile, distance and availability."
+              actions={<div className="flex flex-wrap items-center justify-center gap-3"><span
                     className="rounded-full px-3 py-1 text-xs font-extrabold"
                     style={{
                       background: "rgba(11,61,46,0.10)",
@@ -346,15 +343,7 @@ const handleInvite = useCallback(
                     {filtersActive
                       ? `${sortedMatches.length} matching ${sortedMatches.length === 1 ? "partner" : "partners"}`
                       : `${postcodePrefixPlayerCount ?? sortedMatches.length} partners`}
-                  </span>
-                </div>
-
-                <div className="text-[12px] text-gray-600 mt-1">
-                  Recommended tennis players based on your profile, distance and availability.
-                </div>
-              </div>
-
-              <button
+                  </span><button
                 type="button"
                 onClick={onOpenAvailabilityRequest}
                 className="shrink-0 rounded-full px-4 py-2.5 text-sm font-extrabold"
@@ -365,8 +354,9 @@ const handleInvite = useCallback(
                 }}
               >
                 Post Availability
-              </button>
-            </div>
+              </button></div>}
+              stackActions
+            />
 
             {/* GRID */}
             <main className="mt-6">

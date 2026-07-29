@@ -16,6 +16,7 @@ import {
   limit,
 } from "firebase/firestore";
 import debounce from "lodash.debounce";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 /** Desktop Create Event (matches screenshot layout) */
 
@@ -425,13 +426,7 @@ useEffect(() => {
         <section className="flex-1">
           {/* Top bar (back / title / help) */}
           <div className="mb-6 flex items-center justify-between">
-            <Link
-              href="/events"
-              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-white hover:shadow-sm"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </Link>
+            <CourtsBackButton href="/events" label="Back to Events" title="Back to Events" />
 
             <div
   className="text-2xl font-extrabold tracking-tight"

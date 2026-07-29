@@ -61,6 +61,8 @@ import {
 import { ANALYTICS_EVENTS } from "@/lib/analyticsEvents";
 import { profileRecoveryReady } from "@/lib/profileReadiness";
 import MatchMeContextualIntro from "@/components/onboarding-v2/MatchMeContextualIntro";
+import AppPageHeader, { appPageHeaderButtonClass } from "@/components/AppPageHeader";
+import CourtsBackButton from "@/components/CourtsBackButton";
 import {
   consumeOnboardingV2EntrySource,
   ONBOARDING_V2_MATCH_INTRO_STEPS,
@@ -3561,49 +3563,22 @@ return (
 
 {/* Mobile header (matches screenshot vibe) */}
 <div
-  className="-mx-4 sm:-mx-6 px-4 sm:px-6 pt-3 pb-4 sticky top-[var(--safe-top)] z-20"
+  className="-mx-4 sticky top-[var(--safe-top)] z-20 mb-3 px-4 pb-3 pt-3 sm:-mx-6 sm:px-6"
   style={{
     background:
       "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.78) 55%, #ffffff 100%)",
     backdropFilter: "blur(10px)",
   }}
 >
-  <div className="flex items-center justify-between">
-    {/* Back */}
-    <button
-      onClick={() => router.push("/home")}
-      className="h-10 w-10 rounded-full grid place-items-center"
-      style={{
-        background: "rgba(255,255,255,0.06)",
-        border: "1px solid rgba(255,255,255,0.10)",
-      }}
-      aria-label="Back"
-    >
-      <ArrowLeft size={22} strokeWidth={3} style={{ color: TM.forest }} />
-    </button>
-
-    {/* Center title + subtitle */}
-    <div className="text-center">
-      <div
-        className="font-black tracking-tight text-[20px] leading-none"
-        style={{ color: TM.forest }}
-      >
-        Find a Match
-      </div>
-      <div
-        className="text-[13px] font-semibold mt-1"
-        style={{ color: "rgba(11,61,46,0.70)" }}
-      >
-        {filtersActive
-          ? `${sortedMatches.length} matching ${sortedMatches.length === 1 ? "player" : "players"}`
-          : `${postcodePrefixPlayerCount ?? sortedMatches.length} players nearby`}
-      </div>
-    </div>
-
-    {/* Filters (circle) */}
-    <button
+  <AppPageHeader
+    title="Find a Match"
+    subtitle={filtersActive
+      ? `${sortedMatches.length} matching ${sortedMatches.length === 1 ? "player" : "players"}`
+      : `${postcodePrefixPlayerCount ?? sortedMatches.length} players nearby`}
+    leading={<CourtsBackButton onClick={() => router.push("/home")} />}
+    actions={<button
       onClick={() => setFiltersOpen((v) => !v)}
-      className="relative h-10 w-10 rounded-full grid place-items-center"
+      className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full"
       style={{
         background: "rgba(11,61,46,0.08)",
         border: "1.5px solid rgba(11,61,46,0.22)",
@@ -3620,8 +3595,8 @@ return (
           style={{ background: TM.neon, boxShadow: `0 0 10px ${TM.neon}` }}
         />
       )}
-    </button>
-  </div>
+    </button>}
+  />
 </div>
 
 {availabilityDraftSaved && (

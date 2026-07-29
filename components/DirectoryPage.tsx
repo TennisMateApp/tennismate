@@ -23,6 +23,7 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import DesktopDirectoryPage from "@/components/directory/DesktopDirectoryPage";
+import AppPageHeader from "@/components/AppPageHeader";
 import { getPlayerPhotoUrl } from "@/lib/profilePhoto";
 
 
@@ -407,12 +408,8 @@ useEffect(() => {
   return (
     <div className="min-h-screen" style={{ background: TM.bg, color: TM.ink }}>
       <div className="mx-auto w-full max-w-md px-4 py-6">
-        {/* Header */}
-        <div className="mb-3">
-  <h1 className="text-[22px] font-extrabold tracking-tight" style={{ color: TM.forest }}>
-    Players
-  </h1>
-</div>
+        {/* Source-of-truth mobile page header */}
+        <AppPageHeader className="mb-3" title="Players" />
 
         {/* Search */}
         <div

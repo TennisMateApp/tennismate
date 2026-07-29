@@ -944,12 +944,12 @@ return (
       {/* icon + title on one row */}
       <div className="flex items-center gap-3">
         <GiTennisBall className="h-6 w-6 text-green-600" aria-hidden="true" />
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+        <h1 className="text-center text-[22px] font-extrabold tracking-tight text-[#0B3D2E] lg:text-[28px]">
           Match Requests
         </h1>
       </div>
       {/* subtitle on its own row, lined up under the title */}
-      <p className="mt-1 ml-9 text-sm text-gray-600">
+      <p className="mt-1 text-center text-sm text-gray-600">
         Manage invitations you’ve sent and received — keep the rallies going.
       </p>
     </div>

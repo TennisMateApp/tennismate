@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import CourtsBackButton from "@/components/CourtsBackButton";
 import TMDesktopSidebar from "@/components/desktop_layout/TMDesktopSidebar";
 import ClubMemberCard from "@/components/clubs/ClubMemberCard";
 import { useIsDesktop } from "@/lib/useIsDesktop";
@@ -58,10 +59,10 @@ export default function ClubMembersPage({ courtId }: { courtId: string }) {
 
   const content = (
     <div className="min-w-0">
-      <Link href={`/clubs/${encodeURIComponent(courtId)}`} className="inline-flex items-center gap-2 text-sm font-extrabold text-emerald-950/65 hover:text-emerald-950"><ArrowLeft size={17} aria-hidden="true" /> Back to club</Link>
+      <CourtsBackButton href={`/clubs/${encodeURIComponent(courtId)}`} label="Back to club" title="Back to club" />
       <div className="mt-5">
-        <h1 className="break-words text-3xl font-black tracking-tight text-emerald-950">{club ? `${club.name} Members` : "Club Members"}</h1>
-        {!loading && club ? <p className="mt-2 text-sm font-semibold text-emerald-950/55">{memberCount} TennisMate {memberCount === 1 ? "member" : "members"}</p> : null}
+        <h1 className="break-words text-center text-[22px] font-extrabold tracking-tight text-[#0B3D2E] lg:text-[28px]">{club ? `${club.name} Members` : "Club Members"}</h1>
+        {!loading && club ? <p className="mt-2 text-center text-sm font-semibold text-emerald-950/55">{memberCount} TennisMate {memberCount === 1 ? "member" : "members"}</p> : null}
       </div>
 
       {error ? <div className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700" role="alert">{error}</div> : null}

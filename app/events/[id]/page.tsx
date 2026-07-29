@@ -44,6 +44,8 @@ import PlayerProfileView from "@/components/players/PlayerProfileView";
 import DesktopEventDetailsPage from "@/components/events/DesktopEventDetailsPage";
 import { resolveSmallProfilePhoto } from "@/lib/profilePhoto";
 import { countEventAttendees, getEventFilledSpots } from "@/lib/eventCapacity";
+import AppPageHeader from "@/components/AppPageHeader";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 
 function getSkill(profile?: any | null): number | null {
@@ -752,16 +754,29 @@ async function handleConfirmBooking() {
 
 
   if (loading) {
-    return <p className="p-6 text-sm text-muted-foreground">Loading event…</p>;
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-6">
+        <AppPageHeader
+          className="mb-5"
+          title="Event Details"
+          leading={
+            <CourtsBackButton href="/events" label="Back to Events" title="Back to Events" />
+          }
+        />
+        <p className="text-sm text-muted-foreground">Loading event…</p>
+      </main>
+    );
   }
   if (!event) {
     return (
-      <main className="mx-auto max-w-3xl p-6">
-        <div className="mb-4">
-          <Link href="/events" className="text-blue-600 hover:underline text-sm">
-            ← Back to Events
-          </Link>
-        </div>
+      <main className="mx-auto max-w-3xl px-4 py-6">
+        <AppPageHeader
+          className="mb-5"
+          title="Event Details"
+          leading={
+            <CourtsBackButton href="/events" label="Back to Events" title="Back to Events" />
+          }
+        />
         <p className="text-red-600">Event not found.</p>
       </main>
     );
@@ -861,19 +876,14 @@ if (isDesktop) {
 
  return (
   <main className="mx-auto max-w-3xl px-4 py-4 pb-10">
-    {/* Top bar (back + actions) */}
-    <div className="mb-3 flex items-center justify-between">
-      <Link
-        href="/events"
-        className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900"
-      >
-        <ArrowLeft className="h-5 w-5" />
-        <span>Event Details</span>
-      </Link>
-
-      {/* Keep status pill if you want (subtle, top-right) */}
-      <StatusPill status={event.status} />
-    </div>
+    <AppPageHeader
+      className="mb-4"
+      title={event.title || "Tennis Event"}
+      leading={
+        <CourtsBackButton href="/events" label="Back to Events" title="Back to Events" />
+      }
+      actions={<StatusPill status={event.status} />}
+    />
 
     {/* HERO */}
     <section className="overflow-hidden rounded-2xl border bg-white shadow-sm">
@@ -885,7 +895,6 @@ if (isDesktop) {
           loading="lazy"
         />
         <div className="absolute inset-0 bg-black/25" />
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent" />
 
         <div className="absolute left-4 top-4">
           <span className="inline-flex items-center rounded-full bg-lime-300 px-3 py-1 text-[11px] font-extrabold tracking-wide text-green-950">
@@ -893,11 +902,6 @@ if (isDesktop) {
           </span>
         </div>
 
-        <div className="absolute bottom-4 left-4 right-4">
-          <h1 className="text-xl font-extrabold leading-tight text-white drop-shadow">
-            {event.title || "Tennis Event"}
-          </h1>
-        </div>
       </div>
 
       {/* Primary CTA */}

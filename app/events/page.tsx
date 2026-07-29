@@ -18,6 +18,8 @@ import { CalendarDays, MapPin, Users, Plus, CircleCheck } from "lucide-react";
 import DesktopEventsPage from "@/components/events/DesktopEventsPage";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { getEventFilledSpots } from "@/lib/eventCapacity";
+import AppPageHeader from "@/components/AppPageHeader";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 type EventItem = {
   id: string;
@@ -145,29 +147,11 @@ const ev: EnrichedEvent = { ...data, id: d.id };
 {/* HEADER */}
 <section className="mb-6">
   {/* Top row: back + icon + title */}
-  <div className="flex items-center gap-3 px-1">
-    <button
-      type="button"
-      onClick={() => router.push("/home")}
-      className="h-10 w-10 rounded-full grid place-items-center"
-      style={{ background: "rgba(0,0,0,0.04)" }}
-      aria-label="Back"
-    >
-      <span className="text-xl" style={{ color: "#0B3D2E" }}>‹</span>
-    </button>
-
-    <div
-      className="h-7 w-7 rounded-full grid place-items-center"
-      style={{ background: "#39FF14" }}
-      aria-hidden="true"
-    >
-      <CalendarDays className="h-4 w-4" style={{ color: "#0B3D2E" }} />
-    </div>
-
-    <div className="text-[15px] font-extrabold" style={{ color: "#111827" }}>
-      Tennis Events
-    </div>
-  </div>
+  <AppPageHeader
+    className="px-1"
+    title="Tennis Events"
+    leading={<CourtsBackButton onClick={() => router.push("/home")} />}
+  />
 
   {/* Promo card */}
   <div className="mt-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-black/5">
@@ -186,9 +170,9 @@ const ev: EnrichedEvent = { ...data, id: d.id };
           HOST A MATCH
         </div>
 
-        <h1 className="mt-2 text-[26px] leading-tight font-extrabold text-white">
+        <h2 className="mt-2 text-[26px] leading-tight font-extrabold text-white">
           Create Your Event
-        </h1>
+        </h2>
 
         <p className="mt-2 text-[13px] leading-snug text-white/75">
           Find players for your court time

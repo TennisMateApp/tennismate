@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { ArrowLeft } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 import {
   ONBOARDING_V2_STEP_META,
@@ -51,10 +52,7 @@ export default function OnboardingV2Shell({
           <div className="mx-auto w-full max-w-xl">
             <div className={onBack ? "flex min-h-11 items-center" : "h-1"}>
               {onBack ? (
-                <button type="button" onClick={onBack} className="-ml-2 inline-flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-semibold text-[#0B3D2E] hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700">
-                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                  Back
-                </button>
+                <CourtsBackButton onClick={onBack} />
               ) : <span />}
             </div>
 

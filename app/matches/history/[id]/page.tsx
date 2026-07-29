@@ -11,6 +11,7 @@ import { GiTennisBall } from "react-icons/gi";
 import { auth, db } from "@/lib/firebaseConfig";
 import { resolveProfilePhoto } from "@/lib/profilePhoto";
 import { createMatchRequestWithRelationship } from "@/lib/playerRelationships";
+import CourtsBackButton from "@/components/CourtsBackButton";
 
 type HistoryMatch = {
   id: string;
@@ -344,14 +345,7 @@ export default function MatchHistoryDetailsPage() {
     <div className="min-h-screen pb-24" style={{ background: TM.bg }}>
       <div className="sticky top-[var(--safe-top)] z-20 border-b border-black/5 bg-[#F3F5F7]/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between px-4 py-4 sm:px-6">
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="grid h-11 w-11 place-items-center rounded-full bg-white ring-1 ring-black/5 hover:bg-black/5"
-            aria-label="Back"
-          >
-            <ArrowLeft className="h-5 w-5 text-gray-700" />
-          </button>
+          <CourtsBackButton onClick={() => router.back()} />
 
           <div className="text-center">
             <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-500">

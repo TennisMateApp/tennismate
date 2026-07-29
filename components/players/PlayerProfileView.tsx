@@ -601,9 +601,9 @@ const clearancePx = showInviteCTA ? CTA_CLEARANCE_PX : 24;
 
     {/* Title / subtitle */}
     <div className="p-3">
-      <div className="text-2xl font-black tracking-tight">{player.name}</div>
+      <h1 className="text-center text-[22px] font-extrabold leading-tight tracking-tight">{player.name}</h1>
 
-      <div className="mt-1 text-sm font-semibold" style={{ color: TM.neon }}>
+      <div className="mt-1 text-center text-sm font-semibold" style={{ color: TM.neon }}>
         TennisMate Player
       </div>
 

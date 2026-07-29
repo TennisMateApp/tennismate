@@ -545,10 +545,10 @@ return (
           {/* ✅ MOVE ALL YOUR EXISTING MIDDLE CONTENT HERE */}
     {/* Header row */}
 <div>
-  <div className="text-2xl font-black" style={{ color: TM.forest }}>
+  <h1 className="text-center text-[28px] font-extrabold tracking-tight" style={{ color: TM.forest }}>
     My Profile
-  </div>
-  <div className="text-sm font-semibold" style={{ color: "rgba(11,61,46,0.55)" }}>
+  </h1>
+  <div className="text-center text-sm font-semibold" style={{ color: "rgba(11,61,46,0.55)" }}>
     Keep your details up to date for better matches.
   </div>
 </div>
