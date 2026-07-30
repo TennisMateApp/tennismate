@@ -110,7 +110,10 @@ test("high-visibility screens retain their page-specific headers", () => {
   assert.match(readFileSync("app/home/HomeClient.tsx", "utf8"), /Hello, \{userName\}!/);
   assert.match(readFileSync("app/match/MatchClient.tsx", "utf8"), /Find a Match/);
   assert.match(readFileSync("components/matches/DesktopMatches.tsx", "utf8"), /Match Center/);
-  assert.match(readFileSync("components/directory/DesktopDirectoryPage.tsx", "utf8"), />\s*Directory\s*</);
+  assert.match(
+    readFileSync("components/directory/DesktopDirectoryPage.tsx", "utf8"),
+    /<AppPageHeader[\s\S]*?title="Directory"/
+  );
   assert.match(readFileSync("app/events/page.tsx", "utf8"), /Tennis Events/);
   assert.match(readFileSync("components/profile/DesktopProfilePage.tsx", "utf8"), /My Profile/);
   assert.doesNotMatch(readFileSync("app/calendar/page.tsx", "utf8"), /<ClientLayoutWrapper>/);
