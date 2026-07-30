@@ -8,6 +8,7 @@ import { httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebaseConfig";
 import { getFunctionsClient } from "@/lib/getFunctionsClient";
 import { matchMeReady } from "@/lib/profileReadiness";
+import { isOnboardingV2Destination, onboardingV2Href } from "@/lib/onboardingV2";
 import type { ReferralCandidate } from "@/lib/referralAttribution";
 import { safeNextDestination, verificationContinueUrl } from "@/lib/verificationFlow";
 
@@ -103,8 +104,7 @@ export async function resolveAccountDestination(user: User, requestedNext?: stri
   const privatePlayer = privateSnapshot.exists() ? privateSnapshot.data() : null;
   const readiness = matchMeReady(player, privatePlayer);
   if (!readiness.ready) {
-    const reason = readiness.reasons[0] || "profile_incomplete";
-    return `/profile?edit=true&recovery=1&reason=${encodeURIComponent(reason)}&next=${encodeURIComponent(next)}`;
+    return isOnboardingV2Destination(next) ? next : onboardingV2Href({next});
   }
   return next;
 }

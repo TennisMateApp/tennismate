@@ -65,7 +65,7 @@ import PwaInstallPrompt from "@/components/pwa/PwaInstallPrompt";
 import {useOnboardingProgress} from "@/lib/useOnboardingProgress";
 import { initializeOrRepairAccount } from "@/lib/accountLifecycle";
 import { profileRecoveryReady } from "@/lib/profileReadiness";
-import { isOnboardingV2Destination, ONBOARDING_V2_PATH } from "@/lib/onboardingV2";
+import { isOnboardingV2Destination, onboardingV2Href, ONBOARDING_V2_PATH } from "@/lib/onboardingV2";
 
 const TM = {
   forest: "#0B3D2E",
@@ -179,7 +179,6 @@ const [playerData, setPlayerData] = useState<any>(null);
 const [privatePlayerData, setPrivatePlayerData] = useState<any>(null);
 const [playerBirthYear, setPlayerBirthYear] = useState<number | null>(null);
 const [authReady, setAuthReady] = useState(false);
-const [showProfilePrompt, setShowProfilePrompt] = useState(false);
   const [unreadMatchRequests, setUnreadMatchRequests] = useState<any[]>([]);
   const [unreadMessages, setUnreadMessages] = useState<any[]>([]);
   const [showSettings, setShowSettings] = useState(false);
@@ -234,7 +233,6 @@ const isActive = (href: string) =>
 const PUBLIC_ROUTES = new Set(["/login", "/signup", ONBOARDING_V2_PATH, "/verify-email", "/verify-complete", "/verified"]);
 const isStandaloneVerificationRoute =
   pathname.startsWith("/verify-complete") || pathname.startsWith("/verified");
-const PROFILE_PROMPT_SESSION_KEY = "tm_dismiss_profile_prompt";
 
 const [profileGateReady, setProfileGateReady] = useState(false);
 const showVerifyRef = useRef(showVerify);
@@ -264,11 +262,6 @@ useEffect(() => {
     timestamp: new Date().toISOString(),
   });
 }, [pathname, user, profileGateReady, playerExists, profileComplete, usableProfile, authReady, loadingState]);
-
-useEffect(() => {
-  if (typeof window === "undefined") return;
-  setShowProfilePrompt(sessionStorage.getItem(PROFILE_PROMPT_SESSION_KEY) !== "1");
-}, [user?.uid]);
 
 // --- Update players/{uid}.lastActiveAt (throttled) ---
 useEffect(() => {
@@ -567,11 +560,11 @@ useEffect(() => {
   if (showVerify) return;
 
 
-  // routes we allow even when profile is incomplete
+  // Routes required to repair or finish an incomplete account.
   const allowedPrefixes = [
-    "/profile",         // must allow the completion screen
     "/verify-email",
     "/verify-complete",
+    "/verified",
     "/login",
     "/signup",
     "/waitlist",
@@ -579,16 +572,9 @@ useEffect(() => {
   ];
 
   const isAllowed = allowedPrefixes.some((p) => pathname.startsWith(p));
-  if (isAllowed || usableProfile === true) {
-    setShowProfilePrompt(false);
-    return;
-  }
+  if (isAllowed || profileComplete === true) return;
 
   // 🔒 If incomplete, force them to complete profile before doing anything else
-  const dismissedForSession =
-    typeof window !== "undefined" &&
-    sessionStorage.getItem(PROFILE_PROMPT_SESSION_KEY) === "1";
-
   console.log("[PROFILE REDIRECT DEBUG]", {
       source: "ClientLayoutWrapper",
       reason: "player exists on protected route but profile is not marked complete or schema-usable",
@@ -600,8 +586,7 @@ useEffect(() => {
       hasBirthYear: typeof playerBirthYear === "number",
       profileGateReady,
       showVerify,
-      dismissedForSession,
-      action: dismissedForSession ? "prompt-suppressed" : "show-profile-prompt",
+      action: "redirect-to-onboarding-v2",
     });
   console.trace("[PROFILE PROMPT TRACE]", {
     source: "ClientLayoutWrapper",
@@ -615,11 +600,10 @@ useEffect(() => {
     playerData,
     authReady,
     loadingState,
-    dismissedForSession,
     timestamp: new Date().toISOString(),
   });
-  setShowProfilePrompt(!dismissedForSession);
-}, [user, profileComplete, playerExists, playerData, playerBirthYear, profileGateReady, showVerify, pathname, usableProfile, authReady, loadingState]);
+  router.replace(onboardingV2Href({next: pathname || "/home"}));
+}, [user, profileComplete, playerExists, playerData, playerBirthYear, profileGateReady, showVerify, pathname, usableProfile, authReady, loadingState, router]);
 
 useEffect(() => {
   function handleClickOutside(event: MouseEvent) {
@@ -655,17 +639,6 @@ useEffect(() => {
   };
 
 const totalMessages = unreadMessages.length; // ✅ separate count for messages
-
-  const handleDismissProfilePrompt = () => {
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem(PROFILE_PROMPT_SESSION_KEY, "1");
-    }
-    setShowProfilePrompt(false);
-  };
-
-  const handleOpenProfilePrompt = () => {
-    router.push("/profile?edit=true");
-  };
 
     // Floating feedback button component
   function FloatingFeedbackButton() {
@@ -706,6 +679,15 @@ const shouldHoldProtectedRender =
   !pathname.startsWith("/verify-email") &&
   !profileGateReady;
 
+const shouldHoldIncompleteRender =
+  !!user &&
+  user.emailVerified === true &&
+  profileGateReady &&
+  profileComplete !== true &&
+  !PUBLIC_ROUTES.has(pathname || "") &&
+  !pathname.startsWith("/verify-email") &&
+  !pathname.startsWith("/waitlist");
+
 console.log("[LayoutWrapper] gate state", {
   pathname,
   hasUser: !!user,
@@ -731,7 +713,7 @@ if (shouldGateToVerify) {
   );
 }
 
-if (shouldHoldProtectedRender) {
+if (shouldHoldProtectedRender || shouldHoldIncompleteRender) {
   console.log("[LayoutWrapper] holding protected render before children mount", {
       pathname,
       hasUser: !!user,
@@ -782,35 +764,6 @@ return (
         }
   }
 >
-  {user &&
-    showProfilePrompt &&
-    !PUBLIC_ROUTES.has(pathname || "") &&
-    !pathname.startsWith("/profile") &&
-    !pathname.startsWith("/verify-email") && (
-      <div className="mx-4 mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="font-medium">
-            Complete your profile to get better match recommendations.
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleOpenProfilePrompt}
-              className="rounded-full bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-800"
-            >
-              Complete profile
-            </button>
-            <button
-              type="button"
-              onClick={handleDismissProfilePrompt}
-              className="rounded-full border border-emerald-300 px-4 py-2 text-xs font-semibold text-emerald-900 transition-colors hover:bg-emerald-100"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
   {children}
 </main>
 

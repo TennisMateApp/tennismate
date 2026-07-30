@@ -25,7 +25,8 @@ test("Home has no mobile or desktop legacy targets or overlay orchestration", ()
   assert.doesNotMatch(desktopHomeSource, /data-onboarding-target|activationTour/);
   assert.match(homeSource, /HomeWelcomeCard/);
   assert.match(homeSource, /ClubMembershipPrompt/);
-  assert.match(layoutSource, /Complete your profile to get better match recommendations/);
+  assert.match(layoutSource, /shouldHoldIncompleteRender/);
+  assert.doesNotMatch(layoutSource, /Complete your profile to get better match recommendations|tm_dismiss_profile_prompt/);
 });
 
 test("Match Me has no legacy targets, highlights or progression writes", () => {

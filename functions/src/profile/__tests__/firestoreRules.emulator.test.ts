@@ -15,7 +15,10 @@ type ClubFields = {
   clubStatus: "member" | "none" | null;
 };
 
-const exactProfilePayload = (club: ClubFields = {clubId: null, clubName: null, clubStatus: null}) => buildEditablePlayerProfileUpdate({
+const exactProfilePayload = (
+  club: ClubFields = {clubId: null, clubName: null, clubStatus: null},
+  profileComplete = true
+) => buildEditablePlayerProfileUpdate({
   name: "Current Player",
   postcode: "3000",
   bio: "Available for social tennis.",
@@ -28,6 +31,7 @@ const exactProfilePayload = (club: ClubFields = {clubId: null, clubName: null, c
   skillLevel: "Intermediate",
   photoURL: "https://example.test/profile.jpg",
   photoThumbURL: "https://example.test/profile-thumb.jpg",
+  profileComplete,
   ...club,
 });
 
@@ -79,8 +83,8 @@ test("profile owner cannot modify protected fields", {skip: !host}, async () => 
   await assertFails(updateDoc(doc(db, "players", "owner"), {geohash: "protected"}));
 });
 
-test("exact shared ProfileContent payload is accepted for an existing profile", {skip: !host}, async () => {
-  await seedPlayer("owner", {name: "Old Name", email: "legacy@example.test"});
+test("exact shared ProfileContent payload is accepted for an existing complete profile", {skip: !host}, async () => {
+  await seedPlayer("owner", {name: "Old Name", email: "legacy@example.test", profileComplete: true, isMatchable: true});
   const db = environment.authenticatedContext("owner").firestore();
   await assertSucceeds(setDoc(doc(db, "players", "owner"), exactProfilePayload(), {merge: true}));
 });
@@ -88,18 +92,37 @@ test("exact shared ProfileContent payload is accepted for an existing profile", 
 test("first-time profile creation accepts editable fields and rejects protected fields", {skip: !host}, async () => {
   const db = environment.authenticatedContext("new-player").firestore();
   const ref = doc(db, "players", "new-player");
-  await assertSucceeds(setDoc(ref, exactProfilePayload(), {merge: true}));
+  await assertSucceeds(setDoc(ref, exactProfilePayload(undefined, false), {merge: true}));
   await assertSucceeds(getDoc(ref));
 
   const protectedDb = environment.authenticatedContext("protected-player").firestore();
   await assertFails(setDoc(doc(protectedDb, "players", "protected-player"), {
-    ...exactProfilePayload(),
+    ...exactProfilePayload(undefined, false),
     activityPoints: 999,
   }, {merge: true}));
 });
 
+test("owner cannot change profile completion state", {skip: !host}, async () => {
+  await seedPlayer("incomplete", {profileComplete: false, isMatchable: false});
+  await seedPlayer("complete", {profileComplete: true, isMatchable: true});
+  const incompleteDb = environment.authenticatedContext("incomplete").firestore();
+  const completeDb = environment.authenticatedContext("complete").firestore();
+  await assertFails(updateDoc(doc(incompleteDb, "players", "incomplete"), {profileComplete: true}));
+  await assertFails(updateDoc(doc(completeDb, "players", "complete"), {profileComplete: false}));
+});
+
+test("matchability can only be toggled by an already-complete owner", {skip: !host}, async () => {
+  await seedPlayer("incomplete", {profileComplete: false, isMatchable: false});
+  await seedPlayer("complete", {profileComplete: true, isMatchable: false});
+  const incompleteDb = environment.authenticatedContext("incomplete").firestore();
+  const completeDb = environment.authenticatedContext("complete").firestore();
+  await assertFails(updateDoc(doc(incompleteDb, "players", "incomplete"), {isMatchable: true}));
+  await assertSucceeds(updateDoc(doc(completeDb, "players", "complete"), {isMatchable: true}));
+  await assertSucceeds(updateDoc(doc(completeDb, "players", "complete"), {isMatchable: false}));
+});
+
 test("owner can save a valid production-shaped court membership", {skip: !host}, async () => {
-  await seedPlayer("owner", {name: "Owner", clubId: null, clubName: null, clubStatus: "none"});
+  await seedPlayer("owner", {name: "Owner", profileComplete: true, isMatchable: true, clubId: null, clubName: null, clubStatus: "none"});
   await seedCourt(PRODUCTION_COURT_ID, {
     name: PRODUCTION_COURT_NAME,
     suburb: "Clifton Hill",
@@ -114,7 +137,7 @@ test("owner can save a valid production-shaped court membership", {skip: !host},
 });
 
 test("valid membership save succeeds on a legacy player without club fields", {skip: !host}, async () => {
-  await seedPlayer("owner", {name: "Legacy Owner", email: "legacy@example.test"});
+  await seedPlayer("owner", {name: "Legacy Owner", email: "legacy@example.test", profileComplete: true, isMatchable: true});
   await seedCourt(PRODUCTION_COURT_ID, {name: PRODUCTION_COURT_NAME, suburb: "Clifton Hill", postcode: "3068"});
   const db = environment.authenticatedContext("owner").firestore();
   await assertSucceeds(setDoc(doc(db, "players", "owner"), exactProfilePayload({

@@ -157,6 +157,7 @@ export default function ProfileContent() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
+  const [storedProfileComplete, setStoredProfileComplete] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<File | null>(null);
   const [previewURL, setPreviewURL] = useState<string | null>(null);
@@ -237,6 +238,7 @@ const safeBadges = Array.isArray(formData.badges) ? formData.badges : [];
     ]);
     const data = snap.data() || {};
     const privateData = privateSnap.data() || {};
+    setStoredProfileComplete(data.profileComplete === true);
 
     // ⬇️ Add this block
   // Derive band from skillRating or fallback to UTR or legacy level
@@ -256,7 +258,7 @@ setFormData({
   skillBand: derivedBand || "",
   rating: typeof ratingNumber === "number" ? ratingNumber : "",
   availability: data.availability || [],
-  isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
+  isMatchable: data.profileComplete === true && data.isMatchable !== false,
   bio: data.bio || "",
   photoURL: typeof data.photoURL === "string" ? data.photoURL : "",
   photoThumbURL: resolveProfilePhoto(data) || "",
@@ -745,6 +747,7 @@ const playerPayload = buildEditablePlayerProfileUpdate({
   clubId: formData.clubId,
   clubName: formData.clubName,
   clubStatus: formData.clubStatus,
+  profileComplete: storedProfileComplete,
 });
 
 const privatePlayerPayload = {

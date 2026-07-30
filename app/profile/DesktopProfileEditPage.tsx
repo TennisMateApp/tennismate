@@ -120,6 +120,7 @@ export default function DesktopProfileEditPage({ onProfileSaved }: DesktopProfil
 
 
   const [user, setUser] = useState<any>(null);
+  const [storedProfileComplete, setStoredProfileComplete] = useState(false);
 
   const originalPostcodeRef = useRef<string>("");
 
@@ -174,6 +175,7 @@ const [formData, setFormData] = useState({
       ]);
       const data = snap.exists() ? (snap.data() as any) : {};
       const privateData = privateSnap.exists() ? (privateSnap.data() as any) : {};
+      setStoredProfileComplete(data.profileComplete === true);
 
       const ratingNumber =
         typeof data.skillRating === "number"
@@ -199,7 +201,7 @@ setFormData({
   photoThumbURL: resolveProfilePhoto(data) || "",
   birthYear: typeof privateData.birthYear === "number" ? privateData.birthYear : "",
   gender: typeof data.gender === "string" ? data.gender : "",
-  isMatchable: typeof data.isMatchable === "boolean" ? data.isMatchable : true,
+  isMatchable: data.profileComplete === true && data.isMatchable !== false,
   badges: Array.isArray(data.badges) ? data.badges : [],
   clubId: typeof data.clubId === "string" ? data.clubId : null,
   clubName: typeof data.clubName === "string" ? data.clubName : null,
@@ -431,6 +433,7 @@ const playerPayload = buildEditablePlayerProfileUpdate({
   clubId: formData.clubId,
   clubName: formData.clubName,
   clubStatus: formData.clubStatus,
+  profileComplete: storedProfileComplete,
 });
 
 const privatePlayerPayload = {

@@ -14,6 +14,7 @@ export type EditablePlayerProfileInput = {
   clubId: string | null;
   clubName: string | null;
   clubStatus: "member" | "none" | null;
+  profileComplete: boolean;
 };
 
 /** Public player fields that profile owners are intentionally allowed to edit. */
@@ -27,7 +28,7 @@ export function buildEditablePlayerProfileUpdate(input: EditablePlayerProfileInp
     bio: input.bio,
     availability: input.availability,
     gender: input.gender,
-    isMatchable: input.isMatchable,
+    ...(input.profileComplete ? {isMatchable: input.isMatchable} : {}),
     skillBand: input.skillBand,
     skillBandLabel: input.skillBandLabel,
     skillRating: input.skillRating,
@@ -39,6 +40,5 @@ export function buildEditablePlayerProfileUpdate(input: EditablePlayerProfileInp
     clubId: input.clubStatus === "member" ? input.clubId : null,
     clubName: input.clubStatus === "member" ? input.clubName : null,
     clubStatus: input.clubStatus,
-    profileComplete: true,
   };
 }

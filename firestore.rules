@@ -38,8 +38,7 @@ service cloud.firestore {
         "avatar",
         "clubId",
         "clubName",
-        "clubStatus",
-        "profileComplete"
+        "clubStatus"
       ];
     }
 
@@ -54,6 +53,18 @@ service cloud.firestore {
 
     function playerCreateAllowedKeys() {
       return playerClientMutableKeys().concat(["createdAt"]);
+    }
+
+    function playerCreateCompletionStateValid() {
+      return request.resource.data.get("profileComplete", false) != true
+        && request.resource.data.get("isMatchable", false) != true;
+    }
+
+    function playerMatchabilityUpdateValid() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny(["isMatchable"])
+        || (resource.data.get("profileComplete", false) == true
+          && request.resource.data.get("profileComplete", false) == true);
     }
 
     function trustedAccountLifecycleKeys() {
@@ -400,10 +411,12 @@ service cloud.firestore {
       allow create: if isSelf(uid)
         && playerWriteHasNoSensitiveFields()
         && clubMembershipValid(request.resource.data)
+        && playerCreateCompletionStateValid()
         && request.resource.data.keys().hasOnly(playerCreateAllowedKeys());
 
       allow update: if isSelf(uid)
         && clubMembershipValid(request.resource.data)
+        && playerMatchabilityUpdateValid()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(playerClientMutableKeys());
 
       allow delete: if false;
