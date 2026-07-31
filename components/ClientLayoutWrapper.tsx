@@ -53,7 +53,6 @@ import { track } from "@/lib/track";
 import Image from "next/image";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { cn } from "@/lib/utils";
-import { shouldHideFloatingFeedback } from "@/lib/feedbackVisibility";
 import { initMixpanel, identifyUser, trackEvent } from "@/lib/mixpanel";
 import {
   analyticsNotificationStatus,
@@ -322,14 +321,6 @@ const hideFeedback =
 // NEW: hide on the feedback form route
 const hideNavFeedback =
   /^\/matches\/[^/]+\/feedback\/?$/.test(pathname);
-
-// Club community pages keep the standard navigation but omit the floating feedback action.
-const isOnboardingV2VerificationReturn =
-  pathname.startsWith("/verify-complete") &&
-  typeof window !== "undefined" &&
-  isOnboardingV2Destination(new URLSearchParams(window.location.search).get("next"));
-const hideFloatingFeedback =
-  shouldHideFloatingFeedback(pathname) || isOnboardingV2VerificationReturn;
 
 // Aggregate: header/footer/FAB should be hidden if any of the above match
 const hideAllNav = hideNavMessages || hideNavVerify || hideFeedback || hideNavFeedback;
@@ -667,19 +658,6 @@ const totalMessages = unreadMessages.length; // ✅ separate count for messages
     router.push("/profile?edit=true");
   };
 
-    // Floating feedback button component
-  function FloatingFeedbackButton() {
-    const router = useRouter();
-    return (
-      <button
-        onClick={() => router.push("/support")}
-        className="fixed bottom-24 right-6 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-full shadow-lg flex items-center gap-2 transition-all duration-200 z-50"
-      >
-        <span className="text-sm font-medium">Give Feedback</span>
-      </button>
-    );
-  }
-
   // Email action pages must not wait for or render application chrome.
   if (isStandaloneVerificationRoute) return <>{children}</>;
 
@@ -892,9 +870,6 @@ return (
 )}
 
 
-
-
-     {user && !hideAllNav && !hideFeedback && !hideFloatingFeedback && !isDesktopWeb && <FloatingFeedbackButton />}
 
 
     </div>

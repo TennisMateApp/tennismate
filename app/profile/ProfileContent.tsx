@@ -42,6 +42,7 @@ import { safeNextDestination } from "@/lib/verificationFlow";
 import { trackEvent as trackAnalyticsEvent } from "@/lib/analytics";
 import { getClubMembershipPresentation } from "@/lib/clubMembershipPresentation";
 import CourtsBackButton from "@/components/CourtsBackButton";
+import ProfileSettingsMenu from "@/components/profile/ProfileSettingsMenu";
 
 
 const TM = {
@@ -165,6 +166,7 @@ export default function ProfileContent() {
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
   const [showCropper, setShowCropper] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [bioExpanded, setBioExpanded] = useState(false);
 
   const originalPostcodeRef = React.useRef<string>("");
@@ -965,10 +967,12 @@ return (
 
       <button
         type="button"
-        onClick={() => router.push("/profile?edit=true")}
+        onClick={() => setSettingsOpen(true)}
         className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#0B3D2E]/15 bg-white shadow-sm"
         style={{ background: "rgba(0,0,0,0.04)" }}
-        aria-label="Edit profile"
+        aria-label="Open settings"
+        aria-haspopup="dialog"
+        aria-expanded={settingsOpen}
       >
         <span className="text-lg" style={{ color: TM.forest }}>⚙️</span>
       </button>
@@ -1675,6 +1679,7 @@ return (
 )}
 
     </div>
+    <ProfileSettingsMenu open={settingsOpen} onClose={() => setSettingsOpen(false)} />
   </div>
 );
 }

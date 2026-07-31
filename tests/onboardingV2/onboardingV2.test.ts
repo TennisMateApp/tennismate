@@ -189,12 +189,11 @@ test("step transitions are restrained and disabled for reduced-motion users", ()
   assert.match(shellSource, /key=\{step\}/);
 });
 
-test("floating feedback stays hidden on signup-v2 and V2 verification returns", () => {
+test("global floating feedback is removed now that support is available from Settings", () => {
   assert.match(layoutSource, /pathname\.startsWith\(ONBOARDING_V2_PATH\)/);
-  assert.match(layoutSource, /isOnboardingV2VerificationReturn/);
-  assert.match(layoutSource, /pathname\.startsWith\("\/verify-complete"\)/);
-  assert.match(layoutSource, /isOnboardingV2Destination\(new URLSearchParams\(window\.location\.search\)\.get\("next"\)\)/);
-  assert.match(layoutSource, /!hideFloatingFeedback/);
+  assert.doesNotMatch(layoutSource, /FloatingFeedbackButton/);
+  assert.doesNotMatch(layoutSource, /Give Feedback/);
+  assert.doesNotMatch(layoutSource, /hideFloatingFeedback/);
 });
 
 test("analytics calls use stable reasons and omit email, birth year, and password", () => {
