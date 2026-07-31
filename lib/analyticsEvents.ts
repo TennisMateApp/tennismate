@@ -23,6 +23,7 @@ export const ANALYTICS_EVENTS = {
   SIGNUP_STARTED: "signup_started",
   ELIGIBILITY_COMPLETED: "eligibility_completed",
   ACCOUNT_CREATION_STARTED: "account_creation_started",
+  SIGNUP_FAILED: "signup_failed",
   ACCOUNT_CREATED: "account_created",
   ACCOUNT_INITIALIZATION_COMPLETED: "account_initialization_completed",
   VERIFICATION_SENT: "verification_sent",

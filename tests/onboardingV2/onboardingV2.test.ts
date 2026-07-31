@@ -27,7 +27,7 @@ const nextConfigSource = readFileSync("next.config.js", "utf8");
 
 function validInput() {
   return {
-    fields: { name: "Alex Player", email: "alex@example.com", password: "secret7" },
+    fields: { name: "Alex Player", email: "alex@example.com", password: "secret7!" },
     birthYear: "1990",
     referralCandidates: [{ code: "CLUB25", source: "ref" as const }],
   };
@@ -140,8 +140,9 @@ test("refresh preserves safe pre-Auth progress but requires birth year again bef
 });
 
 test("duplicate-email recovery is useful and the verification screen uses the frozen cooldown", () => {
-  assert.equal(onboardingV2AuthError("auth/email-already-in-use"), "An account already exists for this email.");
-  assert.match(flowSource, /Sign in to continue/);
+  assert.equal(onboardingV2AuthError("auth/email-already-in-use"), "An account already exists with this email address. Sign in or reset your password.");
+  assert.match(flowSource, />Sign In</);
+  assert.match(flowSource, />Reset Password</);
   assert.equal(ONBOARDING_V2_RESEND_COOLDOWN_SECONDS, 60);
   assert.match(flowSource, /window\.addEventListener\("focus"/);
   assert.match(flowSource, /visibilitychange/);

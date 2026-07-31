@@ -1,5 +1,10 @@
 import type { AccountInitializationResult } from "@/lib/accountLifecycle";
 import type { ReferralCandidate } from "@/lib/referralAttribution";
+import {
+  isSignupPasswordValid,
+  mapSignupAuthError,
+  SIGNUP_PASSWORD_ERROR,
+} from "@/lib/signupAccount";
 import {SKILL_OPTIONS, skillFromUTR, type SkillBand} from "@/lib/skill";
 
 export const ONBOARDING_V2_PATH = "/signup-v2";
@@ -308,9 +313,7 @@ export function validateOnboardingV2Account(fields: OnboardingV2AccountFields) {
   }
 
   if (!fields.password) errors.password = "Password is required.";
-  else if (fields.password.length < 6) {
-    errors.password = "Password must be at least 6 characters.";
-  }
+  else if (!isSignupPasswordValid(fields.password)) errors.password = SIGNUP_PASSWORD_ERROR;
 
   return { errors, values: { name, email, password: fields.password } };
 }
@@ -323,18 +326,10 @@ export function maskEmail(email: string | null | undefined) {
 }
 
 export function onboardingV2AuthError(code: string | undefined) {
-  if (code === "auth/email-already-in-use") {
-    return "An account already exists for this email.";
-  }
-  if (code === "auth/weak-password") return "Password must be at least 6 characters.";
-  if (code === "auth/invalid-email") return "Enter a valid email address.";
-  if (code === "auth/network-request-failed") {
-    return "Check your connection and try again.";
-  }
   if (code === "functions/unavailable" || code === "functions/deadline-exceeded") {
     return "Account setup is temporarily unavailable. Try again shortly.";
   }
-  return "We couldn't create your account. Please try again.";
+  return mapSignupAuthError(code).message;
 }
 
 export async function createOnboardingV2Account<TUser>(input: {

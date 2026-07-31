@@ -7,6 +7,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {
   Check,
   CheckCircle2,
+  CircleX,
   ChevronRight,
   Eye,
   EyeOff,
@@ -58,6 +59,12 @@ import {SKILL_OPTIONS, skillFromUTR, type SkillBand} from "@/lib/skill";
 import {safeNextDestination, verificationContinueUrl} from "@/lib/verificationFlow";
 import {markOnboardingV2EntrySource} from "@/lib/onboardingGuidance";
 import {ensureVerifiedAuthSession} from "@/lib/verifiedAuthSession";
+import {platform as runtimePlatform} from "@/lib/runtime";
+import {
+  getSignupPasswordRequirements,
+  mapSignupAuthError,
+  signupFailureDiagnostics,
+} from "@/lib/signupAccount";
 import {
   buildOnboardingV2AvailabilityUpdate,
   buildOnboardingV2ClubUpdate,
@@ -385,9 +392,12 @@ export default function OnboardingV2Flow() {
 
   async function submitAccount(event: React.FormEvent) {
     event.preventDefault();
+    if (accountSubmissionRef.current) return;
     const validation = validateOnboardingV2Account(account);
     if (Object.keys(validation.errors).length) {
       setErrors(validation.errors);
+      const firstInvalid = (["name", "email", "password"] as const).find((field) => validation.errors[field]);
+      if (firstInvalid) requestAnimationFrame(() => document.getElementById(`onboarding-v2-${firstInvalid}`)?.focus());
       return;
     }
     setErrors({});
@@ -395,6 +405,7 @@ export default function OnboardingV2Flow() {
     setBusy(true);
     accountSubmissionRef.current = true;
     void trackEvent("account_creation_started", {flow: "onboarding_v2"});
+    let authUserCreated = false;
     try {
       const result = await createOnboardingV2Account({
         fields: account,
@@ -402,6 +413,7 @@ export default function OnboardingV2Flow() {
         referralCandidates: referralCandidates(),
         createAuthUser: async (email, password) => {
           const credential = await createUserWithEmailAndPassword(auth, email, password);
+          authUserCreated = true;
           await updateProfile(credential.user, {displayName: account.name.trim()});
           setCurrentUser(credential.user);
           void trackEvent("account_created", {method: "email_password"});
@@ -431,10 +443,28 @@ export default function OnboardingV2Flow() {
       sessionStorage.removeItem(ONBOARDING_V2_PREAUTH_STEP_KEY);
       setStep("verify");
     } catch (error) {
-      const code = (error as {code?: string})?.code;
-      setNotice({kind: "error", text: onboardingV2AuthError(code)});
-      if (code === "auth/email-already-in-use") {
-        setErrors({email: "This email is already linked to an account."});
+      const code = (error as {code?: string})?.code || "unknown";
+      const setupFailed = authUserCreated || Boolean(auth.currentUser);
+      const diagnostics = signupFailureDiagnostics({
+        code,
+        route: "/signup-v2",
+        platform: runtimePlatform(),
+        appVersion: process.env.NEXT_PUBLIC_APP_VERSION,
+        clientValidationPassed: true,
+        email: account.email,
+        stage: setupFailed ? "account_setup" : "authentication",
+      });
+      console.error("[signup_failed]", diagnostics);
+      void trackEvent("signup_failed", diagnostics);
+      if (setupFailed) {
+        setNotice({kind: "error", text: "Your account was created, but setup did not finish. Your progress is safe—sign in again to resume."});
+      } else {
+        const mapped = mapSignupAuthError(code);
+        setNotice(mapped.field ? null : {kind: "error", text: onboardingV2AuthError(code)});
+        if (mapped.field) {
+          setErrors((current) => ({...current, [mapped.field!]: mapped.message}));
+          requestAnimationFrame(() => document.getElementById(`onboarding-v2-${mapped.field}`)?.focus());
+        }
       }
     } finally {
       accountSubmissionRef.current = false;
@@ -730,6 +760,7 @@ export default function OnboardingV2Flow() {
   }
 
   const status = noticeView(notice);
+  const accountPasswordRequirements = getSignupPasswordRequirements(account.password);
 
   if (step === "welcome") {
     return <OnboardingV2Shell step={step} heading="Find your next tennis partner." headingRef={headingRef} helper={<>Join local players organising matches through TennisMate.</>} status={status}><div className="grid gap-3 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-950 sm:grid-cols-3">{["Takes about 2 minutes.", "Your progress is saved.", "For players aged 18+."].map((item) => <div key={item} className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden="true" />{item}</div>)}</div><div className="mt-7 space-y-3"><button type="button" className={primaryButton} onClick={() => {void trackEvent("signup_started", {entry_point: "signup_v2"}); move("why");}}>Get started</button><Link className={secondaryButton} href={`/login?next=${encodeURIComponent(resumeHref)}`}>Already have an account? Sign in</Link></div></OnboardingV2Shell>;
@@ -745,7 +776,15 @@ export default function OnboardingV2Flow() {
   }
 
   if (step === "account") {
-    return <OnboardingV2Shell step={step} heading="Create your TennisMate account" headingRef={headingRef} helper="Use an email address you can open now. We’ll send a verification link automatically." onBack={() => move("eligibility")} status={status}><form onSubmit={submitAccount} noValidate className="space-y-5">{(["name", "email"] as const).map((field) => <div key={field}><label htmlFor={`onboarding-v2-${field}`} className="text-sm font-semibold capitalize text-slate-800">{field}</label><input id={`onboarding-v2-${field}`} className={inputClass} type={field === "email" ? "email" : "text"} autoComplete={field} value={account[field]} onChange={(event) => {setAccount((current) => ({...current, [field]: event.target.value})); setErrors((current) => ({...current, [field]: undefined}));}} required aria-invalid={Boolean(errors[field])} aria-describedby={errors[field] ? fieldErrorId(field) : undefined} />{errors[field] ? <p id={fieldErrorId(field)} className="mt-2 text-sm font-medium text-red-700">{errors[field]}</p> : null}</div>)}<div><label htmlFor="onboarding-v2-password" className="text-sm font-semibold text-slate-800">Password</label><div className="relative"><input id="onboarding-v2-password" className={`${inputClass} pr-12`} type={showPassword ? "text" : "password"} autoComplete="new-password" value={account.password} onChange={(event) => {setAccount((current) => ({...current, password: event.target.value})); setErrors((current) => ({...current, password: undefined}));}} required aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? fieldErrorId("password") : "onboarding-v2-password-help"} /><button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-1 top-3 grid h-10 w-10 place-items-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff className="h-5 w-5" aria-hidden="true" /> : <Eye className="h-5 w-5" aria-hidden="true" />}</button></div><p id="onboarding-v2-password-help" className="mt-2 text-xs text-slate-500">Use at least 6 characters.</p>{errors.password ? <p id={fieldErrorId("password")} className="mt-2 text-sm font-medium text-red-700">{errors.password}</p> : null}</div><p className="text-xs leading-5 text-slate-500">By creating an account, you agree to our <Link href="/terms" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-800 underline">Terms</Link> and <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-800 underline">Privacy Policy</Link>.</p><button type="submit" className={primaryButton} disabled={busy}>{busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />Creating account…</> : "Create account"}</button>{errors.email?.includes("already linked") ? <Link href={`/login?next=${encodeURIComponent(resumeHref)}&email=${encodeURIComponent(account.email.trim())}`} className={secondaryButton}>Sign in to continue</Link> : null}</form></OnboardingV2Shell>;
+    const updateAccountField = (field: keyof OnboardingV2AccountFields, value: string) => {
+      const next = {...account, [field]: value};
+      setAccount(next);
+      if (!validateOnboardingV2Account(next).errors[field]) {
+        setErrors((current) => ({...current, [field]: undefined}));
+      }
+    };
+    const existingAccount = errors.email?.includes("already exists");
+    return <OnboardingV2Shell step={step} heading="Create your TennisMate account" headingRef={headingRef} helper="Use an email address you can open now. We’ll send a verification link automatically." onBack={() => move("eligibility")} status={status}><form onSubmit={submitAccount} noValidate className="space-y-5">{(["name", "email"] as const).map((field) => <div key={field}><label htmlFor={`onboarding-v2-${field}`} className="text-sm font-semibold capitalize text-slate-800">{field}</label><input id={`onboarding-v2-${field}`} className={inputClass} type={field === "email" ? "email" : "text"} autoComplete={field} value={account[field]} onChange={(event) => updateAccountField(field, event.target.value)} required aria-invalid={Boolean(errors[field])} aria-describedby={errors[field] ? fieldErrorId(field) : undefined} />{errors[field] ? <p id={fieldErrorId(field)} role="alert" className="mt-2 text-sm font-medium text-red-700">{errors[field]}</p> : null}</div>)}<div><label htmlFor="onboarding-v2-password" className="text-sm font-semibold text-slate-800">Password</label><div className="relative"><input id="onboarding-v2-password" className={`${inputClass} pr-12`} type={showPassword ? "text" : "password"} autoComplete="new-password" value={account.password} onChange={(event) => updateAccountField("password", event.target.value)} required aria-invalid={Boolean(errors.password)} aria-describedby={`onboarding-v2-password-requirements${errors.password ? ` ${fieldErrorId("password")}` : ""}`} /><button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-1 top-3 grid h-10 w-10 place-items-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff className="h-5 w-5" aria-hidden="true" /> : <Eye className="h-5 w-5" aria-hidden="true" />}</button></div>{errors.password ? <p id={fieldErrorId("password")} role="alert" className="mt-2 text-sm font-medium text-red-700">{errors.password}</p> : null}<div id="onboarding-v2-password-requirements" className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm"><p className="font-semibold text-slate-800">Password requirements</p><ul className="mt-2 space-y-1">{([['length', 'At least 6 characters'], ['number', 'At least 1 number'], ['special', 'At least 1 special character']] as const).map(([key, label]) => {const valid = accountPasswordRequirements[key]; return <li key={key} className="flex items-center gap-2">{valid ? <CheckCircle2 className="h-4 w-4 text-emerald-700" aria-hidden="true" /> : <CircleX className="h-4 w-4 text-red-600" aria-hidden="true" />}<span>{label}<span className="sr-only"> — {valid ? "requirement met" : "requirement not met"}</span></span></li>;})}</ul></div></div><p className="text-xs leading-5 text-slate-500">By creating an account, you agree to our <Link href="/terms" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-800 underline">Terms</Link> and <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-800 underline">Privacy Policy</Link>.</p><button type="submit" className={primaryButton} disabled={busy}>{busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />Creating account…</> : "Create account"}</button>{existingAccount ? <div className="space-y-3"><Link href={`/login?next=${encodeURIComponent(resumeHref)}&email=${encodeURIComponent(account.email.trim())}`} className={secondaryButton}>Sign In</Link><Link href={`/forgot-password?email=${encodeURIComponent(account.email.trim())}`} className={secondaryButton}>Reset Password</Link></div> : null}</form></OnboardingV2Shell>;
   }
 
   if (step === "verify") {
