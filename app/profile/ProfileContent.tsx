@@ -1679,7 +1679,7 @@ return (
 )}
 
     </div>
-    <ProfileSettingsMenu open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    <ProfileSettingsMenu open={settingsOpen} onClose={() => setSettingsOpen(false)} uid={user?.uid ?? null} />
   </div>
 );
 }

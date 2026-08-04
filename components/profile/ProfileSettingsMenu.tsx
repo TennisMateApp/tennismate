@@ -3,14 +3,16 @@
 import Link from "next/link";
 import {useRouter} from "next/navigation";
 import {useEffect, useState, type ReactNode} from "react";
-import {ChevronRight, FileText, HelpCircle, LogOut, ShieldCheck, UserRound, X} from "lucide-react";
+import {ChevronRight, FileText, HelpCircle, ListChecks, LogOut, ShieldCheck, UserRound, X} from "lucide-react";
 import {signOut} from "firebase/auth";
 
 import {auth} from "@/lib/firebaseConfig";
+import {useProductSurveyCompletion} from "@/lib/productSurveyCompletion";
 
 type ProfileSettingsMenuProps = {
   open: boolean;
   onClose: () => void;
+  uid: string | null;
 };
 
 function SettingsLink({href, label, icon, onSelect}: {
@@ -34,8 +36,9 @@ function SettingsLink({href, label, icon, onSelect}: {
   );
 }
 
-export default function ProfileSettingsMenu({open, onClose}: ProfileSettingsMenuProps) {
+export default function ProfileSettingsMenu({open, onClose, uid}: ProfileSettingsMenuProps) {
   const router = useRouter();
+  const {status: surveyCompletionStatus} = useProductSurveyCompletion(uid, open);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
@@ -154,8 +157,11 @@ export default function ProfileSettingsMenu({open, onClose}: ProfileSettingsMenu
 
           <section aria-labelledby="settings-support-heading">
             <h3 id="settings-support-heading" className="mb-2 px-2 text-xs font-black uppercase tracking-wider text-emerald-950/55">Support</h3>
-            <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+            <div className="divide-y divide-emerald-950/10 overflow-hidden rounded-2xl bg-white shadow-sm">
               <SettingsLink href="/support" label="Help & Feedback" icon={<HelpCircle className="h-5 w-5" />} onSelect={onClose} />
+              {surveyCompletionStatus === "incomplete" || surveyCompletionStatus === "error" ? (
+                <SettingsLink href="/survey" label="Product Survey" icon={<ListChecks className="h-5 w-5" />} onSelect={onClose} />
+              ) : null}
             </div>
           </section>
 

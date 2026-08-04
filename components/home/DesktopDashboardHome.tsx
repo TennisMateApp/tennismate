@@ -78,6 +78,7 @@ type DesktopDashboardHomeProps = {
   notificationBanner?: React.ReactNode;
   clubMembershipPrompt?: React.ReactNode;
   v2WelcomeCard?: React.ReactNode;
+  surveyPrompt?: React.ReactNode;
 };
 
 export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
@@ -100,6 +101,7 @@ export default function DesktopDashboardHome(props: DesktopDashboardHomeProps) {
     notificationBanner,
     clubMembershipPrompt,
     v2WelcomeCard,
+    surveyPrompt,
   } = props;
 
     const [openInviteId, setOpenInviteId] = useState<string | null>(null);
@@ -337,6 +339,7 @@ const [openPlayerCanMessage, setOpenPlayerCanMessage] = useState(false);
               {notificationBanner}
               {clubMembershipPrompt}
               {v2WelcomeCard}
+              {surveyPrompt}
 
               {/* Left column */}
               <section className="min-w-0">

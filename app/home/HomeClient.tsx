@@ -64,6 +64,7 @@ import {
 } from "@/lib/onboardingGuidance";
 import {trackEvent as trackAnalyticsEvent} from "@/lib/analytics";
 import {ANALYTICS_EVENTS} from "@/lib/analyticsEvents";
+import SurveyPrompt from "@/components/survey/SurveyPrompt";
 
 
 const TM = {
@@ -1358,6 +1359,7 @@ const nextEvent = nextUpcomingEvents?.[0] ?? null;
 const clubMembershipPrompt = uid && clubStatus !== undefined
   ? <ClubMembershipPrompt uid={uid} visibility={clubPromptVisibility} />
   : null;
+const surveyPrompt = <SurveyPrompt uid={uid} />;
 
 // ✅ DESKTOP WEB (not app) layout
 if (showDesktopWeb) {
@@ -1387,6 +1389,7 @@ if (showDesktopWeb) {
       notificationBanner={homeNotificationBanner}
       clubMembershipPrompt={clubMembershipPrompt}
       v2WelcomeCard={v2HomeWelcomeCard}
+      surveyPrompt={surveyPrompt}
     />
   );
 }
@@ -1448,6 +1451,8 @@ if (showDesktopWeb) {
         {clubMembershipPrompt ? <div className="mt-4">{clubMembershipPrompt}</div> : null}
 
         {v2HomeWelcomeCard ? <div className="mt-4">{v2HomeWelcomeCard}</div> : null}
+
+        <div className="mt-4">{surveyPrompt}</div>
 
 {/* Active near you */}
 <div className="mt-4">

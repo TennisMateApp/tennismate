@@ -52,6 +52,11 @@ export const ANALYTICS_EVENTS = {
   ACTIVITY_LEADERBOARD_HOME_CARD_CLICKED: "activity_leaderboard_home_card_clicked",
   ACTIVITY_LEADERBOARD_POINTS_HELP_OPENED: "activity_leaderboard_points_help_opened",
   ACTIVITY_LEADERBOARD_MONTH_CHANGED: "activity_leaderboard_month_changed",
+  SURVEY_VIEWED: "survey_viewed",
+  SURVEY_STARTED: "survey_started",
+  SURVEY_STEP_COMPLETED: "survey_step_completed",
+  SURVEY_COMPLETED: "survey_completed",
+  SURVEY_DISMISSED: "survey_dismissed",
 } as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENTS)[keyof typeof ANALYTICS_EVENTS];

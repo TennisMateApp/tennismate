@@ -13,6 +13,7 @@
     "test:event-rules:emulator": "firebase emulators:exec --only firestore --project demo-tennismate-event-duration \"tsx --test src/eventRules.emulator.test.ts\"",
     "test:onboarding-foundation:rules": "firebase emulators:exec --only firestore --project demo-tennismate-onboarding-foundation \"tsx --test src/onboardingFoundation.rules.emulator.test.ts\"",
     "test:onboarding-finalization": "tsx --test src/profile/__tests__/onboardingFinalization.test.ts",
+    "test:survey-rules": "firebase emulators:exec --only firestore --project demo-tennismate-survey \"tsx --test src/surveyRules.emulator.test.ts\"",
     "test:onboarding-guidance-foundation": "tsx --test src/profile/__tests__/onboardingJourney.test.ts src/profile/__tests__/onboardingFinalization.test.ts",
     "audit:activity-leaderboard": "tsx ../scripts/auditActivityLeaderboardSources.ts",
     "reconcile:activity-duplicates": "tsx ../scripts/reconcileActivityDuplicateCandidates.ts",

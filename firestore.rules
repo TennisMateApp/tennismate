@@ -448,6 +448,59 @@ service cloud.firestore {
         && request.resource.data.email == request.auth.token.email;
     }
 
+    match /surveyResponses/{responseId} {
+      allow get: if signedIn()
+        && responseId == "product-survey-2026-08_" + request.auth.uid;
+      allow list: if false;
+
+      allow create: if signedIn()
+        && responseId == request.resource.data.surveyId + "_" + request.auth.uid
+        && request.resource.data.surveyId == "product-survey-2026-08"
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.submittedAt == request.time
+        && request.resource.data.keys().hasOnly([
+          "surveyId", "userId", "userName", "submittedAt", "playFrequency", "reasons", "reasonsOther",
+          "playedThroughTennisMate", "matchBarriers", "matchBarriersOther", "favouriteFeature",
+          "favouriteFeatureOther", "desiredFeatures", "desiredFeaturesOther", "eventInterest",
+          "premiumPrice", "premiumFeatures", "premiumFeaturesOther", "oneThingChange", "oneThingWell"
+        ])
+        && request.resource.data.userName is string
+        && request.resource.data.userName.size() <= 100
+        && request.resource.data.playFrequency in ["less_than_monthly", "1_3_per_month", "once_per_week", "2_3_per_week", "4_plus_per_week"]
+        && request.resource.data.reasons is list
+        && request.resource.data.reasons.size() > 0
+        && request.resource.data.reasons.size() == request.resource.data.reasons.toSet().size()
+        && request.resource.data.reasons.toSet().hasOnly(["new_people", "similar_skill", "nearby_players", "play_more_often", "regular_partners_unavailable", "social_connections", "events_activities", "other"])
+        && request.resource.data.reasonsOther is string && request.resource.data.reasonsOther.size() <= 200
+        && request.resource.data.playedThroughTennisMate in ["yes_once", "yes_2_5", "yes_more_than_5", "not_yet"]
+        && request.resource.data.matchBarriers is list
+        && request.resource.data.matchBarriers.size() > 0
+        && request.resource.data.matchBarriers.size() == request.resource.data.matchBarriers.toSet().size()
+        && request.resource.data.matchBarriers.toSet().hasOnly(["no_response", "requests_not_accepted", "skill_level", "nearby_players", "availability_mismatch", "conversation_stalls", "unsure_who_to_contact", "not_tried", "no_difficulty", "other"])
+        && !("not_tried" in request.resource.data.matchBarriers && request.resource.data.matchBarriers.size() > 1)
+        && !("no_difficulty" in request.resource.data.matchBarriers && request.resource.data.matchBarriers.size() > 1)
+        && request.resource.data.matchBarriersOther is string && request.resource.data.matchBarriersOther.size() <= 200
+        && request.resource.data.favouriteFeature in ["match_me", "match_requests", "chat", "match_scheduling", "courts", "clubs", "events", "activity_leaderboard", "other"]
+        && request.resource.data.favouriteFeatureOther is string && request.resource.data.favouriteFeatureOther.size() <= 200
+        && request.resource.data.desiredFeatures is list
+        && request.resource.data.desiredFeatures.size() > 0 && request.resource.data.desiredFeatures.size() <= 3
+        && request.resource.data.desiredFeatures.size() == request.resource.data.desiredFeatures.toSet().size()
+        && request.resource.data.desiredFeatures.toSet().hasOnly(["better_recommendations", "accurate_skill_levels", "player_stats", "match_history", "achievements", "easier_scheduling", "more_local_players", "social_events", "club_features", "other"])
+        && request.resource.data.desiredFeaturesOther is string && request.resource.data.desiredFeaturesOther.size() <= 200
+        && request.resource.data.eventInterest in ["yes", "maybe", "no"]
+        && request.resource.data.premiumPrice in ["would_not_pay", "1_2_aud", "3_5_aud", "6_8_aud", "9_plus_aud", "not_sure"]
+        && request.resource.data.premiumFeatures is list
+        && request.resource.data.premiumFeatures.size() > 0
+        && request.resource.data.premiumFeatures.size() == request.resource.data.premiumFeatures.toSet().size()
+        && request.resource.data.premiumFeatures.toSet().hasOnly(["advanced_filters", "better_recommendations", "advanced_stats", "performance_insights", "unlimited_requests", "premium_profile", "partner_benefits", "other", "none"])
+        && !("none" in request.resource.data.premiumFeatures && request.resource.data.premiumFeatures.size() > 1)
+        && request.resource.data.premiumFeaturesOther is string && request.resource.data.premiumFeaturesOther.size() <= 200
+        && request.resource.data.oneThingChange is string && request.resource.data.oneThingChange.size() > 0 && request.resource.data.oneThingChange.size() <= 500
+        && request.resource.data.oneThingWell is string && request.resource.data.oneThingWell.size() > 0 && request.resource.data.oneThingWell.size() <= 500;
+
+      allow update, delete: if false;
+    }
+
     match /waitlist_users/{uid} {
       allow read: if isSelf(uid);
       allow create, update, delete: if false;

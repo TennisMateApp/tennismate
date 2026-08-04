@@ -18,9 +18,17 @@ test("Settings menu exposes the required grouped destinations", () => {
   assert.match(settingsSource, /href="\/profile\?edit=true" label="Edit Profile"/);
   assert.match(settingsSource, />Support</);
   assert.match(settingsSource, /href="\/support" label="Help & Feedback"/);
+  assert.match(settingsSource, /href="\/survey" label="Product Survey"/);
   assert.match(settingsSource, />Legal</);
   assert.match(settingsSource, /href="\/terms" label="Terms of Use"/);
   assert.match(settingsSource, /href="\/privacy" label="Privacy Policy"/);
+});
+
+test("Product Survey matches Settings navigation and is hidden only after confirmed completion", () => {
+  assert.match(settingsSource, /useProductSurveyCompletion\(uid, open\)/);
+  assert.match(settingsSource, /surveyCompletionStatus === "incomplete" \|\| surveyCompletionStatus === "error"/);
+  assert.match(settingsSource, /href="\/survey" label="Product Survey" icon=\{<ListChecks/);
+  assert.doesNotMatch(settingsSource, /surveyCompletionStatus === "complete"[\s\S]*href="\/survey"/);
 });
 
 test("existing query-driven Edit Profile flow remains unchanged", () => {
